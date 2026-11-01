@@ -25,6 +25,7 @@ from integrations.mcp.client import (
     OVERDUE_MAX_LIMIT,
     OVERDUE_MAX_PAGES,
     PRRClient,
+    _validated_iso_date,
 )
 
 
@@ -434,3 +435,40 @@ class OverdueScanBoundsTests(SimpleTestCase):
         self.assertEqual(payload["total"], OVERDUE_MAX_PAGES)
         self.assertTrue(payload["truncated"])
         self.assertFalse(payload["scan_complete"])
+
+
+class IsoDateValidationTests(SimpleTestCase):
+    """The date guard in front of the two drafting POSTs.
+
+    Both drafting tools document their date argument as ``YYYY-MM-DD``, and
+    both send it to a service that treats the value as a statutory date. The
+    guard is tested directly because the interesting inputs never arrive over
+    MCP -- the tool schema types them as strings -- but do arrive from code
+    importing ``PRRClient``, which the module supports.
+    """
+
+    def test_a_dashed_iso_date_is_accepted(self):
+        self.assertEqual(
+            _validated_iso_date("2026-10-20", field="estimated_completion"),
+            dt.date(2026, 10, 20),
+        )
+
+    def test_the_compact_form_is_rejected_though_fromisoformat_takes_it(self):
+        # date.fromisoformat accepts "20261020" on Python 3.12. Accepting it
+        # here would mean the documented format was not the only one, and an
+        # integer stringified to eight digits would sail through.
+        with self.assertRaisesMessage(ValueError, "YYYY-MM-DD"):
+            _validated_iso_date("20261020", field="estimated_completion")
+
+    def test_a_non_string_is_rejected_rather_than_stringified(self):
+        for value in (20261020, dt.date(2026, 10, 20), ["2026-10-20"]):
+            with self.subTest(value=value):
+                with self.assertRaisesMessage(ValueError, "YYYY-MM-DD"):
+                    _validated_iso_date(value, field="clarification_due")
+
+    def test_the_error_names_the_caller_s_own_argument(self):
+        with self.assertRaisesMessage(
+            ValueError,
+            "clarification_due must be an ISO date (YYYY-MM-DD).",
+        ):
+            _validated_iso_date("next Friday", field="clarification_due")

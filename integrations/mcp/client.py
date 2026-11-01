@@ -106,6 +106,26 @@ def _validated_request_number(value, *, field: str) -> str:
     return value
 
 
+def _validated_iso_date(value, *, field: str) -> dt.date:
+    """Accept only a dashed ``YYYY-MM-DD`` string, which is what we document.
+
+    ``date.fromisoformat`` is wider than that on Python 3.12: it also accepts
+    the compact ``YYYYMMDD`` form, and a caller importing ``PRRClient``
+    directly who passed the integer ``20261020`` would have had it coerced by
+    ``str()`` and silently accepted -- never seeing the error that teaches the
+    documented format. ``strptime`` accepts the one form the docstring and the
+    tool schema promise, and a non-string is rejected rather than stringified.
+    """
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be an ISO date (YYYY-MM-DD).")
+    try:
+        return dt.datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError(
+            f"{field} must be an ISO date (YYYY-MM-DD)."
+        ) from exc
+
+
 def _validated_response_format(value) -> str:
     """Accept only the two documented formats, and say what the other one is.
 
@@ -489,13 +509,10 @@ class PRRClient:
             ),
         }
         if estimated_completion is not None:
-            try:
-                estimate = dt.date.fromisoformat(str(estimated_completion))
-            except ValueError as exc:
-                raise ValueError(
-                    "estimated_completion must be an ISO date (YYYY-MM-DD)."
-                ) from exc
-            body["estimated_completion"] = estimate.isoformat()
+            body["estimated_completion"] = _validated_iso_date(
+                estimated_completion,
+                field="estimated_completion",
+            ).isoformat()
         return self._post(
             "/api/staff/correspondence/drafts/acknowledgment/",
             body,
@@ -516,12 +533,10 @@ class PRRClient:
         questions = str(clarification_questions).strip()
         if not questions:
             raise ValueError("clarification_questions cannot be blank.")
-        try:
-            due = dt.date.fromisoformat(str(clarification_due))
-        except ValueError as exc:
-            raise ValueError(
-                "clarification_due must be an ISO date (YYYY-MM-DD)."
-            ) from exc
+        due = _validated_iso_date(
+            clarification_due,
+            field="clarification_due",
+        )
         return self._post(
             "/api/staff/correspondence/drafts/clarification/",
             {
