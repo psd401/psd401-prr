@@ -1,0 +1,17 @@
+name: Security Scan
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-scan:
+    permissions:
+      contents: read
+    uses: PSD401/.github/.github/workflows/reusable-security-scan.yml@8c4dbb4e6ae79345ec5f56a96de522e9528e3fb4 # v1.1.0

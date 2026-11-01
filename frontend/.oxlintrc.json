@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc", "vitest"],
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }],
+
+    "vitest/expect-expect": "error",
+    "vitest/no-focused-tests": "error",
+    "vitest/no-disabled-tests": "error",
+    "vitest/no-commented-out-tests": "error",
+    "vitest/no-identical-title": "error",
+    "vitest/no-standalone-expect": "error",
+    "vitest/valid-expect": "error",
+    "vitest/valid-describe-callback": "error",
+    "vitest/valid-title": "error",
+    "vitest/no-conditional-expect": "off",
+    "vitest/require-mock-type-parameters": "off"
+  }
+}

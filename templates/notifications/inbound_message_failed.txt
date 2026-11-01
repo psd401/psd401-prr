@@ -1,0 +1,5 @@
+Gmail message {{ message_id }} arrived in the intake mailbox but could not be received ({{ failure }}).
+
+The rest of the mailbox kept flowing. This message stays unlabelled in Gmail, and the hourly reconciliation retries it for up to {{ lookback_days }} day(s) after it arrived. If this alert repeats, find the message in Gmail and enter it by hand before it ages out of that window. A public records request inside it is already on the statutory clock.
+
+Open the staff Inbox: {{ inbox_url }}

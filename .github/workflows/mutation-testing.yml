@@ -1,0 +1,146 @@
+# Scheduled mutation testing on the Tier A critical modules
+# psd-dev-standards standards/05 rule 7. Coverage proves a line ran; a
+# mutation score proves an assertion would have noticed it change. For
+# statutory deadline math, identity, and the intake path that decides which law
+# a case answers to, that difference is the whole point -- and it is exactly
+# the difference an agent-written test is most likely to miss.
+#
+# This never gates a merge: mutmut re-runs the suite once per mutant, which is
+# minutes of CI per module. It runs monthly, and a surviving mutant becomes an
+# issue (the `report` job below).
+name: Mutation testing
+
+on:
+  schedule:
+    # 12:00 UTC on the 1st of each month.
+    - cron: "0 12 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-testing
+  cancel-in-progress: false
+
+jobs:
+  mutate:
+    name: Mutate ${{ matrix.label }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      # Every module's score matters on its own; one weak module must not hide
+      # the others' results.
+      fail-fast: false
+      matrix:
+        include:
+          # The RCW 42.56.520 clock. `tests` names the suite mutmut re-runs per
+          # mutant, so it stays narrow: a mutant in the deadline engine that
+          # the deadline tests do not catch is the finding, and running
+          # unrelated apps would only make each mutant slower.
+          - label: deadlines
+            paths: apps/records/deadlines.py,apps/records/response_due.py
+            tests: >-
+              apps.records.tests.test_deadlines
+              apps.records.tests.test_deadlines_properties
+              apps.records.tests.test_next_response_due
+          # Auth and identity: who may see and do what.
+          - label: identity
+            paths: apps/api/identity.py
+            tests: >-
+              apps.api.tests.test_staff_identity
+              apps.api.tests.test_staff_roles
+              apps.api.tests.test_agent_auth
+          # Student-data path: matter kind is fixed at intake and decides
+          # whether FERPA or RCW 42.56 applies (ADR 0004).
+          - label: intake
+            paths: apps/records/intake.py
+            tests: >-
+              apps.records.tests.test_public_intake
+              apps.records.tests.test_matter_kinds
+
+    env:
+      PYTHON_DOTENV_DISABLED: "1"
+      # uv otherwise prefers the runner's system Python, whose patch level
+      # differs from the production image's.
+      UV_PYTHON_PREFERENCE: "only-managed"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - name: Set up Python dependencies
+        uses: ./.github/actions/setup-python-deps
+
+      # mutmut's own exit code is a bit field (2 = a mutant survived), and the
+      # score below is the gate, so the run itself must not stop the job.
+      - name: Run mutmut
+        run: |
+          uv run --frozen mutmut run \
+            --paths-to-mutate "${{ matrix.paths }}" \
+            --tests-dir apps \
+            --runner "uv run --frozen python manage.py test ${{ matrix.tests }} --settings=config.test_settings" \
+            || echo "mutmut exited $? (scored below)"
+
+      - name: Score the run
+        run: |
+          uv run --frozen mutmut junitxml > "mutmut-${{ matrix.label }}.xml"
+          {
+            echo '## Mutation score — ${{ matrix.label }}'
+            echo '```'
+            uv run --frozen python scripts/mutation_score.py \
+              "mutmut-${{ matrix.label }}.xml" \
+              --label '${{ matrix.label }}' 2>&1 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          uv run --frozen python scripts/mutation_score.py \
+            "mutmut-${{ matrix.label }}.xml" \
+            --label '${{ matrix.label }}'
+
+      - name: Upload the mutation report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: mutation-report-${{ matrix.label }}
+          overwrite: true
+          path: mutmut-${{ matrix.label }}.xml
+          if-no-files-found: ignore
+          retention-days: 90
+
+  report:
+    name: File surviving mutants as an issue
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: mutate
+    # Standards rule 7: "Survivors become issues." Only on a real shortfall,
+    # and only once per scheduled run -- a monthly reminder nobody opened is
+    # still a reminder; twelve duplicates are noise.
+    if: failure() && github.event_name == 'schedule'
+
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: >-
+            ${{ github.server_url }}/${{ github.repository
+            }}/actions/runs/${{ github.run_id }}
+        run: |
+          month="$(date -u +%Y-%m)"
+          title="Mutation testing: surviving mutants ($month)"
+          existing="$(gh issue list --state open --search "$title in:title" \
+            --json number --jq '.[0].number // empty')"
+          body="The scheduled mutation run fell below the required kill rate on at least one Tier A module (psd-dev-standards standards/05 rule 7).
+
+          Per-module scores and the surviving mutants are in the run summary and the \`mutation-report-*\` artifacts: $RUN_URL
+
+          Each surviving mutant is a change to critical logic that the suite would not notice. Add the missing assertion, or record why the mutant is equivalent."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

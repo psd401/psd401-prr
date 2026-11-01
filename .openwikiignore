@@ -1,0 +1,35 @@
+# Paths OpenWiki must not read, in gitignore syntax (psd-dev-standards
+# standards/06 section 3). The generated docs pull request merges itself, so
+# nothing reviews wiki prose before it lands; this is the hard read boundary
+# for internal hostnames, account names, and notes on how credentials are
+# handled. It is not a redaction: the wiki can still mention a topic it infers
+# from code, tests or commit messages.
+#
+# Covered here, with what each one carries:
+#
+#   docs/google-identity-bootstrap.md  Workspace mailbox and group account
+#                                      names, OIDC callback URLs, and the
+#                                      keyless federation bootstrap steps.
+#   docs/phase-2-production-handoffs.md the named Vault subject account and
+#                                      the interim personal account it
+#                                      replaced, plus outstanding credential
+#                                      handoffs.
+#   docs/operations/                   restore-drill evidence holding the AWS
+#                                      account ID, the SSO role, and the
+#                                      operator who ran it.
+#   infra/cdk/cdk.context.json         AMI lookup cache keyed by the AWS
+#                                      account ID; no design content.
+#   infra/terraform/google-identity/identity.auto.tfvars
+#                                      Google organization and billing
+#                                      account IDs, AWS account IDs.
+#   .gitleaksignore                    secret-scanner baseline: where past
+#                                      findings sit in the tree.
+#
+# Secrets themselves never belong in a repo (standards/04 rule 15a); this
+# covers the sensitive context that legitimately does.
+docs/google-identity-bootstrap.md
+docs/phase-2-production-handoffs.md
+docs/operations/
+infra/cdk/cdk.context.json
+infra/terraform/google-identity/identity.auto.tfvars
+.gitleaksignore

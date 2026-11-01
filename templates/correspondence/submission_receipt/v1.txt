@@ -1,0 +1,23 @@
+{# Non-statutory intake receipt. Counsel review is required before production use. #}
+{% autoescape off %}
+Subject: Public Records Request {{ request.number }} — Submission Received
+
+Dear {{ request.requester.name|default:"Requester" }},
+
+This email confirms that Peninsula School District received your public
+records request. It has been assigned tracking number {{ request.number }}.
+Please reference this number in all correspondence.
+
+You submitted:
+"{{ request.description }}"
+
+This confirmation is not the District's five-business-day response required by RCW 42.56.520.
+The District will provide that formal response within five business days.
+
+If you have questions, contact the Public Records Officer at
+{{ pra_officer_email }}.
+
+Sincerely,
+Public Records Officer
+Peninsula School District No. 401
+{% endautoescape %}

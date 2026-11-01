@@ -1,0 +1,13 @@
+# ABOUTME: Samples root-volume usage every five minutes, and after boot.
+# ABOUTME: Frequent by design: a disk fills between daily checks.
+[Unit]
+Description=Root-volume usage reporting for PSD401 PRR (%i)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=prr-disk-usage@%i.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,39 @@
+{# Reasonable-search completion notice. Counsel review required before production use. #}
+{% autoescape off %}
+Subject: Public Records Request {{ request.number }} — Search Complete
+
+Dear {{ request.requester.name|default:"Requester" }},
+
+Peninsula School District has completed a reasonable search for records
+responsive to public records request {{ request.number }}:
+
+"{{ request.description }}"
+
+The District did not locate responsive records. The search was completed on
+{{ search_completed_at|date:"F j, Y" }} and included these locations and
+methods:
+{% for step in search_steps %}
+- {{ step.location }} (custodian: {{ step.custodian }}): {{ step.method }};
+  date range {{ step.date_range }}; result: {{ step.result }}.
+{% endfor %}
+
+Search adequacy summary: {{ adequacy_reason }}
+{% if determination == "outside_retention" %}
+
+The requested records were outside the verified retention period. Retention
+schedule reference: {{ retention_schedule_reference }}. Staff also checked
+incident holds, prior exports, email/Drive copies, and other likely copies.
+{% endif %}
+
+The District is therefore closing this request as having no responsive records.
+This is not a determination that responsive records are exempt. If the District
+later discovers records that existed at the time of your request, it will notify
+you and address them promptly.
+
+If you believe another location or description would help identify responsive
+records, contact the Public Records Officer at {{ pra_officer_email }}.
+
+Sincerely,
+Public Records Officer
+Peninsula School District No. 401
+{% endautoescape %}

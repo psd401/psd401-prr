@@ -1,0 +1,8 @@
+# Routine operators do not need this file. Stable, non-secret live inputs are
+# committed in identity.auto.tfvars so every workstation produces the same
+# plan. Use an ignored terraform.tfvars only for an explicitly reviewed,
+# temporary override, and remove it before the final plan.
+#
+# labels = {
+#   change_ticket = "CHG-1234"
+# }

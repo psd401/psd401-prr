@@ -1,0 +1,14 @@
+# ABOUTME: Runs app backups daily, after boot, and after missed schedules.
+# ABOUTME: A randomized delay avoids coupling backup load to the snapshot job.
+[Unit]
+Description=Daily PSD401 PRR app-layer backup (%i)
+
+[Timer]
+OnCalendar=*-*-* 09:30:00 UTC
+OnBootSec=20min
+Persistent=true
+RandomizedDelaySec=15min
+Unit=prr-app-backup@%i.service
+
+[Install]
+WantedBy=timers.target

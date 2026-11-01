@@ -1,0 +1,136 @@
+# Managed per psd-dev-standards standards/04 Tier 1 rule 4:
+#
+#   * weekly grouped minor+patch updates;
+#   * a cooldown before a release is eligible (3 days, 7-14 for npm);
+#   * majors stay ungrouped, so each one arrives as its own pull request and
+#     is scheduled as migration work rather than batched into a green PR;
+#   * security updates are unaffected -- cooldown and `ignore` never suppress
+#     Dependabot alerts or security bumps;
+#   * patch-level development-dependency pull requests auto-merge when CI is
+#     green (.github/workflows/dependabot-auto-merge.yml). Nothing else does.
+#
+# Groups are split by `dependency-type` wherever a manifest has both kinds,
+# because `dependabot/fetch-metadata` reports the highest-priority type in a
+# group: batched together, every pull request would look like
+# `direct:production` and the development-scoped auto-merge rule could never
+# fire.
+#
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 3
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # pyproject.toml + uv.lock (#293). Dependabot updates the lockfile, so a
+  # bump arrives as the exact resolution CI will test and production will run.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 3
+    groups:
+      # Not split by `dependency-type`: GitHub documents that option on
+      # `groups` for bundler, composer, mix, maven, npm and pip only, and
+      # `uv` is not among them. A split written anyway would be a group that
+      # matches nothing. So, exactly as under `pip` before #293, Python has
+      # one group and the development-scoped auto-merge rule cannot fire on
+      # it -- bandit and pip-audit bumps stay a human merge.
+      python-runtime:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    # One uninstallable bump fails the whole grouped PR (#263 did), so hold
+    # these until the packages that pin them upstream allow them. Remove each
+    # rule when its blocker ships a release that does.
+    ignore:
+      # django-celery-beat 2.9.0 requires Django<6.1.
+      - dependency-name: "django"
+        versions: [">=6.1"]
+      # kombu 5.6.2 (celery's redis transport) requires redis<6.5.
+      - dependency-name: "redis"
+        versions: [">=6.5"]
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    # The npm registry is where a yanked or hijacked release is the common
+    # failure mode, so these wait longer than the 3-day floor.
+    cooldown:
+      default-days: 7
+    groups:
+      frontend-runtime:
+        dependency-type: "production"
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      frontend-development:
+        dependency-type: "development"
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # The CDK app is a bun workspace (infra/cdk/bun.lock) and every dependency
+  # in it is a devDependency: CDK is a build-time synthesiser, not a runtime.
+  - package-ecosystem: "bun"
+    directory: "/infra/cdk"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 7
+    groups:
+      cdk-development:
+        dependency-type: "development"
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Google identity federation is the one Terraform-managed surface; AWS is
+  # CDK only (AGENTS.md).
+  - package-ecosystem: "terraform"
+    directory: "/infra/terraform/google-identity"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 3
+    groups:
+      terraform-providers:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # The application image base layers (Dockerfile).
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 3
+    groups:
+      container-images:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # The compose overlays pin their own images (postgres, redis, minio) for
+  # dev services and for the deploy-time stacks, and `docker` does not read
+  # them.
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 3
+    groups:
+      compose-images:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

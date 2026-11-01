@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "prr-staff-stdio": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--frozen",
+        "python",
+        "integrations/mcp/server.py"
+      ],
+      "env": {
+        "PRR_BASE_URL": "https://mcp-scan.invalid",
+        "PRR_API_TOKEN": "scan-placeholder-not-a-credential",
+        "PYTHON_DOTENV_DISABLED": "1"
+      }
+    }
+  }
+}

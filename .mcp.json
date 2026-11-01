@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "aws-knowledge": {
+      "type": "http",
+      "url": "https://knowledge-mcp.global.api.aws"
+    },
+    "aws-iac": {
+      "command": "uvx",
+      "args": ["awslabs.aws-iac-mcp-server==1.0.26"],
+      "env": {
+        "AWS_REGION": "us-west-2",
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+# Continuous Integration workflow
+# Runs the complete quality gates in psd-ci-jobs.yml on every PR and main
+# branch push. The caller job is named `psd-ci` so the combined gate reports
+# as `psd-ci / psd-ci`, the context the org rulesets require
+# (psd-dev-standards standards/06 §2).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# One in-flight run per branch. Pushing a follow-up commit to a PR used to
+# leave the previous full five-job run going to completion alongside the new
+# one, so a quick fixup push cost two complete gates. Superseded PR runs are
+# cancelled; main is never cancelled, because every merge commit needs its own
+# recorded result.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  psd-ci:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/psd-ci-jobs.yml

@@ -1,0 +1,9 @@
+Request {{ request_number }} received {{ request_received_at|date:"Y-m-d" }} has not received an initial statutory response.
+
+RCW 42.56.520 response due: {{ statutory_response_due }}
+Alert level: {{ level }}
+
+Request description:
+{{ request_description|truncatechars:500 }}
+
+Open the staff workspace: {{ status_url }}

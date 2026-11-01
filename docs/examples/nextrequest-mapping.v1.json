@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "source_timezone": "America/Los_Angeles",
+  "columns": {
+    "source_id": "Request ID",
+    "source_number": "Request Number",
+    "description": "Request Text",
+    "received_at": "Received At",
+    "status": "Status",
+    "status_changed_at": "Status Changed At",
+    "closed_at": "Closed At",
+    "closure_reason": "Closure Reason",
+    "initial_response_at": "Initial Response At",
+    "estimated_completion": "Estimated Completion",
+    "attachment_count": "Attachment Count",
+    "channel": "Submission Method",
+    "name": "Requester Name",
+    "email": "Requester Email",
+    "phone": "Requester Phone",
+    "mailing_address": "Requester Mailing Address",
+    "company": "Requester Organization"
+  },
+  "status_map": {
+    "New": "received",
+    "In Progress": "gathering",
+    "Legal Review": "review",
+    "Producing Installments": "installment",
+    "Completed": "fulfilled",
+    "Withdrawn": "closed_withdrawn",
+    "Abandoned": "closed_abandoned"
+  },
+  "channel_map": {
+    "Portal": "portal",
+    "Email": "email",
+    "Mail": "mail",
+    "Phone": "phone",
+    "In Person": "in_person"
+  }
+}

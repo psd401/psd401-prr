@@ -1,0 +1,20 @@
+#!/bin/bash
+# Rehearsal stub for the pre-deploy backup gate. run-app-backup.sh requires
+# exactly one running web, db, worker and beat container, so the stub enforces
+# precisely that precondition and nothing else.
+set -uo pipefail
+S="${REHEARSAL_STATE:?}"
+echo "systemctl $*" >> "$S/calls.log"
+case " $* " in
+  *" start "*)
+    if [ "${REHEARSAL_BACKUP_FAILS:-0}" = 1 ]; then echo "backup gate forced failure" >&2; exit 70; fi
+    for svc in web db worker beat; do
+      if [ ! -f "$S/service/$svc" ]; then
+        echo "${svc} must have exactly one running container" >&2
+        exit 70
+      fi
+    done
+    echo "backup" >> "$S/backups.log"
+    exit 0 ;;
+esac
+exit 0

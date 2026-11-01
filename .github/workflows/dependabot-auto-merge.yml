@@ -1,0 +1,127 @@
+name: Dependabot auto-merge
+
+# `pull_request` is the right trigger here, and the job's `permissions:` block
+# below is what makes the merge step work. A Dependabot-triggered run starts
+# from a read-only `GITHUB_TOKEN`, but that is a *default*, not a ceiling:
+# Dependabot `push` and `pull_request` runs have respected the `permissions`
+# key since 2021-10-11, so declaring `contents: write` and
+# `pull-requests: write` gives this job a writable token. `secrets.GITHUB_TOKEN`
+# is generated per run, not an Actions secret, so the rule that Dependabot runs
+# see Dependabot secrets instead of Actions secrets does not withhold it. This
+# is GitHub's own documented auto-merge recipe.
+#
+# Do NOT "fix" this by switching to `pull_request_target`: GitHub documents
+# that when the pull request's base ref was created by Dependabot the
+# `pull_request_target` token is read-only and secrets are unavailable, so that
+# trigger is the one that cannot merge. `test_only_patch_level_dev_dependency_updates_auto_merge`
+# pins both the trigger and the write permissions so this cannot regress.
+on: pull_request
+
+# Deny by default; the job grants only what it needs (psd-dev-standards
+# standards/06 section 4).
+permissions: {}
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    # Read the author from the pull request payload rather than github.actor,
+    # which reflects whoever most recently triggered the run.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    steps:
+      # `gh pr merge --auto` waits only for the checks the branch actually
+      # requires, and it requires none that a workflow can see unless a ruleset
+      # says so. The org `psd-production` ruleset -- the one requiring
+      # `psd-ci`, `claude-review` and `license-check` -- was still in
+      # `evaluate` mode on 2026-10-13, so `main` enforced nothing and `--auto`
+      # would have merged these pull requests on arrival rather than when CI
+      # went green. Fail closed instead: no required checks, no auto-merge.
+      # This starts working on its own when the ruleset flips to active, and
+      # needs no second place to keep the list of checks.
+      - name: Require that the base branch enforces status checks
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          required=$(gh api "repos/$GITHUB_REPOSITORY/rules/branches/$BASE_REF" \
+            --jq '[.[] | select(.type == "required_status_checks")] | length')
+          if [ "$required" -eq 0 ]; then
+            echo "::warning::$BASE_REF enforces no required status checks, so auto-merge would not wait for CI. Leaving this pull request for a human."
+            echo "enforced=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enforced=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The author check on the job is the *pull request's* author, which stays
+      # `dependabot[bot]` after anyone with write access pushes a further commit
+      # to the branch, and `fetch-metadata` reads Dependabot's own commit
+      # message format rather than the diff -- so an added commit would ride
+      # along on the original patch/dev-dependency labels. Require every commit
+      # in the pull request to be one Dependabot wrote and GitHub signed.
+      # Measured on PR #306: Dependabot's commits report
+      # `author.login == dependabot[bot]`, `committer.login == web-flow` (the
+      # signing identity, which is why the committer is not checked), and
+      # `verification.verified == true`.
+      #
+      # This does not stop someone who signs their commits and sets the author
+      # email to Dependabot's -- but anyone who can push to this branch can
+      # also push straight to `main` today, so that is not the boundary this
+      # step is defending.
+      - name: Require that Dependabot wrote every commit
+        id: provenance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # `pipefail` is not on by default under Actions' `bash -e {0}`, and
+          # this gate must never decide from the exit status of the last stage
+          # of a pipeline: `gh api | wc -l` reports `wc`'s success even when
+          # `gh` failed, which would read as "no offending commits" and wave
+          # the pull request through. So the decision is taken from a bare
+          # command substitution -- a failing `gh api` exits the step under
+          # `-e` and the merge step never runs -- and `pipefail` is set as well
+          # for the count below.
+          #
+          # `--paginate` also runs the `--jq` filter once per page, so an
+          # aggregate like `| length` would print one number per page. Emitting
+          # one line per offending commit is correct across any number of pages.
+          set -o pipefail
+          offenders=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" \
+            --jq '.[] | select(.author.login != "dependabot[bot]"
+                               or .commit.verification.verified != true) | .sha')
+          # Empty here can only mean a successful call that found nothing; a
+          # failed call does not reach this line.
+          if [ -z "$offenders" ]; then
+            echo "dependabot=true" >> "$GITHUB_OUTPUT"
+          else
+            foreign=$(printf '%s\n' "$offenders" | wc -l | tr -d '[:space:]')
+            echo "::warning::$foreign commit(s) were not written by dependabot[bot] or are unsigned. Leaving this pull request for a human."
+            echo "dependabot=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      # standards/04 Tier 1 rule 4: patch-level development-dependency updates
+      # are the only ones that auto-merge, and `--auto` still waits for the
+      # branch's required checks. Both conditions are positive matches, so an
+      # empty or unexpected metadata value leaves the pull request for a human
+      # instead of merging it. A runtime dependency reaching production is
+      # merged by a person, because that merge is also what triggers the
+      # deploy (AGENTS.md: merge to main, then the single CDK command).
+      - name: Auto-merge patch-level dev-dependency updates
+        if: |
+          steps.gate.outputs.enforced == 'true' &&
+          steps.provenance.outputs.dependabot == 'true' &&
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' &&
+          steps.metadata.outputs.dependency-type == 'direct:development'
+        run: gh pr merge --auto --merge "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

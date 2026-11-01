@@ -1,0 +1,29 @@
+# ABOUTME: Publishes one root-volume usage sample with minimal host access.
+# ABOUTME: The instance name selects the non-secret deployment environment.
+[Unit]
+Description=PSD401 PRR root-volume usage report (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/aws-cli/current/bin:/snap/bin
+Environment=PRR_ENVIRONMENT=%i
+ExecStart=/usr/local/sbin/prr-report-disk-usage
+TimeoutStartSec=2min
+UMask=0077
+NoNewPrivileges=true
+# It only reads df and calls CloudWatch, so it needs no write access at all
+# and no access to the Docker socket.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

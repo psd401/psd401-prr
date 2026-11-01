@@ -1,0 +1,23 @@
+{
+  "audit_max_id": 15385,
+  "audit_row_count": 15385,
+  "backup_created_at": "2026-08-25T09:33:42Z",
+  "backup_image_id": "b4f7872877e274b2adeb52e62eceffaf75f4fe818f3ef8d6cf830de161beb711",
+  "backup_manifest_uri": "s3://psd401-prr-backups-prod/app-backups/2026/08/25/952b63d0-e442-4ff1-bd48-de782a28c42e/manifest.json",
+  "completed_at": "2026-08-25T11:47:47Z",
+  "environment": "prod",
+  "isolation": {
+    "database_network": "none",
+    "encrypted_storage": true,
+    "host_ingress": "none",
+    "production_host": false
+  },
+  "operator_arn": "arn:aws:sts::338414773271:assumed-role/AWSReservedSSO_AWSAdministratorAccess_2fafd9a1fbc2f07b/[redacted-operator]",
+  "schema_version": 2,
+  "status": "verified",
+  "temporary_stack_deleted": true,
+  "verifier_output": "backup restore verified: 15385 audit rows, max ID 15385",
+  "verifier_release_sha": "d9ac67e99af5223ba8b09f70a711b81afd7d0139",
+  "verifier_tools_manifest_path": "docs/operations/production-restore-drill-tools-2026-08-25.json",
+  "verifier_tools_sha256": "931e314a9b00ec3fc85df4eb9fbce20b3790578cbb9e23d93d6fbb80bee7c4eb"
+}

@@ -1,0 +1,44 @@
+[
+  {
+    "name": "anchors are required and alternatives are one OR group",
+    "required": ["transportation plan"],
+    "alternative": ["bus route", "bus stop"],
+    "expected": "\"transportation plan\" AND (\"bus route\" OR \"bus stop\")"
+  },
+  {
+    "name": "a single alternative needs no parentheses",
+    "required": ["budget"],
+    "alternative": ["levy"],
+    "expected": "\"budget\" AND \"levy\""
+  },
+  {
+    "name": "an alternative that repeats an anchor is dropped",
+    "required": ["Bid"],
+    "alternative": ["bid", "award"],
+    "expected": "\"Bid\" AND \"award\""
+  },
+  {
+    "name": "embedded quotes cannot break out of a term",
+    "required": ["a\" OR b"],
+    "alternative": [],
+    "expected": "\"a OR b\""
+  },
+  {
+    "name": "backslashes and search operators stay literal inside quotes",
+    "required": ["back\\slash"],
+    "alternative": ["from:superintendent", "OR"],
+    "expected": "\"back\\slash\" AND (\"from:superintendent\" OR \"OR\")"
+  },
+  {
+    "name": "surrounding quotes and whitespace collapse to one term",
+    "required": ["\"quoted\"", " quoted "],
+    "alternative": [],
+    "expected": "\"quoted\""
+  },
+  {
+    "name": "blank terms produce no query at all",
+    "required": [],
+    "alternative": ["  "],
+    "expected": ""
+  }
+]

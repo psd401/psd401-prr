@@ -1,0 +1,39 @@
+# Bun toolchain for a CI lane: Bun, the packages one bun.lock pins, and --
+# for the Playwright lanes -- the Chromium build that Playwright version wants.
+#
+# A local composite action, not a reusable workflow (see setup-python-deps for
+# why). The caller must check out the repository first.
+name: Set up Bun dependencies
+description: Install Bun, install one package's frozen lockfile, optionally Playwright Chromium.
+
+inputs:
+  bun-version:
+    description: Bun version range, e.g. "1.2.x". No default, so each lane states its own.
+    required: true
+  working-directory:
+    description: Directory holding the package.json and bun.lock to install, relative to the checkout.
+    required: true
+  install-playwright:
+    description: '"true" also installs Playwright Chromium and its system dependencies.'
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Bun
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6  # v2
+      with:
+        bun-version: ${{ inputs.bun-version }}
+        cache: true
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: bun install --frozen-lockfile
+
+    - name: Install Playwright Chromium
+      if: inputs.install-playwright == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: bunx playwright install --with-deps chromium

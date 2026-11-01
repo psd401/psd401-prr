@@ -1,0 +1,29 @@
+{# Safe installment foundation. Sending remains disabled until an application-managed requester download route exists. #}
+{% autoescape off %}
+Subject: Public Records Request {{ request.number }} — Installment {{ installment.sequence }} Delivery Draft
+
+Dear {{ request.requester.name|default:"Requester" }},
+
+District staff have prepared a draft notice for installment
+{{ installment.sequence }} of request {{ request.number }}
+({{ item_count }} record{{ item_count|pluralize }}).
+
+Proposed secure delivery URL:
+{{ download_url }}
+
+This notice cannot yet be sent. A Records Officer must first verify an
+application-managed requester download, its release state, and its expiration.
+{% if has_exemptions %}The proposed installment includes records that require
+an exemption log before release.{% endif %}
+{% if installment.fee_amount %}The proposed fee for this installment is
+${{ installment.fee_amount }}, subject to the District's fee workflow under
+RCW 42.56.120.{% endif %}
+
+{% if is_final %}Staff have marked this as the proposed final installment.
+This draft does not close the request.{% else %}Additional installments are
+currently expected.{% endif %}
+
+Sincerely,
+Public Records Officer
+Peninsula School District No. 401
+{% endautoescape %}

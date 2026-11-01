@@ -1,0 +1,25 @@
+{# Completion closure. Counsel review is required before production use. #}
+{% autoescape off %}
+Subject: Public Records Request {{ request.number }} — Response Complete
+
+Dear {{ request.requester.name|default:"Requester" }},
+
+Peninsula School District has completed its response to public records request
+{{ request.number }}, received {{ request.received_at|date:"F j, Y" }}:
+
+"{{ request.description }}"
+
+{{ production_summary }}
+
+The District is closing this request as fulfilled. Closing it does not affect
+any right you have to seek review of a redaction or withholding the District
+applied, and the District will address any responsive records it later
+discovers that existed at the time of your request.
+
+If you believe this response is incomplete, contact the Public Records Officer
+at {{ pra_officer_email }}.
+
+Sincerely,
+Public Records Officer
+Peninsula School District No. 401
+{% endautoescape %}

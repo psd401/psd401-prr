@@ -1,0 +1,196 @@
+# TLS-fronted deployment stack: one exact release image and no bind mounts.
+# Migration and seed flags default off; the recurring production mechanism runs
+# only a nonmutating migration check. The web port binds to loopback; expose it
+# only through a reverse proxy that terminates HTTPS.
+#
+# Object storage is not here, and neither is any OBJECT_STORE_* value. Compose
+# interpolates this file before an overlay could remove a service or a variable
+# from it, so a `${MINIO_...:?}` here would make the AWS host unable to start at
+# all. Every deployment layers exactly one store on top, and that overlay
+# carries both the store and the OBJECT_STORE_* settings that reach it:
+#
+#   docker-compose.minio.yml  MinIO contract/configuration validation only
+#   docker-compose.aws.yml    S3 through the instance role, plus Caddy
+x-google-identity: &google-identity
+  # Every value in this block except GOOGLE_APPLICATION_CREDENTIALS is an
+  # application-managed setting since Phase C. What is left here is the
+  # one-time bootstrap seed `manage.py import_environment_settings` reads on
+  # the first deploy after they moved, so that deploy changes nothing about
+  # what production is running. Afterwards an Application Admin owns them, at
+  # Configuration > District settings, with a written reason and a history --
+  # and editing this file does nothing.
+  #
+  # Public identifier for the one shared internal web client.
+  PRR_GOOGLE_OIDC_CLIENT_ID: 996556698486-2bo54rh7c0r2go178fssfmagcgpqnnvr.apps.googleusercontent.com
+  # Non-secret, dedicated Gmail service-account target. No private key: the
+  # container authenticates as itself and impersonates this account.
+  PRR_GMAIL_IMPERSONATION_TARGET: prr-gmail@psd401-prr-identity.iam.gserviceaccount.com
+  # eDiscovery authority is isolated from the Gmail transport identity.
+  PRR_VAULT_IMPERSONATION_TARGET: prr-vault@psd401-prr-identity.iam.gserviceaccount.com
+  # Bare external-account configuration only; overlays mount this keyless AWS
+  # federation file read-only. It contains no service-account private key.
+  GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/prr-google-runtime-credential.json
+
+services:
+  # db/redis publish NO host ports here on purpose: this stack is
+  # network-facing, and publishing them would hand anyone on the network the
+  # compliance database with the hardcoded dev credentials, bypassing the
+  # service layer and audit trail entirely. Sibling containers reach them
+  # over the compose network; only web:8000 is exposed. For one-off access
+  # use `docker compose -f docker-compose.deploy.yml exec db psql -U prr`.
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: prr
+      # Keep the original owner name so existing volumes remain upgradeable.
+      POSTGRES_USER: prr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-prr_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prr"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Re-runs the idempotent role/grant bootstrap for existing as well as new
+  # database volumes. Owner and app passwords exist only in this one-shot.
+  db-role-init:
+    image: postgres:16
+    entrypoint:
+      - /bin/bash
+      - /bootstrap/001-create-app-user.sh
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_DB: prr
+      POSTGRES_USER: prr
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-prr_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD in .env}
+    volumes:
+      - ./docker/postgres-init:/bootstrap:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  # clamd's unauthenticated TCP service is deliberately reachable only from
+  # sibling containers. The official image keeps signatures fresh in the
+  # persisted database volume.
+  clamav:
+    image: clamav/clamav:1.5-debian
+    volumes: [clamavdata:/var/lib/clamav]
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 90s
+
+  # Schema ownership and bootstrap credentials exist only in this one-shot
+  # process. Long-running Django/Celery services use the scoped prr_app role.
+  # Recurring releases force both mutation flags false and use this service only
+  # for `manage.py migrate --check`; an approved migration-bearing path must be
+  # separately gated and is not implied by this service definition.
+  #
+  # No OBJECT_STORE_* here: the store overlay adds it, along with whatever
+  # dependency that store needs before the schema may be touched.
+  migrate:
+    image: "${PRR_RELEASE_IMAGE:?Set PRR_RELEASE_IMAGE to the exact reviewed release tag}"
+    command: ["true"]
+    env_file: .env.app
+    environment:
+      <<: *google-identity
+      PRR_DEPLOYMENT_MODE: "production"
+      DJANGO_DEBUG: "false"
+      RUN_MIGRATIONS: "${PRR_RUN_MIGRATIONS:-false}"
+      AUTO_SEED: "${PRR_AUTO_SEED:-false}"
+      DATABASE_URL: "postgres://prr:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/prr"
+      DJANGO_SUPERUSER_USERNAME: ${DJANGO_SUPERUSER_USERNAME:-}
+      DJANGO_SUPERUSER_EMAIL: ${DJANGO_SUPERUSER_EMAIL:-}
+      DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-}
+    depends_on:
+      db-role-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    image: "${PRR_RELEASE_IMAGE:?Set PRR_RELEASE_IMAGE to the exact reviewed release tag}"
+    # Includes the complete PRR_GMAIL_* set and bare ADC path. Store overlays
+    # mount the corresponding keyless external-account file read-only.
+    env_file: .env.app
+    environment:
+      <<: *google-identity
+      PRR_DEPLOYMENT_MODE: "production"
+      DJANGO_DEBUG: "false"
+      DATABASE_URL: "postgres://${POSTGRES_APP_USER:-prr_app}:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD in .env}@db:5432/prr"
+    # Never publish the compliance application directly to the LAN. A host
+    # reverse proxy terminates TLS and forwards to this loopback-only port.
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # Gunicorn binds only after the entrypoint finishes its enabled checks. A
+      # TCP probe avoids the intentional HTTP-to-HTTPS redirect and prevents
+      # worker/beat from starting before web is actually ready.
+      test: ["CMD", "python", "-c", "import socket; connection=socket.create_connection(('127.0.0.1', 8000), timeout=3); connection.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      # Startup waits for the isolated migration/check service.
+      start_period: 60s
+
+  worker:
+    image: "${PRR_RELEASE_IMAGE:?Set PRR_RELEASE_IMAGE to the exact reviewed release tag}"
+    command: celery -A config worker -l info
+    # Keep transport switches identical across every long-running process.
+    env_file: .env.app
+    environment:
+      <<: *google-identity
+      PRR_DEPLOYMENT_MODE: "production"
+      DJANGO_DEBUG: "false"
+      DATABASE_URL: "postgres://${POSTGRES_APP_USER:-prr_app}:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD in .env}@db:5432/prr"
+    depends_on:
+      web:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+
+  beat:
+    image: "${PRR_RELEASE_IMAGE:?Set PRR_RELEASE_IMAGE to the exact reviewed release tag}"
+    command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    # Application-managed switches (Gmail, correspondence, staff alerts, the
+    # safety net, advisory AI) live in the in-app settings store, changed by an
+    # Application Admin on the Settings page. No production overlay may add
+    # defaults for the settings that remain in .env.app.
+    env_file: .env.app
+    environment:
+      <<: *google-identity
+      PRR_DEPLOYMENT_MODE: "production"
+      DJANGO_DEBUG: "false"
+      DATABASE_URL: "postgres://${POSTGRES_APP_USER:-prr_app}:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD in .env}@db:5432/prr"
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  clamavdata:

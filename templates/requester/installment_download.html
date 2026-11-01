@@ -1,0 +1,44 @@
+{# ABOUTME: What this installment contains, when it expires, who to ask. #}
+{# ABOUTME: The package itself is one path deeper, behind the optional code. #}
+{% extends "requester/installment_base.html" %}
+{% block title %}Installment {{ sequence }} &mdash; request {{ request_number }}{% endblock %}
+{% block content %}
+<h1>Your records are ready</h1>
+<p class="lede">
+  Installment {{ sequence }} for public records request {{ request_number }}.
+</p>
+<dl>
+  <dt>Records included</dt>
+  <dd>{{ item_count }}</dd>
+  <dt>Download size</dt>
+  <dd>{{ package_size|filesizeformat }}</dd>
+  <dt>Format</dt>
+  <dd>One ZIP archive, with a manifest listing every file</dd>
+  <dt>Link expires</dt>
+  <dd>{{ expires_at|date:"l, F j, Y \a\t g:i A T" }}</dd>
+  <dt>Questions</dt>
+  <dd><a href="mailto:{{ contact_email }}">{{ contact_email }}</a></dd>
+</dl>
+<div class="notice">
+  Save the file before the link expires. If it has expired, or if you need it
+  in another format, email the records officer above and we will re-send it.
+</div>
+{% if requires_access_code %}
+  {% if attempt_failed %}
+    <div class="error">That access code is not correct. Check the separate
+      message that carried it, then try again.</div>
+  {% endif %}
+  <form method="post" action="{{ package_url }}">
+    {% csrf_token %}
+    <label for="access-code">Access code</label>
+    <input id="access-code" name="access_code" type="password"
+           autocomplete="one-time-code" required
+           aria-describedby="access-code-help">
+    <p id="access-code-help">The District sent this code to you in a separate
+      message. It is not in the email that carried this link.</p>
+    <button type="submit">Download records</button>
+  </form>
+{% else %}
+  <a class="button" href="{{ package_url }}">Download records</a>
+{% endif %}
+{% endblock %}

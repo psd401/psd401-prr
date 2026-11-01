@@ -1,0 +1,28 @@
+{# RCW 42.56.520 acknowledgment. Counsel review is required before production use. #}
+{% autoescape off %}
+Subject: Public Records Request {{ request.number }} — Acknowledgment
+
+Dear {{ request.requester.name|default:"Requester" }},
+
+Peninsula School District received your public records request on
+{{ request.received_at|date:"F j, Y" }}. It has been assigned tracking
+number {{ request.number }}. Please reference this number in all
+correspondence.
+
+You requested:
+"{{ request.description }}"
+
+Pursuant to RCW 42.56.520, the District estimates that responsive records
+will be available on or about {{ estimated_completion|date:"F j, Y" }}.
+This estimate reflects the time required to locate, assemble, and review
+records for information exempt from disclosure. If the request is clarified
+or narrowed, records may be available sooner. Records may be provided in
+installments as they become ready.
+
+If you have questions, contact the Public Records Officer at
+{{ pra_officer_email }}.
+
+Sincerely,
+Public Records Officer
+Peninsula School District No. 401
+{% endautoescape %}

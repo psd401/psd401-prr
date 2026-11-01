@@ -1,0 +1,16 @@
+# ABOUTME: TLS front end for the AWS deployment: one automatic certificate for
+# ABOUTME: the environment hostname, proxying to the loopback-bound application.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$PRR_HOSTNAME} {
+	encode zstd gzip
+
+	reverse_proxy web:8000 {
+		# Set rather than forwarded. Django trusts this header on the AWS
+		# host, so a client-supplied value must never survive the proxy.
+		header_up X-Forwarded-Proto https
+	}
+}

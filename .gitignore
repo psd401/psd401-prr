@@ -1,0 +1,62 @@
+.env
+.env.app
+.venv/
+__pycache__/
+*.pyc
+db.sqlite3
+celerybeat-schedule*
+.DS_Store
+staticfiles/
+demo-*.png
+.playwright-mcp/
+
+# Terraform provider cache, local state, plans, and operator-only values.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.auto.tfvars
+!infra/terraform/google-identity/identity.auto.tfvars
+crash.log
+
+# OpenWiki local config/secrets (canonical location is ~/.openwiki/.env; this
+# guards against an accidental in-repo .openwiki/ holding a provider API key).
+# The generated openwiki/ wiki tree itself IS committed and is not ignored.
+.openwiki/
+
+# CDK dependencies and synthesized CloudFormation. cdk.context.json IS
+# committed: it is what lets CI synth the stacks without AWS credentials.
+infra/cdk/node_modules/
+infra/cdk/cdk.out/
+
+# Local agent tooling scratch (worktrees, local settings, run logs). The shared
+# project settings and their hooks are committed (psd-dev-standards standards/08).
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+.codex-runs/
+
+# Local verification state and synthetic E2E database. Every acceptance run
+# deletes and regenerates the whole evidence directory, so committing it made
+# each UI change carry ~5MB of binary churn. CI uploads the same artifacts
+# (14-day retention) and that is the copy PR reviewers should read.
+.psd/last-gate-result
+.psd/finalizing
+.verification/*
+!.verification/.gitkeep
+
+# Agent scratch output. Never part of the application.
+outputs/
+
+# Playwright run artifacts
+test-results/
+
+# Coverage data and reports. `coverage json` output lands under .verification/
+# (already ignored); the parallel-mode data files land here.
+.coverage
+.coverage.*
+htmlcov/
+
+# mutmut's mutant cache, written by the scheduled mutation-testing run.
+.mutmut-cache

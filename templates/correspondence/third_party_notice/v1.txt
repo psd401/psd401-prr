@@ -1,0 +1,31 @@
+{# RCW 42.56.540 third-party notice. Counsel review is required before production use. #}
+{% autoescape off %}
+Subject: Public Records Request {{ request.number }} — Notice of Records Concerning You
+
+Dear {{ employee_name }},
+
+Peninsula School District received public records request {{ request.number }}
+on {{ request.received_at|date:"F j, Y" }} from {{ disclosed_requesters }}.
+The request asks for:
+
+"{{ request.description }}"
+
+The District has identified records concerning you that appear responsive and
+intends to disclose them. This notice is given under RCW 42.56.540 so that you
+may, at your own expense, seek a court order preventing or limiting disclosure
+if you believe an exemption applies to these records.
+
+If you intend to seek such an order, notify the District and file your action
+by {{ response_by|date:"F j, Y" }}. The District will proceed with disclosure
+if it has not been enjoined by that date.
+
+This notice is not a determination that any exemption applies, and it does not
+extend the District's own deadlines under RCW 42.56.
+
+Questions about this notice go to the Public Records Officer at
+{{ pra_officer_email }}.
+
+Sincerely,
+Public Records Officer
+Peninsula School District No. 401
+{% endautoescape %}

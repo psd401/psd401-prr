@@ -1,0 +1,12 @@
+A message reached the intake mailbox and was kept, but PRR could not read it, so no case was opened and it matched no case.
+
+From: {{ sender|default:"(unreadable)" }}
+Subject: {{ subject|default:"(unreadable)" }}
+Received: {{ received_at }}
+Delivered to: {{ recipients }}
+Reason: {{ reason }}
+Receipt: {{ receipt_id }}
+
+Gmail has labelled it processed, so it will not be picked up again on its own. If it is a public records request it is already on the statutory clock. Open the staff Inbox, review it under "Held for review", and have an officer run `manage.py reparse_quarantined_inbound` once the parser handles it.
+
+Open the staff Inbox: {{ inbox_url }}

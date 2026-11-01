@@ -1,0 +1,23 @@
+{# ABOUTME: The requester-facing dead end for a link that no longer works. #}
+{# ABOUTME: Says what to do next; never says whether a record exists. #}
+{% extends "requester/installment_base.html" %}
+{% block title %}This download link is not available{% endblock %}
+{% block content %}
+{% if reason == "expired" %}
+  <h1>This download link has expired</h1>
+  <p class="lede">Records are posted behind a link that expires so they are
+    not left available indefinitely.</p>
+  <p>Email <a href="mailto:{{ contact_email }}">{{ contact_email }}</a> and the
+    records officer will issue you a new link at no charge.</p>
+{% elif reason == "revoked" %}
+  <h1>This download link was withdrawn</h1>
+  <p class="lede">The District revoked this link.</p>
+  <p>Email <a href="mailto:{{ contact_email }}">{{ contact_email }}</a> to ask
+    why and to arrange delivery of your records.</p>
+{% else %}
+  <h1>This link is not valid</h1>
+  <p class="lede">We could not find anything for this address.</p>
+  <p>Check that you copied the whole link from the message the District sent
+    you. Links are long and email programs sometimes break them across lines.</p>
+{% endif %}
+{% endblock %}

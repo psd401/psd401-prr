@@ -1,0 +1,159 @@
+---
+type: Domain
+title: Advisory AI Proposals
+description: The advisory-only Amazon Bedrock features - request intent, case titles, record responsiveness, and grounded redaction candidates - their proposal-only boundary, persistence (AdvisoryRun and RedactionProposal), switches, prerequisites, and what they may never change. Start here before touching any advisory or model-facing code.
+tags: [domain, advisory-ai, bedrock, redaction, responsiveness, safety]
+timestamp: 2026-09-24T00:00:00Z
+openwiki:
+  roles: [domain, integration, architecture]
+  change_kinds: [advisory-ai, model-provider, redaction-proposal, automatic-run]
+  source_paths: [apps/records/advisory_ai.py, apps/records/redaction_ai.py, apps/records/models.py, apps/records/tasks.py, apps/api/advisory.py, apps/configuration/registry.py, apps/configuration/prerequisites.py, infra/cdk/lib/advisory-bedrock.ts, docs/advisory-ai.md]
+  symbols: [AdvisoryRun, RedactionProposal, RedactionProposalDecision, request_request_intent_advisory, request_case_title_advisory, request_record_responsiveness_advisory, request_record_redaction_advisory, execute_advisory_run, invoke_advisory_model, prepare_record_review_advisories]
+  test_paths: [apps/records/tests/test_advisory_ai.py, apps/records/tests/test_redaction_ai.py, apps/records/tests/test_case_titles.py, apps/records/tests/test_scope_conversation.py, apps/records/tests/test_verify_advisory_command.py, apps/api/tests/test_advisory_ai.py, apps/api/tests/test_redaction_ai.py]
+  invariants:
+    - "AdvisoryRun.applied is always false by database constraint; no provider output is a legal action."
+    - "Each automatic run keeps a named requester only when a staff member initiated it; manual runs require one."
+    - "Redaction candidates are immutable proposals; accepting one goes through the normal redaction service with an active exemption citation, one at a time."
+    - "The provider never sets request status, scope, collection tasks, fees, estimates, correspondence, review state, redactions, withholding, release, or preservation."
+  validation_commands: ["PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_advisory_ai apps.records.tests.test_redaction_ai --settings=config.test_settings"]
+---
+
+# Advisory AI Proposals
+
+The application uses Amazon Bedrock (the Converse API, in the district's AWS
+account) for four bounded proposals. Every proposal is advisory. The
+authoritative source is the operations document
+[`docs/advisory-ai.md`](../../docs/advisory-ai.md), which also holds the
+approval prerequisites. This page explains the code shape and the invariants a
+change must keep.
+
+| Kind | What the model proposes | Where it starts |
+|---|---|---|
+| `request_intent` | Summary, mandatory search anchors, alternative terms, record-system slugs, clarification questions, complexity flags, a date range, and up to four narrowing options | `request_request_intent_advisory`, or the automatic intake path |
+| `case_title` | One title of at most 80 characters, and nothing else | `request_case_title_advisory` |
+| `record_responsiveness` | `responsive`, `non_responsive`, or `uncertain`, with confidence, terms, and rationale | `request_record_responsiveness_advisory` and the automatic review path |
+| `record_redactions` | Page-specific candidate spans and an active exemption identifier, for a human-confirmed responsive PDF | `request_record_redaction_advisory` |
+
+## Boundary
+
+Model output is untrusted data. The worker validates it against the
+`_validate_proposal` rules and the bounded field shapes. It also checks each
+span and exemption against the vocabularies it issued. Unknown or inactive
+identifiers, unexpected fields, invalid confidence, and unsearchable PDFs fail
+closed.
+
+- **Request intent** never narrows a request. A narrowing option is display-only
+  drafting material for the officer's scope conversation. The advisory never
+  drafts, queues, or sends the letter that offers it.
+- **Case title** is shown to Records Officers only, in the case Subject column,
+  and marked as AI-suggested. It reads no attachments and is offered no record
+  systems or exemption taxonomy, so a completed run starts nothing.
+- **Responsiveness and redaction** remain proposals. A named reviewer must still
+  confirm each responsiveness recommendation. Each redaction candidate needs an
+  individual accept, edit, or reject decision with an active exemption citation.
+  There is no accept-all path. The model never supplies coordinates. The worker
+  derives normalized boxes from the retained PDF, and an accepted candidate goes
+  through the normal redaction service. Second review and raster burn-in still
+  apply.
+
+## Persistence and provenance
+
+`AdvisoryRun` in [`apps/records/models.py`](../../apps/records/models.py) keeps
+each run's trigger (`manual` or `automatic`), the requester, the model
+identifier, the target, the input SHA-256, the truncation flag, and a bounded
+proposal or failure code. Database constraints enforce that `applied` is always
+false (`records_advisory_never_applied`) and that a manual run has a named staff
+requester (`records_manual_advisory_requires_requester`). Run state is
+`pending`, `running`, `complete`, or `failed`. `RedactionProposal` and
+`RedactionProposalDecision` are append-only. A decision links the proposal to the
+resulting `Redaction` when accepted.
+
+Input is fingerprinted from the full attachment manifest. A scan verdict or an
+attachment change therefore cannot reuse a stale result. Attachments reach
+Bedrock only after the ClamAV boundary reports them clean, and the worker
+verifies their byte count and SHA-256 first. Bedrock receives neutral labels, not
+requester filenames.
+
+## Automatic runs
+
+The worker starts automatic runs only where a switch allows it. Each switch is an
+app setting in the [configuration registry](../architecture/configuration.md),
+and each requires `PRR_AI_ADVISORY_ENABLED`:
+
+- `PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED`. A new Vault record queues a
+  responsiveness proposal. A `responsive` or `uncertain` result queues redaction
+  candidates. `prepare_record_review_advisories` runs every five minutes, and
+  bounded retry stops after three substantive automatic failures.
+- `PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED`. A new request prepares its intent
+  proposal after intake commits and after every attachment has a final malware
+  verdict. A completed proposal that maps to an active Vault-backed system queues
+  an entire-organization count. See [Collection and Vault](collection-and-vault.md).
+- `PRR_AI_AUTOMATIC_CASE_TITLES_ENABLED`. Every new case gets a title run after
+  intake commits. It does not wait on scanning, since it reads no files.
+
+Every switch defaults off. None is an environment variable. The Application
+Admin sets it on Configuration > District settings with a written reason, and the
+change takes effect without a redeploy.
+
+## Backfilling case titles
+
+Automatic titles apply only to new cases. The `backfill_case_titles` management
+command in [`apps/records/management/commands/backfill_case_titles.py`](../../apps/records/management/commands/backfill_case_titles.py)
+is the one-time pass for existing cases. It queues the same automatic
+`case_title` run through `request_automatic_case_title_advisory()` and nothing
+else. It sends no correspondence, changes no status or deadline, and writes
+nothing to the request.
+
+- **Dry run by default.** Without `--commit` it only reports each case it would
+  queue. With `--commit` it refuses unless `PRR_AI_ADVISORY_ENABLED` and
+  `PRR_AI_AUTOMATIC_CASE_TITLES_ENABLED` are both on.
+- **Scope.** Open cases only, unless `--all` is passed. `--limit` bounds one pass.
+  `--batch-size` and `--pause` throttle how fast runs reach the provider.
+- **Idempotent.** The command skips cases that already have a pending, running, or
+  complete title run, and the service reuses an identical completed run. A second
+  pass queues nothing for cases already handled.
+- **Failures stay local.** A case that cannot be queued is named on stderr and the pass
+  continues. The command audits `advisory.case_titles.backfilled` with its counts.
+
+`test_backfill_case_titles.py` covers dry run, scope, idempotency, bounds, the refusal
+while a switch is off, and the rule that the pass does not change the case.
+
+## Enablement prerequisites and runtime grant
+
+`PRR_AI_ADVISORY_ENABLED` carries the prerequisite rule `advisory_model_configured`
+in [`apps/configuration/prerequisites.py`](../../apps/configuration/prerequisites.py).
+The settings service applies that rule before it accepts the switch, so the switch
+cannot turn on unless the provider is `bedrock`, the AWS region is valid, and the
+model identifier matches the Bedrock format.
+
+In production the runtime role receives a `bedrock:InvokeModel` grant from
+[`infra/cdk/lib/advisory-bedrock.ts`](../../infra/cdk/lib/advisory-bedrock.ts),
+which `prr-hosting-stack.ts` applies during the CDK release. The grant is limited to
+one inference profile and to the matching foundation-model resources in the three US
+regions that profile may route to. It is not a broad Bedrock permission. The model
+identifier is a constant in that file, so a model change needs the district setting
+and a matching CDK change, shipped through the
+[AWS production release](../operations/aws-deployment.md).
+
+## Change guidance
+
+- Keep the advisory-only boundary. A new kind of output needs its own validation
+  and a test that it cannot reach the statutory services.
+- Model calls, validation, and persistence belong in `advisory_ai.py` and
+  `redaction_ai.py`. Do not call Bedrock from a view or a serializer.
+- The `scope conversation` and case-title copy must describe a count the officer
+  typed, not one the system ran. See `test_scope_conversation`.
+- Bulk review is a human decision. Never add a path that accepts a candidate
+  without its own named decision.
+- Use `test_advisory_ai` and `test_redaction_ai` for the worker and validator.
+  `test_verify_advisory_command` covers the verification command. Run only
+  those modules for a narrow check.
+- The `verify_advisory_ai` management command (`apps/records/management/commands/verify_advisory_ai.py`)
+  checks Bedrock connectivity and the bounded-JSON contract with synthetic data. It calls
+  `invoke_advisory_model()` and `_validate_proposal()` directly and writes no request or
+  `AdvisoryRun`. Use it to confirm provider access, not to test case behavior.
+
+Related: [Compliance](compliance.md) (human-only and advisory rules),
+[Agent parity](../architecture/agent-parity.md) (AI actions are
+catalogued as human-confirmation or human-only), [Case workspace](case-workspace.md)
+(where the title and the Next due column appear).

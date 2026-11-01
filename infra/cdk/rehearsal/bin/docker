@@ -1,0 +1,181 @@
+#!/bin/bash
+# Rehearsal stub: models just enough of the Docker CLI for the CDK deploy script.
+set -uo pipefail
+S="${REHEARSAL_STATE:?}"
+echo "docker $*" >> "$S/calls.log"
+
+cfield() { sed -n "s/^$2=//p" "$S/containers/$1" 2>/dev/null; }
+new_id() { head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n' | cut -c1-12; }
+
+set_container() { # service image working_dir config_files health
+  local old; old="$(cat "$S/service/$1" 2>/dev/null || true)"
+  [ -n "$old" ] && rm -f "$S/containers/$old"
+  local id; id="$(new_id)"
+  { echo "service=$1"; echo "image=$2"; echo "working_dir=$3"; echo "config_files=$4"; echo "health=$5"; } > "$S/containers/$id"
+  echo "$id" > "$S/service/$1"
+}
+
+case "$1" in
+  ps)
+    svc=""
+    for a in "$@"; do case "$a" in label=com.docker.compose.service=*) svc="${a#label=com.docker.compose.service=}";; esac; done
+    if [ "${REHEARSAL_PS_ALL_FAILS:-0}" = 1 ] && [ -z "$svc" ]; then
+      echo "ps forced failure" >&2; exit 1
+    fi
+    if [ -n "$svc" ]; then
+      [ -f "$S/service/$svc" ] && cat "$S/service/$svc"
+    else
+      # `docker ps -q` with no service filter lists every running container,
+      # which is how the release prune finds the live compose working dirs.
+      for s in "$S"/service/*; do [ -f "$s" ] && cat "$s"; done
+    fi
+    exit 0 ;;
+  build) exit 0 ;;
+  image) cat "$S/replacement_image_id"; exit 0 ;;
+  tag)
+    # The warm rollback pins the previous image under a tag; `compose up` resolves it.
+    mkdir -p "$S/tags"; printf '%s\n' "$2" > "$S/tags/${3//[:\/]/_}"; exit 0 ;;
+  images) exit 0 ;;          # post-deploy prune: nothing to list
+  rmi|builder) exit 0 ;;     # post-deploy prune: nothing to remove
+  stop)
+    if [ "${REHEARSAL_STOP_FAILS:-0}" = 1 ]; then echo "stop forced failure" >&2; exit 1; fi
+    id="${@: -1}"; svc="$(cfield "$id" service)"
+    [ -n "$svc" ] && rm -f "$S/service/$svc" "$S/containers/$id"
+    exit 0 ;;
+  exec)
+    shift
+    envs=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -i|-t) shift ;;
+        -e) envs="$envs $2"; shift 2 ;;
+        *) break ;;
+      esac
+    done
+    id="$1"; shift
+    [ -f "$S/containers/$id" ] || { echo "No such container: $id" >&2; exit 1; }
+    cmd="$*"
+    case "$envs" in
+      *PRR_EXPECT_GMAIL_MODE*)
+        # The replacement runtime reports the mode its Compose files imply.
+        want="${envs#* PRR_EXPECT_GMAIL_MODE=}"; want="${want%% *}"
+        have=disabled
+        case "$(cfield "$id" config_files)" in *activation*) have=enabled ;; esac
+        [ "$want" = "$have" ] || { echo "replacement Gmail runtime switches do not match" >&2; exit 1; }
+        exit 0 ;;
+      *PRR_GMAIL_SCHEDULE_QUEUE_BASELINE*)
+        # The scheduled-poll probe legitimately returns non-zero on every retry
+        # until beat enqueues its task. REHEARSAL_POLL_RETRIES models that.
+        cat >/dev/null
+        calls=$(( $(cat "$S/poll_calls" 2>/dev/null || echo 0) + 1 ))
+        echo "$calls" > "$S/poll_calls"
+        if [ "$calls" -le "${REHEARSAL_POLL_RETRIES:-0}" ]; then exit 1; fi
+        echo "6f1d0d1e-6a7c-4b21-9f0e-7c2a1b3d4e5f"; exit 0 ;;
+      *PRR_GMAIL_SCHEDULE_TASK_ID*) exit 0 ;;
+    esac
+    case "$cmd" in
+      *runtime.get\(\"PRR_GMAIL_ENABLED\"*)
+        # The in-app settings store decides Gmail mode; the rehearsal store
+        # agrees with the activation overlay the container was started with.
+        case "$(cfield "$id" config_files)" in *activation*) echo enabled ;; *) echo disabled ;; esac
+        exit 0 ;;
+      *verify_gmail*)
+        if [ "${REHEARSAL_VERIFY_GMAIL_FAILS:-0}" = 1 ]; then echo "verify_gmail forced failure" >&2; exit 1; fi
+        exit 0 ;;
+      *poll_inbound_mailbox*) echo '{"status":"ok"}'; exit 0 ;;
+      *last_synced_at.isoformat*) echo "2026-08-28T12:00:00+00:00"; exit 0 ;;
+    esac
+    cat >/dev/null 2>&1; echo ""; exit 0 ;;
+  inspect)
+    if [ "$2" = "--format" ]; then
+      fmt="$3"; id="$4"
+      # Real docker parses the format as a Go template before it looks at any
+      # container, and a quoted string cannot span lines: a literal newline in
+      # the format is a parse error, not a separator. Reject it here too, or a
+      # format the real host would refuse passes the rehearsal.
+      if [[ "$fmt" == *$'\n'* ]]; then
+        echo "template parsing error: template: :1: unterminated quoted string" >&2
+        exit 64
+      fi
+      [ -f "$S/containers/$id" ] || { echo "No such object: $id" >&2; exit 1; }
+      case "$fmt" in
+        *"State.Health"*) cfield "$id" health ;;
+        *".Image"*)       cfield "$id" image ;;
+        # The release prune asks for the compose working_dir and every mount
+        # source together, one path per line.
+        *working_dir*.Mounts*)
+          cfield "$id" working_dir
+          cfield "$id" mounts | tr ',' '\n' | sed '/^$/d' ;;
+        *working_dir*)    cfield "$id" working_dir ;;
+        *config_files*)   cfield "$id" config_files ;;
+        *) echo "unhandled format: $fmt" >&2; exit 1 ;;
+      esac
+      exit 0
+    fi
+    shift
+    python3 - "$@" <<'PY'
+import json, os, sys
+state = os.environ["REHEARSAL_STATE"]
+out = []
+for cid in sys.argv[1:]:
+    fields = dict(l.split("=", 1) for l in open(f"{state}/containers/{cid}").read().splitlines() if "=" in l)
+    mode = "enabled" if "activation" in fields["config_files"] else "disabled"
+    flag = "true" if mode == "enabled" else "false"
+    out.append({"Image": fields["image"], "Config": {"Labels": {
+        "com.docker.compose.project": "app",
+        "com.docker.compose.service": fields["service"],
+        "com.docker.compose.project.working_dir": fields["working_dir"],
+        "com.docker.compose.project.config_files": fields["config_files"]},
+        "Env": [f"PRR_GMAIL_ENABLED={flag}", f"PRR_GMAIL_INBOUND_POLL_ENABLED={flag}"]}})
+print(json.dumps(out))
+PY
+    exit $? ;;
+  compose)
+    shift
+    workdir=""; files=()
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --project-directory) workdir="$2"; shift 2 ;;
+        --project-name) shift 2 ;;
+        -f) files+=("$2"); shift 2 ;;
+        *) break ;;
+      esac
+    done
+    cfg="$(IFS=,; echo "${files[*]}")"
+    sub="$1"; shift
+    case "$sub" in
+      ps)
+        if [ "${REHEARSAL_PS_FAILS:-0}" = 1 ]; then echo "compose ps forced failure" >&2; exit 1; fi
+        svc="${@: -1}"; [ -f "$S/service/$svc" ] && cat "$S/service/$svc"; exit 0 ;;
+      run)
+        if [ "${REHEARSAL_MIGRATE_FAILS:-0}" = 1 ]; then echo "migration failed" >&2; exit 1; fi
+        exit 0 ;;
+      up)
+        norecreate=0; svcs=()
+        for a in "$@"; do
+          case "$a" in
+            -d|--no-deps|--force-recreate) ;;
+            --no-recreate) norecreate=1 ;;
+            *) svcs+=("$a") ;;
+          esac
+        done
+        for svc in "${svcs[@]}"; do
+          [ "$norecreate" = 1 ] && [ -f "$S/service/$svc" ] && continue
+          case "$svc" in
+            db|redis|clamav|caddy) img="infra:$svc" ;;
+            *) img="${PRR_RELEASE_IMAGE:-}"
+               tagfile="$S/tags/${img//[:\/]/_}"
+               case "$img" in
+                 sha256:*) ;;
+                 *) if [ -n "$img" ] && [ -f "$tagfile" ]; then img="$(cat "$tagfile")"
+                    else img="$(cat "$S/replacement_image_id")"; fi ;;
+               esac ;;
+          esac
+          set_container "$svc" "$img" "$workdir" "$cfg" healthy
+        done
+        exit 0 ;;
+      *) echo "unhandled compose subcommand: $sub" >&2; exit 1 ;;
+    esac ;;
+esac
+echo "unhandled docker command: $*" >&2
+exit 1

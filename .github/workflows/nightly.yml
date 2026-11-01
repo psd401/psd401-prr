@@ -1,0 +1,118 @@
+# Nightly verification
+# psd-dev-standards standards/05 rule 5: a Playwright smoke subset blocks the
+# merge and the full suite runs nightly. Pull requests therefore get a result
+# in minutes, and every flow is still exercised against `main` every day.
+#
+# A failure here is a real regression on `main`, not a PR to fix: triage it the
+# way FLAKY.md describes before anything else lands on top of it.
+name: Nightly
+
+on:
+  schedule:
+    # 11:00 UTC = 03:00 Pacific in summer, 04:00 in winter. Well clear of the
+    # workday either way.
+    - cron: "0 11 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # uv otherwise prefers the runner's system Python, whose patch level differs
+  # from the production image's.
+  UV_PYTHON_PREFERENCE: "only-managed"
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  full-acceptance:
+    name: Full Playwright acceptance suite
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      # `uv sync` puts the environment in the checkout's `.venv`, which is
+      # where `scripts/prr-python.sh` -- and so the acceptance runner -- looks
+      # for the interpreter.
+      - name: Set up Python dependencies
+        uses: ./.github/actions/setup-python-deps
+        with:
+          include-dev: false
+
+      - name: Set up Bun dependencies
+        uses: ./.github/actions/setup-bun-deps
+        with:
+          bun-version: "1.2.x"
+          working-directory: frontend
+          install-playwright: true
+
+      - name: Run every Playwright acceptance flow
+        run: bash scripts/run-casework-acceptance.sh
+
+      # Quarantined flows run here too, and still may not fail the run
+      # (FLAKY.md). Their result is in the log for the owner on the hook.
+      - name: Run quarantined Playwright flows
+        continue-on-error: true
+        run: bash scripts/run-casework-acceptance.sh --quarantine
+
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: nightly-acceptance-evidence
+          overwrite: true
+          path: |
+            .verification/*.png
+            .verification/axe-report.json
+            .verification/playwright-results.json
+            .verification/playwright-results
+            .verification/playwright-report
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  report:
+    name: File a nightly regression as an issue
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: full-acceptance
+    # The smoke subset is a deliberately thinner merge gate, so this run is the
+    # net under it. A net whose only signal is a scheduled-workflow email to
+    # whoever last edited this file is not a closed loop: file an issue, so the
+    # regression is attributable and visible before anything lands on top of
+    # it. Scheduled runs only -- a manual dispatch has somebody watching.
+    if: failure() && github.event_name == 'schedule'
+
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: >-
+            ${{ github.server_url }}/${{ github.repository
+            }}/actions/runs/${{ github.run_id }}
+        run: |
+          day="$(date -u +%Y-%m-%d)"
+          title="Nightly acceptance failure ($day)"
+          existing="$(gh issue list --state open \
+            --search "Nightly acceptance failure in:title" \
+            --json number --jq '.[0].number // empty')"
+          body="The nightly Playwright run failed on \`main\`. This is a regression on the default branch, not a pull request to fix.
+
+          Flows, screenshots, traces and the HTML report are in the run's \`nightly-acceptance-evidence\` artifact: $RUN_URL
+
+          Triage it the way FLAKY.md describes before more work lands on top of it: confirm whether it fails every time (a bug) or intermittently (a flake), then fix or quarantine with an owner and an expiry."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

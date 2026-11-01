@@ -1,0 +1,138 @@
+# Snyk Agent Scan analysis for the MCP server (psd-dev-standards
+# standards/07-mcp.md build standard 6, and the standard's weekly
+# "runs mcp-scan against live endpoints" enforcement pattern).
+#
+# Why this is a separate workflow rather than a step in psd-ci-jobs.yml:
+# the analysis half of Agent Scan -- prompt-injection and toxic-flow checks
+# on tool descriptions -- authenticates to Snyk's API and exits non-zero
+# without a SNYK_TOKEN. `ci.yml` deliberately calls psd-ci-jobs.yml with no
+# `secrets:` so that a compromised floating dependency in any of its ten
+# jobs reaches no credential, and widening that to carry one token would be
+# a poor trade. The token-free half of the same tool (`inspect`, which boots
+# the server and enumerates its tools) does run in that gating lane.
+#
+# Until the secret exists this workflow reports a skip with instructions
+# rather than a pass, so the gap is visible in the Actions tab instead of
+# looking green. docs/phase-2-production-handoffs.md tracks provisioning it.
+name: MCP Scan
+
+on:
+  # pyproject.toml and uv.lock are in scope because the scanned server runs
+  # through `uv run`, so the MCP SDK version they pin is part of what gets
+  # scanned -- a dependency bump can change the tool surface without touching
+  # a file under integrations/mcp/.
+  #
+  # Deliberately NOT on `pull_request`. This job holds SNYK_TOKEN and its
+  # scan step starts the MCP server from the checked-out tree, so running it
+  # on a pull request would boot branch-controlled code in a job that has a
+  # credential. `pull_request` does not hand secrets to forks, but it does to
+  # branches pushed by anyone with write access, and that is a bigger trust
+  # assumption than this lane needs. Pull requests are covered by the
+  # token-free half in psd-ci, which boots the same server with no secret in
+  # the job at all; the authenticated analysis runs after merge and weekly,
+  # which is also what the standard's enforcement pattern asks for.
+  push:
+    branches: [main]
+    paths:
+      - "integrations/mcp/**"
+      - "server.json"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/mcp-scan.yml"
+  # The standard asks for a weekly scan of every MCP server, because a
+  # finding can appear from a new detection rule rather than from a commit.
+  schedule:
+    - cron: "30 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-scan-${{ github.ref }}
+  # main and the weekly run each want their own recorded result, so nothing
+  # here is superseded.
+  cancel-in-progress: false
+
+jobs:
+  mcp-scan:
+    name: Snyk Agent Scan analysis
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      # Pinned for the same reason as PRR_CHECKOV_VERSION in psd-ci-jobs.yml:
+      # a scanner that changes rules under the gate fails a branch nobody
+      # touched. Transitive versions float, bounded by `contents: read` and
+      # no cloud credentials in this job.
+      PRR_MCP_SCAN_VERSION: "0.6.8"
+      UV_PYTHON_PREFERENCE: "only-managed"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # The token is set per step rather than on the job, so the checkout and
+      # the dependency sync never run with the credential in their
+      # environment. Only the two steps that genuinely need it see it: this
+      # one, which needs to know whether it exists, and the scan itself,
+      # which authenticates with it. `secrets` is not available in a
+      # job-level `if:`, which is why existence is resolved into a step
+      # output rather than branched on directly.
+      - name: Decide whether the analysis account is configured
+        id: gate
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          if [ -n "${SNYK_TOKEN}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python dependencies
+        if: steps.gate.outputs.configured == 'true'
+        uses: ./.github/actions/setup-python-deps
+
+      # The config names the stdio entrypoint with placeholder credentials:
+      # the scanner only needs the server to start and answer tools/list, and
+      # it must never hold a real staff token. `--dangerously-run-mcp-servers`
+      # skips the interactive consent prompt; the only server it starts is
+      # this repository's own, at a commit already merged to main.
+      - name: Scan the MCP server for prompt-injection and toxic flows
+        if: steps.gate.outputs.configured == 'true'
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: >-
+          uv tool run "snyk-agent-scan==${PRR_MCP_SCAN_VERSION}"
+          scan integrations/mcp/mcp-scan.json
+          --ci --no-skills --dangerously-run-mcp-servers
+          --suppress-mcpserver-io true --server-timeout 120
+
+      - name: Report that the analysis account is not provisioned yet
+        if: steps.gate.outputs.configured != 'true'
+        run: |
+          {
+            echo "### MCP Scan skipped"
+            echo
+            echo "No \`SNYK_TOKEN\` repository secret is configured, so the"
+            echo "Snyk Agent Scan analysis could not run. Snyk Agent Scan"
+            echo "(formerly \`mcp-scan\`) has required an account since"
+            echo "v0.6, and psd-dev-standards standards/07-mcp.md build"
+            echo "standard 6 asks for this lane."
+            echo
+            echo "The token-free half of the same tool still gates every"
+            echo "pull request: see the \"Enumerate MCP tools with Snyk"
+            echo "Agent Scan\" step in \`psd-ci / Backend audits and"
+            echo "quarantined tests\`."
+            echo
+            echo "To enable: add a \`SNYK_TOKEN\` repository secret from"
+            echo "https://app.snyk.io/account. Tracked in"
+            echo "\`docs/phase-2-production-handoffs.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "SNYK_TOKEN is not configured; analysis skipped." >&2

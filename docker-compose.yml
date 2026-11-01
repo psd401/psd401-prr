@@ -1,0 +1,97 @@
+# Local developer dependency stack only. Production uses the reviewed
+# docker-compose.deploy.yml + docker-compose.aws.yml path; do not deploy this.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: prr
+      POSTGRES_USER: prr
+      POSTGRES_PASSWORD: prr-dev-only
+    volumes: [pgdata:/var/lib/postgresql/data]
+    # Bound to loopback: host-run Django/celery use localhost anyway, and the
+    # laptop this runs on sits on the district network.
+    ports: ["127.0.0.1:5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prr"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:  # S3-compatible object store; swap for AWS S3 in prod via env vars
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: prr
+      MINIO_ROOT_PASSWORD: prr-dev-only
+    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+    volumes: [miniodata:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Private malware scanner for requester-supplied intake attachments. Its TCP
+  # port stays on the Compose network; clamd has no authentication or TLS.
+  clamav:
+    image: clamav/clamav:1.5-debian
+    ports: ["127.0.0.1:3310:3310"]
+    volumes: [clamavdata:/var/lib/clamav]
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 90s
+
+  web:
+    build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes: [.:/app]
+    ports: ["8000:8000"]
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: celery -A config worker -l info
+    volumes: [.:/app]
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+
+  beat:
+    build: .
+    command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes: [.:/app]
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  miniodata:
+  clamavdata:

@@ -1,0 +1,31 @@
+{# Application-managed installment delivery. Approval remains human and version-checked. #}
+{% autoescape off %}
+Subject: Public Records Request {{ request.number }} — Installment {{ installment.sequence }} Available
+
+Dear {{ request.requester.name|default:"Requester" }},
+
+Installment {{ installment.sequence }} of public records request
+{{ request.number }} is now available. This installment contains
+{{ item_count }} record{{ item_count|pluralize }}.
+
+Secure download link:
+{{ download_url }}
+
+This scoped link expires {{ download_expires_at|date:"F j, Y, g:i a T" }}.
+{% if has_exemptions %}
+The package includes an exemption and withholding log identifying each
+redaction or record withheld in full and the legal basis applied under
+RCW 42.56.210(3).
+{% endif %}
+{% if is_final %}
+District staff have marked this as the final installment. Delivery of this
+notice does not by itself close the request; closure remains a separate
+Records Officer action.
+{% else %}
+Additional installments are currently expected.
+{% endif %}
+
+Sincerely,
+Public Records Officer
+Peninsula School District No. 401
+{% endautoescape %}

@@ -1,0 +1,166 @@
+# AWS overlay for the CDK-provisioned host in infra/cdk. This is the object
+# store for that host, the environment's S3 bucket reached through the
+# instance role, plus Caddy terminating TLS in front of the loopback-bound
+# application. Initial-turn-up composition context only:
+#
+#   COMPOSE_FILE=docker-compose.deploy.yml:docker-compose.aws.yml
+#
+# Manual upgrades are blocked; follow the gates in docs/aws-deploy.md.
+x-object-store: &object-store
+  # An empty endpoint and empty keys send boto3 to AWS S3 with the instance
+  # role from the metadata service. No object-store credential exists on this
+  # host to steal.
+  OBJECT_STORE_ENDPOINT: ""
+  OBJECT_STORE_ACCESS_KEY: ""
+  OBJECT_STORE_SECRET_KEY: ""
+  OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:?Set OBJECT_STORE_BUCKET to this environment's records bucket}
+  AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-west-2}
+
+x-app-runtime: &app-runtime
+  <<: *object-store
+  # DJANGO_SECRET_KEY and PRR_SETTINGS_ENCRYPTION_KEY come from this AWS
+  # Secrets Manager secret, read by each Django process through the instance
+  # role (config/runtime_secrets.py; docs/aws-deploy.md "Runtime secret").
+  # Either key also set in .env.app stops the process.
+  PRR_RUNTIME_SECRET_ID: psd401-prr/prod/runtime
+  # PII-free operational metrics let AWS report a stopped/failing Gmail poller
+  # without host access. The runtime role is namespace-scoped in CDK.
+  #
+  # Both are application-managed now (the switch since Phase A, the region
+  # since Phase C). These lines are the one-time bootstrap seed the settings
+  # store imports on first start, so the move changed nothing about this
+  # deployment; afterwards an Application Admin owns them and both are
+  # ignored.
+  PRR_CLOUDWATCH_METRICS_ENABLED: "true"
+  PRR_CLOUDWATCH_REGION: ${AWS_DEFAULT_REGION:-us-west-2}
+  # The sign-in client secret is a write-only district setting, stored
+  # encrypted in the application; rotate it at Configuration > District
+  # settings. The empty value blanks any legacy entry left in .env.app, so a
+  # stale secret can never be imported from the environment.
+  PRR_GOOGLE_OIDC_CLIENT_SECRET: ""
+
+x-advisory-ai: &advisory-ai
+  # AWS-native Converse calls use the runtime role; there is no AI API key.
+  # The US inference profile can route only among its documented US Regions.
+  # Enablement is an Application Admin decision on the in-app Settings page,
+  # and since Phase B so are these three values. They stay here as the
+  # one-time bootstrap seed `manage.py import_environment_settings` writes
+  # into the settings store, so a deployment that has never imported them
+  # keeps running the model it was already running. Once the store holds
+  # them, editing this block does nothing: change the model on the Settings
+  # page, with a reason, where the change is recorded.
+  PRR_AI_PROVIDER: "bedrock"
+  PRR_AI_AWS_REGION: "us-west-2"
+  PRR_AI_MODEL: "us.amazon.nova-2-lite-v1:0"
+
+x-secrets-mount: &secrets-mount
+  # Keyless Google credential configuration, written by the operator per
+  # docs/google-identity-bootstrap.md. Read-only: nothing in the container has
+  # a reason to rewrite it.
+  - /srv/prr/secrets:/run/secrets:ro
+
+# This host reboots for AWS maintenance and kernel patching, and nobody is
+# watching it at 03:00. Every service comes back on its own.
+x-restart: &restart unless-stopped
+
+# The root volume is 50 GiB and holds the database. Uncapped container logs
+# are a slow way to take the application down.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # Never layer docker-compose.minio.yml on this host: the records belong in
+  # the versioned bucket the stack created, not in a container volume whose
+  # only copy is the daily snapshot.
+  db:
+    restart: *restart
+    logging: *logging
+
+  redis:
+    restart: *restart
+    logging: *logging
+
+  clamav:
+    restart: *restart
+    logging: *logging
+
+  # One-shot, so it keeps the base file's `restart: "no"`. It still needs the
+  # bucket settings: the seed step writes through the same object store the
+  # application does.
+  migrate:
+    logging: *logging
+    environment:
+      # migrate runs `manage.py migrate`, so it loads Django settings exactly
+      # like web, worker and beat. It was the fourth service running the
+      # release image and the one missed when beat was fixed: with the
+      # advisory switch on and no model identifier, every deployment died at
+      # the migration step. The rule is the service's image, not its name --
+      # anything running ${PRR_RELEASE_IMAGE} needs both halves.
+      <<: [*app-runtime, *advisory-ai]
+
+  web:
+    restart: *restart
+    logging: *logging
+    # Carries every PRR_GMAIL_* runtime setting from .env.app. The overlay
+    # supplies the keyless ADC mount below, never a Google private key.
+    env_file: .env.app
+    environment:
+      <<: [*app-runtime, *advisory-ai]
+      # Caddy sets this header itself and discards whatever the client sent,
+      # which is the condition config/settings.py attaches to trusting it.
+      DJANGO_TRUST_X_FORWARDED_PROTO: "true"
+    volumes: *secrets-mount
+
+  worker:
+    restart: *restart
+    logging: *logging
+    env_file: .env.app
+    environment:
+      <<: [*app-runtime, *advisory-ai]
+    volumes: *secrets-mount
+
+  beat:
+    restart: *restart
+    logging: *logging
+    env_file: .env.app
+    environment:
+      # Beat needs *advisory-ai even though it never calls Bedrock. Enablement
+      # lives in .env.app and therefore reaches every service, while the model
+      # identifier lives here -- so a service that got the switch without the
+      # model failed Django's settings validation at import and crash-looped.
+      # Beat runs the day-5 statutory safety net, so that took the safety net
+      # down while the advisory looked merely "on". Any service that loads
+      # Django settings gets both halves or neither.
+      <<: [*app-runtime, *advisory-ai]
+    volumes: *secrets-mount
+
+  # The only service on the public interface. Port 80 is open solely so the
+  # ACME HTTP-01 challenge can complete and so plain HTTP redirects.
+  caddy:
+    # Pinned to a minor like every other image here: an unattended pull must
+    # not change the TLS front end's behavior during a routine redeploy.
+    image: caddy:2.10-alpine
+    restart: *restart
+    logging: *logging
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PRR_HOSTNAME: ${PRR_HOSTNAME:?Set PRR_HOSTNAME to this environment's public hostname}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL to the district contact for certificate notices}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and account keys. Losing this volume means re-issuing
+      # against Let's Encrypt rate limits.
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  caddydata:
+  caddyconfig:

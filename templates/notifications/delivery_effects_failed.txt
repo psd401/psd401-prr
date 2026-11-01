@@ -1,0 +1,7 @@
+URGENT: A {{ correspondence_kind }} letter for request {{ request_number }} was delivered to the requester, but the system could not apply its lifecycle effect.
+
+Reason: {{ failure }}
+
+The delivery is recorded as sent. The request status, deadline, and related records were NOT updated. A Records Officer must review the request and apply or reject the effect by hand, then resolve the delivery exception in the work queue (correspondence {{ correspondence_id }}).
+
+Open the staff workspace: {{ status_url }}

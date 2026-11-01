@@ -1,0 +1,5 @@
+Camera preservation for request {{ request_number }} completed with {{ held_count }} camera(s) held and {{ failed_count }} failed.
+
+Review the hold and have an accountable human exclude irrelevant cameras with a substantive reason. Investigate every failed camera immediately.
+
+Open the staff workspace: {{ status_url }}

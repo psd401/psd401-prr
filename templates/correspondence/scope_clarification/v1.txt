@@ -1,0 +1,28 @@
+{# Scope conversation. The clarification form is an RCW 42.56.520(3) clarification request and tolls the District's response period; the informational form is not and does not. Counsel review is required before production use. #}
+{% autoescape off %}
+Subject: Public Records Request {{ request.number }} — Scope of Your Request
+
+Dear {{ request.requester.name|default:"Requester" }},
+
+Peninsula School District received your public records request
+({{ request.number }}) on {{ request.received_at|date:"F j, Y" }}. You
+requested:
+
+"{{ request.description }}"
+
+A preliminary search of {{ query_summary }} identified
+{{ match_count_phrase }}. That number estimates how much material the
+District would have to review. It is not a determination that any of that
+material is responsive, and it is not a denial of any part of your request.
+{{ fee_paragraph }}{{ narrowing_options }}
+Please reply by {{ response_by|date:"F j, Y" }}.
+
+{{ scope_response_paragraph }}
+
+If you have questions, contact the Public Records Officer at
+{{ pra_officer_email }}.
+
+Sincerely,
+Public Records Officer
+Peninsula School District No. 401
+{% endautoescape %}

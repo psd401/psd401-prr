@@ -1,0 +1,27 @@
+#!/bin/bash
+# Rehearsal stub: serves a valid public-intake bootstrap page and cookie jar.
+set -uo pipefail
+S="${REHEARSAL_STATE:?}"
+echo "curl $*" >> "$S/calls.log"
+out=""; jar=""; url=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --output) out="$2"; shift 2 ;;
+    --cookie-jar) jar="$2"; shift 2 ;;
+    --proto|--connect-timeout|--max-time) shift 2 ;;
+    --fail|--silent|--show-error) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+host="prr.psd401.net"
+if [ -n "$jar" ]; then
+  {
+    echo "# Netscape HTTP Cookie File"
+    printf '%s\tFALSE\t/\tTRUE\t0\tcsrftoken\trehearsal-csrf\n' "$host"
+    printf '#HttpOnly_%s\tFALSE\t/api/public/requests/\tTRUE\t0\tprr_public_intake\trehearsal-intake\n' "$host"
+  } > "$jar"
+fi
+if [ -n "$out" ] && [ "$out" != "/dev/null" ]; then
+  printf '<!doctype html><html><head><script type="module" crossorigin src="/static/app/assets/index-REHEARSAL.js"></script></head><body><div id="root"></div></body></html>\n' > "$out"
+fi
+exit 0

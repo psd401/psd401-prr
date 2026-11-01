@@ -1,0 +1,10 @@
+{{ waiting }} inbound message(s) have waited more than {{ threshold }} business day(s) without triage. The oldest arrived {{ oldest|date:"Y-m-d" }}.
+{% for label, count in by_kind %}
+- {{ label }}: {{ count }}{% endfor %}
+{% if by_address %}
+Sent to an address other than the intake mailbox:{% for address, count in by_address %}
+- {{ address }}: {{ count }}{% endfor %}
+{% endif %}
+None of these opened a case on its own. Open each one, and open a case, match it to an existing case, or record why no action is needed.
+
+Open the staff Inbox: {{ inbox_url }}

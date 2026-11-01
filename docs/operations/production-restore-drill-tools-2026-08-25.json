@@ -1,0 +1,21 @@
+{
+  "archive": {
+    "bytes": 4760,
+    "s3_checksum_sha256": "kx4xSpsA7D/IXfTrn7ziCzeQV4y7niPZPW+7gL7nxOs=",
+    "s3_uri": "s3://psd401-prr-backups-prod/restore-drills/tools/d9ac67e99af5223ba8b09f70a711b81afd7d0139/tools.tar.gz",
+    "sha256": "931e314a9b00ec3fc85df4eb9fbce20b3790578cbb9e23d93d6fbb80bee7c4eb",
+    "version_id": "ws.ccSz0G2w5ixD5OK5SKTQvUvuKo2VU"
+  },
+  "files": {
+    "infra/aws/backup_manifest.py": {
+      "bytes": 12568,
+      "sha256": "4e8ac394b0fc07bcc715847ead1df9140b01e51e4d6189ed8a456f9b1bb35265"
+    },
+    "infra/aws/verify-app-backup-restore.sh": {
+      "bytes": 2309,
+      "sha256": "b4bf4b3bf1ea277f631dc24e121c6b7a400c335a885b48f3211d3e6a892c58fa"
+    }
+  },
+  "release_sha": "d9ac67e99af5223ba8b09f70a711b81afd7d0139",
+  "schema_version": 1
+}

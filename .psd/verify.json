@@ -1,0 +1,225 @@
+{
+  "commands": {
+    "build": "(cd frontend && bun run build)",
+    "lint": "(cd frontend && bun run lint) && uv run --frozen ruff check .",
+    "typecheck": "(cd frontend && bun run typecheck) && uv run --frozen python scripts/pyright_baseline.py",
+    "test": "bash scripts/verify-fast.sh",
+    "e2e": "bash scripts/run-casework-acceptance.sh --smoke"
+  },
+  "e2e_required": true,
+  "e2e_flows": [
+    "staff-login-open-case",
+    "officer-high-volume-messages",
+    "officer-message-disposition",
+    "new-arrival-stability",
+    "role-aware-work-inbox",
+    "admin-agent-configuration",
+    "admin-district-settings",
+    "intake-clerk-route-boundary",
+    "officer-new-case",
+    "officer-matter-kinds",
+    "officer-clarification-response",
+    "officer-scope-conversation",
+    "officer-correct-requester-identity",
+    "officer-email-to-existing-case",
+    "officer-statutory-response-and-templates",
+    "officer-case-table-sort",
+    "officer-case-table-caught-up",
+    "officer-case-table-row-opens-the-case",
+    "officer-case-table-row-opens-from-the-keyboard",
+    "officer-case-table-bulk-caught-up",
+    "officer-case-table-fits-1440",
+    "officer-case-table-fits-1280",
+    "officer-case-notes",
+    "officer-closure-letters-and-batch",
+    "officer-fee-estimate-and-deposit",
+    "liaison-assigned-case-work",
+    "reviewer-record-work-no-pii",
+    "review-throughput-queue",
+    "correspondence-destination-parity",
+    "keyboard-case-inbox",
+    "accessible-live-updates",
+    "high-volume-performance",
+    "complete-officer-case-journey",
+    "complete-liaison-handoff",
+    "complete-reviewer-journey",
+    "accessibility-audit"
+  ],
+  "e2e_screenshots": {
+    "staff-login-open-case": [
+      "staff-login-open-case.png"
+    ],
+    "officer-high-volume-messages": [
+      "officer-high-volume-messages.png"
+    ],
+    "officer-message-disposition": [
+      "officer-inbox-row-actions.png",
+      "officer-message-needs-attention.png",
+      "officer-message-no-action.png"
+    ],
+    "new-arrival-stability": [
+      "new-arrival-stability.png"
+    ],
+    "role-aware-work-inbox": [
+      "officer-shell.png",
+      "officer-inbox.png",
+      "liaison-shell.png",
+      "reviewer-shell.png",
+      "intake-shell.png",
+      "admin-shell.png",
+      "admin-inbox.png"
+    ],
+    "admin-agent-configuration": [
+      "admin-agent-configuration.png"
+    ],
+    "intake-clerk-route-boundary": [
+      "intake-clerk-route-boundary.png"
+    ],
+    "officer-new-case": [
+      "officer-new-case-overview.png",
+      "officer-case-collection.png",
+      "officer-case-records.png",
+      "officer-case-releases.png"
+    ],
+    "officer-clarification-response": [
+      "officer-clarification-response.png"
+    ],
+    "officer-scope-conversation": [
+      "officer-scope-count-and-options.png",
+      "officer-scope-conversation-compose.png",
+      "officer-scope-conversation-draft.png"
+    ],
+    "officer-email-to-existing-case": [
+      "officer-auto-created-email-case.png",
+      "officer-add-email-to-existing-case.png",
+      "officer-message-on-existing-case.png",
+      "reviewer-close-case.png",
+      "reviewer-closed-case.png"
+    ],
+    "liaison-assigned-case-work": [
+      "liaison-assigned-case-work.png"
+    ],
+    "reviewer-record-work-no-pii": [
+      "reviewer-record-work-no-pii.png"
+    ],
+    "correspondence-destination-parity": [
+      "correspondence-destination-parity-inbox.png",
+      "correspondence-destination-parity-messages.png",
+      "correspondence-destination-parity-operations.png"
+    ],
+    "keyboard-case-inbox": [
+      "keyboard-case-inbox.png"
+    ],
+    "accessible-live-updates": [
+      "accessible-live-updates.png"
+    ],
+    "high-volume-performance": [
+      "high-volume-performance.png"
+    ],
+    "complete-officer-case-journey": [
+      "complete-officer-case-journey.png"
+    ],
+    "complete-liaison-handoff": [
+      "complete-liaison-handoff.png"
+    ],
+    "complete-reviewer-journey": [
+      "complete-reviewer-journey.png"
+    ],
+    "accessibility-audit": [
+      "accessibility-work-queues-320-forced-colors.png",
+      "accessibility-work-queues-200-percent-zoom.png",
+      "accessibility-inbox-320-forced-colors.png",
+      "accessibility-inbox-200-percent-zoom.png",
+      "accessibility-cases-320-forced-colors.png",
+      "accessibility-cases-200-percent-zoom.png",
+      "accessibility-case-overview-320-forced-colors.png",
+      "accessibility-case-overview-200-percent-zoom.png"
+    ],
+    "officer-statutory-response-and-templates": [
+      "officer-messages-statutory-tracker.png",
+      "officer-awaiting-statutory-response.png",
+      "officer-inbox-triage-context.png",
+      "officer-guided-statutory-send.png",
+      "officer-submission-receipt-draft.png",
+      "officer-template-starting-point.png",
+      "officer-editable-message-templates.png"
+    ],
+    "officer-correct-requester-identity": [
+      "officer-correct-requester-identity.png"
+    ],
+    "officer-closure-letters-and-batch": [
+      "officer-closure-letter-compose.png",
+      "officer-batch-closure-drafts.png"
+    ],
+    "officer-fee-estimate-and-deposit": [
+      "officer-fee-estimate-compose.png",
+      "officer-fee-deposit-gate.png"
+    ],
+    "review-throughput-queue": [
+      "review-throughput-auto-reply-filter.png",
+      "review-throughput-bulk-selection.png",
+      "review-throughput-bulk-confirm.png",
+      "review-throughput-bulk-reviewed.png"
+    ],
+    "admin-district-settings": [
+      "admin-district-settings.png",
+      "admin-district-settings-reason.png",
+      "admin-district-settings-limit.png",
+      "admin-district-settings-secret.png",
+      "admin-district-settings-secret-history.png",
+      "admin-district-settings-denied.png"
+    ],
+    "officer-matter-kinds": [
+      "officer-matter-kind-intake.png",
+      "officer-matter-kind-ferpa-case.png",
+      "officer-matter-kind-identity.png",
+      "officer-matter-kind-identity-recorded.png"
+    ],
+    "officer-case-table-sort": [
+      "officer-case-table-sort.png"
+    ],
+    "officer-case-table-caught-up": [
+      "officer-case-table-caught-up.png",
+      "officer-case-table-row-menu.png"
+    ],
+    "officer-case-notes": [
+      "officer-case-notes-panel.png",
+      "officer-case-latest-note.png"
+    ],
+    "officer-case-table-fits-1440": [
+      "officer-all-cases-table-1440.png"
+    ],
+    "officer-case-table-row-opens-the-case": [
+      "officer-case-table-row-selected.png"
+    ],
+    "officer-case-table-row-opens-from-the-keyboard": [
+      "officer-case-table-row-focus.png"
+    ],
+    "officer-case-table-bulk-caught-up": [
+      "officer-case-table-selection-bar.png"
+    ],
+    "officer-case-table-fits-1280": [
+      "officer-all-cases-table-1280.png"
+    ]
+  },
+  "strictness": "block",
+  "reviewers": [],
+  "review_agents": [
+    "security-reviewer",
+    "correctness-reviewer",
+    "adversarial-reviewer",
+    "code-simplicity-reviewer",
+    "architecture-strategist",
+    "pattern-recognition-specialist",
+    "python-reviewer",
+    "typescript-reviewer",
+    "configuration-validator",
+    "data-integrity-guardian"
+  ],
+  "commit_learnings": false,
+  "auto_worktree": true,
+  "screenshot_dir": ".verification",
+  "baseline": {
+    "allow_preexisting_failures": false
+  }
+}

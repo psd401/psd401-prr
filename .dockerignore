@@ -1,0 +1,28 @@
+# Keep secrets, local state, and build artifacts out of the image context.
+# .env especially: COPY . . would otherwise bake it into a layer.
+.env
+.env.*
+.git
+.github
+.claude
+.venv
+venv
+.terraform
+**/.terraform
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.auto.tfvars
+__pycache__
+**/__pycache__
+*.pyc
+staticfiles
+node_modules
+frontend/node_modules
+frontend/dist
+# Infrastructure definitions run from a workstation, never from the image.
+infra
+openwiki
+docs/screenshots
+db.sqlite3

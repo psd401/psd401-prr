@@ -1,0 +1,25 @@
+{# Installment notice. Counsel review is required before production use. #}
+{% autoescape off %}
+Subject: Public Records Request {{ request.number }} — Installment {{ installment.sequence }} Available
+
+Dear {{ request.requester.name|default:"Requester" }},
+
+Installment {{ installment.sequence }} for request {{ request.number }} is
+now available for download ({{ item_count }} record{{ item_count|pluralize }}):
+
+{{ download_url }}
+
+This link expires {{ installment.download_expires_at|date:"F j, Y" }}.
+{% if has_exemptions %}Some records were redacted or withheld under
+exemptions identified in the enclosed exemption log.{% endif %}
+{% if installment.fee_amount %}The fee for this installment is
+${{ installment.fee_amount }}, per the District's fee schedule adopted
+under RCW 42.56.120.{% endif %}
+
+{% if is_final %}This completes the District's response to your request,
+which is now closed.{% else %}Additional installments will follow.{% endif %}
+
+Sincerely,
+Public Records Officer
+Peninsula School District No. 401
+{% endautoescape %}

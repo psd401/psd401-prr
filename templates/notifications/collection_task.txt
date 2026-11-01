@@ -1,0 +1,14 @@
+A collection task for request {{ request_number }} was created for {{ system_name }}.
+
+Due date: {{ due_date }}
+Retention: {{ retention_note|default:"Not specified" }}
+{% if urgent %}
+Preserve responsive data NOW, before scoping or review. Destruction after a request is received violates RCW 42.56.100.
+{% endif %}
+Checklist:
+{{ search_checklist }}
+
+Request description:
+{{ request_description|truncatechars:800 }}
+
+Open the staff workspace: {{ status_url }}

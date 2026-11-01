@@ -1,0 +1,52 @@
+# Python toolchain for a CI lane: uv, a managed Python 3.12, and the
+# environment uv.lock pins, in the checkout's `.venv`.
+#
+# A local composite action, not a reusable workflow: reusable workflows live in
+# PSD401/.github (psd-dev-standards standards/06), and a composite action runs
+# inside the caller's job, so the caller keeps its own `permissions`, checkout
+# and services. The caller must check out the repository first -- GitHub reads
+# this file from the checkout.
+#
+# The caller's workflow sets UV_PYTHON_PREFERENCE=only-managed; without it uv
+# prefers the runner's system 3.12, whose patch level differs from production.
+name: Set up Python dependencies
+description: Install uv and Python 3.12, then sync the locked environment.
+
+inputs:
+  include-dev:
+    description: >-
+      "true" installs the dev group (audit, coverage and mutation tooling);
+      "false" installs only what the production image runs.
+    required: false
+    default: "true"
+  sync:
+    description: >-
+      "false" installs uv and Python but no project environment, for a lane
+      that only needs `uv tool run` to reach a pinned standalone tool.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up uv
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+      with:
+        python-version: "3.12"
+        enable-cache: true
+
+    # `--locked` installs exactly what uv.lock pins and fails when uv.lock no
+    # longer matches pyproject.toml, so a drifted lockfile fails here instead
+    # of quietly testing versions production will not run. Later steps use
+    # `uv run --frozen` so they run this environment and never re-lock.
+    - name: Install dependencies from the lockfile
+      if: inputs.sync == 'true' && inputs.include-dev == 'true'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: uv sync --locked
+
+    - name: Install runtime dependencies from the lockfile
+      if: inputs.sync == 'true' && inputs.include-dev != 'true'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: uv sync --locked --no-dev

@@ -1,0 +1,690 @@
+# Continuous Integration jobs
+# Enforces the complete backend/frontend quality gates, including the static
+# GUI/agent capability-parity contract. ci.yml calls this workflow from a job
+# named `psd-ci`, so every check here reports as `psd-ci / <job name>` and the
+# combined gate at the bottom as `psd-ci / psd-ci`, the context the org
+# rulesets require (psd-dev-standards standards/06 §2). Triggers and
+# concurrency live in ci.yml.
+#
+# Speed budget (psd-dev-standards standards/05, CI shape): no PR check should
+# run much past five minutes. Three things keep it there -- the Django suite
+# runs as four shards by app label rather than one serial job, pull requests
+# run the Playwright smoke subset while nightly.yml runs every flow, and
+# coverage runs on CPython's own `sysmon` core rather than coverage.py's trace
+# core. A gate nobody waits for is a gate people route around.
+name: PSD CI jobs
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  PRR_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  # uv otherwise prefers the runner's system Python 3.12 (3.12.3 on
+  # ubuntu-latest), whose email header folding differs from the current 3.12
+  # in the production image. A uv-managed build tracks the latest 3.12 patch.
+  UV_PYTHON_PREFERENCE: "only-managed"
+  # psd-dev-standards standards/05 rule 4: patch coverage on changed lines.
+  # There is deliberately no project-coverage floor.
+  PRR_PATCH_COVERAGE_MINIMUM: "80"
+  # Pinned, because a static-analysis gate that changes rules under you is a
+  # gate that fails on a day nobody touched the infrastructure. Run through
+  # `uv tool run`, not uv.lock: Checkov pulls around a hundred packages that
+  # no other lane and nothing in the application needs.
+  #
+  # Only this top-level version is pinned; Checkov's transitive dependencies
+  # resolve per run. The blast radius of a compromised one is bounded on
+  # purpose: both lanes that run it declare `permissions: contents: read`,
+  # ci.yml passes no `secrets:` into this reusable workflow, and neither lane
+  # configures AWS or Google credentials. Read the repository, write nothing,
+  # reach no cloud account.
+  PRR_CHECKOV_VERSION: "3.3.29"
+
+jobs:
+  backend-audit:
+    name: Backend audits and quarantined tests
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    # Split out of the test shards so an advisory-database fetch never sits in
+    # front of the suite's result.
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python dependencies
+        uses: ./.github/actions/setup-python-deps
+
+      # The environment this audits was created from uv.lock, so this audits
+      # the locked versions -- including the transitive ones a manifest audit
+      # could only guess at -- on the same Linux platform production resolves.
+      - name: Audit the locked Python environment
+        run: uv run --frozen pip-audit
+
+      # `scripts` is in scope because the gate runners live there, matching the
+      # decision in pyproject.toml to count their lines against the coverage
+      # floor they enforce: a gate runner is not exempt from the gates.
+      - name: Scan backend source for security defects
+        run: uv run --frozen bandit -q -r apps config integrations/mcp integrations/cli infra/aws scripts -x apps/api/tests,apps/records/tests -ll
+
+      # psd-dev-standards standards/07-mcp.md build standard 6 asks for
+      # mcp-scan in CI. `inspect` is the half that needs no account: it boots
+      # the stdio server named in integrations/mcp/mcp-scan.json and
+      # enumerates its tools, so a server that no longer starts, or whose
+      # tool list cannot be read by a real MCP client, fails here rather
+      # than on somebody's workstation. `--ci` turns a start failure into a
+      # non-zero exit (failure code X001).
+      #
+      # The analysis half (prompt-injection and toxic-flow checks against
+      # Snyk's API) needs a SNYK_TOKEN secret, and this reusable workflow is
+      # called with no `secrets:` on purpose -- see the Checkov note in the
+      # `env:` block above. That half therefore lives in its own top-level
+      # workflow, .github/workflows/mcp-scan.yml.
+      #
+      # The pinned top-level version follows the same reasoning as
+      # PRR_CHECKOV_VERSION: a scanner that moves under the gate turns a
+      # green branch red on a day nobody touched the MCP server. Transitive
+      # versions float, bounded by this lane declaring only
+      # `contents: read` and configuring no cloud credentials.
+      - name: Enumerate MCP tools with Snyk Agent Scan (mcp-scan)
+        env:
+          PRR_MCP_SCAN_VERSION: "0.6.8"
+        run: >-
+          uv tool run "snyk-agent-scan==${PRR_MCP_SCAN_VERSION}"
+          inspect integrations/mcp/mcp-scan.json
+          --ci --no-skills --dangerously-run-mcp-servers
+          --suppress-mcpserver-io true --server-timeout 120
+
+      # FLAKY.md: a quarantined test keeps running so its owner can see it,
+      # but it may not block a merge. `continue-on-error` on the step (not the
+      # job) is what makes that unambiguous -- a failing step here leaves the
+      # job, and therefore the `psd-ci` gate, green.
+      - name: Run quarantined backend tests (non-gating)
+        continue-on-error: true
+        run: >-
+          uv run --frozen python manage.py test apps
+          --settings=config.test_settings
+          --tag=quarantine
+
+  backend-static:
+    name: Backend lint and typecheck
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    # Static analysis only: no database, no services. Separate from the test
+    # shards so a lint failure reports as a lint failure rather than hiding
+    # behind a suite that never got to run.
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python dependencies
+        uses: ./.github/actions/setup-python-deps
+
+      # psd-dev-standards standards/05 rule 2. `pyproject.toml` pins the exact
+      # ruff version, so this is the same linter every developer runs.
+      - name: Lint backend source
+        run: uv run --frozen ruff check .
+
+      # Rule 1. The tree does not typecheck clean yet, so the gate is a
+      # ratchet against `pyright-baseline.json` rather than a zero-error
+      # floor: no file may gain an error, and a file that loses one has to
+      # have the baseline rewritten in the same change.
+      - name: Typecheck backend source against the pyright baseline
+        run: uv run --frozen python scripts/pyright_baseline.py
+
+  backend:
+    name: Backend tests (${{ matrix.shard }})
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    # One shard of the suite, plus a cold uv cache, without allowing an
+    # effectively unbounded CI job.
+    timeout-minutes: 15
+    strategy:
+      # One shard's failure must not hide another's, or a fix loop takes as
+      # many pushes as there are broken shards.
+      fail-fast: false
+      matrix:
+        include:
+          - shard: correspondence
+            labels: apps.correspondence
+          - shard: api
+            labels: apps.api
+          - shard: records
+            labels: apps.records
+          - shard: rest
+            labels: apps.audit apps.configuration apps.integrations apps.work_queue
+
+    env:
+      # CPython 3.12's `sys.monitoring` coverage core. Measured on the
+      # `correspondence` shard: 101s uncovered, 164s under coverage.py's
+      # default trace core, 94s under sysmon -- that 60% tax was the whole
+      # reason a shard ran past the five-minute budget. It collects line
+      # coverage only, which is all `[tool.coverage.run]` asks for; turning
+      # `branch` on there would need this removed, and a contract test says so.
+      COVERAGE_CORE: sysmon
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python dependencies
+        uses: ./.github/actions/setup-python-deps
+
+      # `--exclude-tag=quarantine` is the Django half of the flaky policy in
+      # FLAKY.md: a quarantined test still runs, in the non-gating lane above,
+      # and does not block a merge.
+      - name: Run backend tests
+        run: >-
+          uv run --frozen coverage run manage.py test ${{ matrix.labels }}
+          --settings=config.test_settings
+          --exclude-tag=quarantine
+
+      - name: Upload shard coverage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: backend-coverage-${{ matrix.shard }}
+          overwrite: true
+          # coverage.py writes `.coverage.<host>.<pid>.<random>` in parallel
+          # mode, and a dotfile is excluded unless hidden files are included.
+          path: .coverage.*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  patch-coverage:
+    name: Patch coverage on changed lines
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - backend
+      - frontend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # The gate diffs against the base commit, which a shallow clone
+          # does not have.
+          fetch-depth: 0
+
+      - name: Set up Python dependencies
+        uses: ./.github/actions/setup-python-deps
+
+      - name: Download backend shard coverage
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7
+        with:
+          pattern: backend-coverage-*
+          merge-multiple: true
+          path: .verification/backend-coverage
+
+      - name: Download frontend coverage
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7
+        with:
+          name: frontend-coverage
+          path: .verification/frontend-coverage
+
+      - name: Combine backend shard coverage
+        run: |
+          uv run --frozen coverage combine .verification/backend-coverage
+          uv run --frozen coverage json -o .verification/backend-coverage.json
+
+      - name: Require patch coverage on changed lines
+        env:
+          PRR_PATCH_BASE: >-
+            ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          base="$PRR_PATCH_BASE"
+          # A first push, a force push, and a re-run can all hand us a ref the
+          # clone does not contain. The previous commit is the honest fallback
+          # on a branch push; failing closed here would block every merge.
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base="$(git rev-parse HEAD~1)"
+            echo "::warning::Patch coverage base $PRR_PATCH_BASE is not in this clone; measuring against $base instead."
+          fi
+          uv run --frozen python scripts/patch_coverage.py \
+            --base "$base" \
+            --minimum "$PRR_PATCH_COVERAGE_MINIMUM" \
+            --coverage .verification/backend-coverage.json \
+            --coverage .verification/frontend-coverage/coverage-final.json
+
+  postgres-concurrency:
+    name: PostgreSQL legal-workflow concurrency
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: prr_ci
+          POSTGRES_USER: prr_ci
+          POSTGRES_PASSWORD: prr-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U prr_ci -d prr_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PYTHON_DOTENV_DISABLED: "1"
+      PRR_CASEWORK_PERFORMANCE_DISPOSABLE: casework-performance-disposable
+      PRR_POSTGRES_TEST_DATABASE_URL: >-
+        postgresql://prr_ci:prr-ci-only@127.0.0.1:5432/prr_ci
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # `include-dev: false` leaves out the security tooling: this lane only
+      # runs tests.
+      - name: Set up Python dependencies
+        uses: ./.github/actions/setup-python-deps
+        with:
+          include-dev: false
+
+      - name: Run PostgreSQL legal-workflow and search contracts
+        run: |
+          uv run --frozen python manage.py test \
+            apps.api.tests.test_identity_config_concurrency \
+            apps.api.tests.test_personal_api_tokens_concurrency \
+            apps.api.tests.test_case_workspace_postgres \
+            apps.records.tests.test_lifecycle_authorization_concurrency \
+            apps.records.tests.test_automatic_record_advisory.AutomaticRecordAdvisoryTests.test_periodic_supervisor_backfills_precomputed_responsive_signal \
+            apps.api.tests.test_correspondence_search_postgres \
+            apps.configuration.tests.test_settings_concurrency \
+            apps.correspondence.tests.test_casework_fixture_command \
+            apps.correspondence.tests.test_inbound_concurrency \
+            apps.correspondence.tests.test_outbound_concurrency \
+            apps.correspondence.tests.test_search_projection_migration \
+            apps.work_queue.tests.test_concurrency \
+            --exclude-tag=quarantine \
+            --settings=config.postgres_test_settings
+          uv run --frozen python manage.py migrate --noinput \
+            --settings=config.casework_performance_settings
+          uv run --frozen python manage.py seed_casework_test_fixture \
+            --settings=config.casework_performance_settings
+          uv run --frozen python manage.py measure_casework_performance --runs 30 --output .verification/casework-performance.json \
+            --source-sha "$PRR_SOURCE_SHA" \
+            --settings=config.casework_performance_settings
+
+      - name: Upload PostgreSQL performance evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: casework-postgresql-performance
+          path: .verification/casework-performance.json
+          if-no-files-found: error
+          retention-days: 14
+
+  frontend:
+    name: Frontend test, lint, and build
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # No Python here any more: the E2E server moved to the `acceptance` job
+      # with the Playwright flows it serves.
+      - name: Set up Bun dependencies
+        uses: ./.github/actions/setup-bun-deps
+        with:
+          bun-version: "1.2.x"
+          working-directory: frontend
+
+      - name: Audit production frontend dependencies
+        run: bun audit --production
+
+      - name: Run frontend tests with coverage
+        run: bun run test:coverage
+
+      - name: Run frontend lint
+        run: bun run lint
+
+      - name: Build production frontend
+        run: bun run build
+
+      - name: Upload frontend coverage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: frontend-coverage
+          overwrite: true
+          path: .verification/frontend-coverage/coverage-final.json
+          if-no-files-found: error
+          retention-days: 7
+
+  acceptance:
+    name: Playwright smoke acceptance
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # `uv sync` puts the environment in the checkout's `.venv`, which is
+      # where `scripts/prr-python.sh` -- and so the acceptance runner below --
+      # looks for the interpreter.
+      - name: Set up Python dependencies
+        uses: ./.github/actions/setup-python-deps
+        with:
+          include-dev: false
+
+      - name: Set up Bun dependencies
+        uses: ./.github/actions/setup-bun-deps
+        with:
+          bun-version: "1.2.x"
+          working-directory: frontend
+          install-playwright: true
+
+      # The smoke subset gates the merge; nightly.yml runs every flow
+      # (psd-dev-standards standards/05 rule 5).
+      - name: Run Playwright acceptance flows
+        run: bash scripts/run-casework-acceptance.sh --smoke
+
+      # Quarantined flows still run, and still may not block a merge
+      # (FLAKY.md). The step's own failure is swallowed on purpose.
+      - name: Run quarantined Playwright flows
+        continue-on-error: true
+        run: bash scripts/run-casework-acceptance.sh --quarantine
+
+      - name: Upload Playwright acceptance evidence
+        if: success()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: playwright-acceptance-evidence
+          path: |
+            .verification/*.png
+            .verification/axe-report.json
+            .verification/playwright-results.json
+            .verification/playwright-results
+            .verification/playwright-report
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Playwright failure evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: playwright-failure-evidence
+          path: |
+            .verification/playwright-results
+            .verification/playwright-results.json
+            .verification/playwright-report
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+  infrastructure:
+    name: CDK tests and credential-free synth
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: infra/cdk
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Bun dependencies
+        uses: ./.github/actions/setup-bun-deps
+        with:
+          bun-version: "1.3.x"
+          working-directory: infra/cdk
+
+      # The deploy asset carries the built staff workspace, and the hosting
+      # stack test proves the deployment's page validator accepts that real
+      # page and rejects a fallback one. Without this build the test reads a
+      # missing frontend/dist/index.html and fails on the environment rather
+      # than on the deployment script.
+      - name: Build the staff workspace the deployment ships
+        working-directory: frontend
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Typecheck CDK app
+        run: bun run typecheck
+
+      - name: Run CDK stack tests
+        run: bun test
+
+      # No AWS credentials are configured for this job on purpose. The AMI
+      # lookup is cached in the committed cdk.context.json, so a synth that
+      # needs credentials here is a regression.
+      #
+      # This step is also where cdk-nag runs: the v3 AwsSolutions pack is
+      # registered with Validations.of(app) in lib/app.ts, so an
+      # unacknowledged ERROR-level finding fails synthesis here.
+      - name: Synthesize both stacks without AWS credentials
+        run: bunx cdk synth --quiet
+
+      # uv only, no project environment: this lane runs one pinned standalone
+      # tool and never imports the application.
+      - name: Set up uv for the pinned Checkov
+        uses: ./.github/actions/setup-python-deps
+        with:
+          sync: "false"
+
+      # The second layer of psd-dev-standards standards/08's guardrail model:
+      # a different engine, over the synthesized templates rather than the CDK
+      # source, so a rule cdk-nag does not carry still blocks. Suppressions
+      # are per resource, in Metadata.checkov.skip with their evidence
+      # (lib/suppressions.ts); nothing is skipped repository-wide.
+      - name: Check the synthesized templates with Checkov
+        working-directory: ${{ github.workspace }}
+        run: >-
+          uv tool run --from "checkov==${PRR_CHECKOV_VERSION}" checkov
+          --directory infra/cdk/cdk.out
+          --framework cloudformation
+          --compact
+          --quiet
+
+  terraform:
+    name: Terraform fmt, validate, lint, and Checkov
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra/terraform/google-identity
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # `terraform_wrapper: false` because the wrapper script swallows the
+      # exit code the steps below are checked on.
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3
+        with:
+          terraform_version: "1.16.5"
+          terraform_wrapper: false
+
+      # Exact version and the SHA-256 of its linux_amd64 release zip, from the
+      # project's checksums.txt: without them the action installs `latest`
+      # and extracts whatever the download returned. The action hashes the
+      # zip before extracting it.
+      - name: Set up TFLint
+        uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337  # v6.3.2
+        with:
+          tflint_version: v0.64.0
+          checksums: cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537
+
+      - name: Set up uv for the pinned Checkov
+        uses: ./.github/actions/setup-python-deps
+        with:
+          sync: "false"
+
+      # standards/08 CI order: fmt, validate, tflint, then Checkov. `plan` is
+      # deliberately absent: it needs Google credentials and write access to
+      # the S3 state backend, neither of which this repository has an OIDC
+      # role for yet. Deployment is tracked separately from #297, and a lane
+      # that cannot plan must not pretend it did.
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      # No backend: `terraform init` would otherwise try to reach the S3 state
+      # bucket, which this job has no credentials for and does not need in
+      # order to validate the configuration.
+      - name: Initialize providers without the state backend
+        run: terraform init -backend=false -input=false
+
+      - name: Validate the configuration
+        run: terraform validate
+
+      # TFLint downloads the google ruleset .tflint.hcl pins; the token is for
+      # the GitHub API rate limit on that download, nothing else.
+      - name: Install the TFLint rulesets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: tflint --init
+
+      - name: Lint
+        run: tflint
+
+      # Suppressions are inline `checkov:skip` comments on the resource they
+      # concern, each with its evidence; nothing is skipped root-wide.
+      - name: Check the configuration with Checkov
+        run: >-
+          uv tool run --from "checkov==${PRR_CHECKOV_VERSION}" checkov
+          --directory .
+          --framework terraform
+          --compact
+          --quiet
+
+  deployment-compose:
+    name: Deployment compose overlays
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Compose refuses to render without the immutable release-image input.
+      # CI validates structure only; production supplies its reviewed SHA tag.
+      PRR_RELEASE_IMAGE: psd401-prr:ci
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # Compose interpolates every file it is given before merging them, so a
+      # value missing from one deployment's overlay breaks the other's parse.
+      - name: Validate both object-store overlays
+        env:
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_APP_PASSWORD: ci-only
+          MINIO_ROOT_USER: ci-only
+          MINIO_ROOT_PASSWORD: ci-only
+          MINIO_APP_PASSWORD: ci-only
+          OBJECT_STORE_BUCKET: psd401-prr-records-ci
+          PRR_HOSTNAME: prr.example.invalid
+          ACME_EMAIL: ci@example.invalid
+        run: |
+          touch .env .env.app
+          docker compose -f docker-compose.deploy.yml -f docker-compose.minio.yml config -q
+          docker compose -f docker-compose.deploy.yml -f docker-compose.aws.yml config -q
+
+      # The AWS host has no MinIO and no MinIO credential. Proving the base
+      # file parses without one is the check that keeps a `${MINIO_...:?}` from
+      # creeping back into it, where interpolation would break production
+      # before any overlay got a chance to merge.
+      - name: Prove the AWS overlay needs no MinIO credential
+        env:
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_APP_PASSWORD: ci-only
+          OBJECT_STORE_BUCKET: psd401-prr-records-prod
+          PRR_HOSTNAME: prr.psd401.net
+          ACME_EMAIL: ci@example.invalid
+        run: |
+          touch .env .env.app
+          docker compose -f docker-compose.deploy.yml -f docker-compose.aws.yml config -q
+
+      - name: Check deployment shell scripts
+        run: |
+          shellcheck --version
+          shellcheck \
+            scripts/run-casework-acceptance.sh \
+            infra/aws/run-app-backup.sh \
+            infra/aws/verify-app-backup-restore.sh \
+            infra/aws/install-app-backup.sh
+
+  # The combined gate: reported as `psd-ci / psd-ci` through ci.yml's caller
+  # job. The org reusable can't run this repository's gates, so this job
+  # stands for the jobs above. It runs even when one of them fails, so a
+  # failure reports as a failure rather than a skipped check.
+  #
+  # Quarantined tests are not represented here on purpose: they run as
+  # non-gating steps inside `backend-audit` and `acceptance` (FLAKY.md).
+  psd-ci:
+    name: psd-ci
+    permissions: {}
+    if: always()
+    needs:
+      - backend-audit
+      - backend-static
+      - backend
+      - patch-coverage
+      - postgres-concurrency
+      - frontend
+      - acceptance
+      - infrastructure
+      - terraform
+      - deployment-compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every CI job to succeed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "CI job results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::A CI job did not succeed ($result)."
+              exit 1
+            fi
+          done

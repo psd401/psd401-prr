@@ -1,0 +1,51 @@
+# gitleaks baseline: historical findings reviewed 2026-10-09 (Hagel). One fingerprint per line.
+# New findings are NOT covered: anything not listed here still fails security-scan.
+#
+# False positives: test fixtures (21 in apps/events/tests/test_events.py), a storage-key path in
+# apps/correspondence/models.py, and the curl example shown in frontend/src/pages/AgentAccess.tsx.
+1db3232f34b15cd136c0773fb313ace9cf7bd5c6:frontend/src/pages/DestructiveActions.repro.test.tsx:generic-api-key:177
+503cdac5ddb2e6fefc5239e6c37062060a27939a:apps/records/tests/test_migrations.py:generic-api-key:77
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:172
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:198
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:218
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:246
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:273
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:322
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:349
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:371
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:398
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:423
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:451
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:481
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:511
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:535
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:557
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:574
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:787
+51e4a38234573cc60c7002b5bd46eaa67576f69a:apps/events/tests/test_events.py:generic-api-key:95
+6ec37e50117a1ee702d7879aa978960cd137e374:apps/correspondence/tests/test_models.py:generic-api-key:883
+77ae955f755ae12842363669495ea2596e66cedb:frontend/src/pages/IdentitySettings.test.tsx:generic-api-key:149
+77ae955f755ae12842363669495ea2596e66cedb:frontend/src/pages/IdentitySettings.test.tsx:generic-api-key:51
+92dc72b34afc52a45e4133c5cc26aa2a7b2bf842:apps/api/tests/test_webhooks.py:generic-api-key:107
+99f55f27d416da6fbb1e4d50b4a0d7a464179955:apps/correspondence/models.py:generic-api-key:2913
+99f55f27d416da6fbb1e4d50b4a0d7a464179955:apps/correspondence/tests/test_inbound_integration_api.py:generic-api-key:145
+99f55f27d416da6fbb1e4d50b4a0d7a464179955:apps/correspondence/tests/test_inbound_migrations.py:generic-api-key:134
+99f55f27d416da6fbb1e4d50b4a0d7a464179955:apps/correspondence/tests/test_inbound_migrations.py:generic-api-key:78
+99f55f27d416da6fbb1e4d50b4a0d7a464179955:apps/correspondence/tests/test_secure_file_pipeline.py:generic-api-key:204
+99f55f27d416da6fbb1e4d50b4a0d7a464179955:apps/correspondence/tests/test_secure_file_pipeline.py:generic-api-key:230
+a78a4b8d65cd24e10acafe2201238144ae236c10:apps/events/tests/test_events.py:generic-api-key:110
+a78a4b8d65cd24e10acafe2201238144ae236c10:apps/events/tests/test_events.py:generic-api-key:187
+a78a4b8d65cd24e10acafe2201238144ae236c10:apps/events/tests/test_events.py:generic-api-key:802
+fbb6bc6eaaf03d46b10a88d60726f626145ad8c2:frontend/src/pages/AgentAccess.tsx:curl-auth-header:205
+
+# Student-email rule (org, 2026-10-10): a sequential-digit placeholder address in
+# apps/records/tests/test_vault_custodian_metadata.py fixtures, not a student. Reviewed 2026-10-10 (Hagel).
+2f3c021f297512509add774bc4c94ec623276ed4:apps/records/tests/test_vault_custodian_metadata.py:psd-student-numeric-email:594
+2f3c021f297512509add774bc4c94ec623276ed4:apps/records/tests/test_vault_custodian_metadata.py:psd-student-numeric-email:967
+bbabd4e60fd9812125b2d7eb11f031d966384317:apps/records/tests/test_vault_custodian_metadata.py:psd-student-numeric-email:167
+bbabd4e60fd9812125b2d7eb11f031d966384317:apps/records/tests/test_vault_custodian_metadata.py:psd-student-numeric-email:288
+bbabd4e60fd9812125b2d7eb11f031d966384317:apps/records/tests/test_vault_custodian_metadata.py:psd-student-numeric-email:396
+bbabd4e60fd9812125b2d7eb11f031d966384317:apps/records/tests/test_vault_custodian_metadata.py:psd-student-numeric-email:411
+bbabd4e60fd9812125b2d7eb11f031d966384317:apps/records/tests/test_vault_custodian_metadata.py:psd-student-numeric-email:503
+bbabd4e60fd9812125b2d7eb11f031d966384317:apps/records/tests/test_vault_custodian_metadata.py:psd-student-numeric-email:527
+bbabd4e60fd9812125b2d7eb11f031d966384317:apps/records/tests/test_vault_custodian_metadata.py:psd-student-numeric-email:550

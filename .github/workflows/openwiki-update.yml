@@ -1,0 +1,22 @@
+name: OpenWiki Update
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    # The auto-merged docs PR only touches openwiki/; don't rebuild for it.
+    # (The reusable also skips wiki-only pushes; this saves starting a run.)
+    paths-ignore:
+      - "openwiki/**"
+  schedule:
+    - cron: "0 8 * * 1"
+jobs:
+  openwiki:
+    permissions:
+      contents: read # the reusable only reads with GITHUB_TOKEN; writes use the psd-automation App
+      pull-requests: read
+    uses: PSD401/.github/.github/workflows/reusable-openwiki.yml@8c4dbb4e6ae79345ec5f56a96de522e9528e3fb4 # v1.1.0
+    with:
+      base_branch: main
+    secrets:
+      BEDROCK_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
+      PSD_AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.PSD_AUTOMATION_APP_PRIVATE_KEY }}

@@ -1,0 +1,5 @@
+URGENT: Request {{ request_number }} covers camera footage from {{ window_start|date:"Y-m-d H:i" }} to {{ window_end|date:"Y-m-d H:i" }}.
+
+The Alta API is unavailable ({{ failure }}). In Alta Aware, create saved clips for that window on ALL cameras immediately. Saved clips persist beyond the {{ camera_retention_days }}-day rolling retention period. Reply through the district's operational process when the manual hold is complete.
+
+Open the staff workspace: {{ status_url }}

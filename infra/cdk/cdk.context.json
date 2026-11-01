@@ -1,0 +1,3 @@
+{
+  "ssm:account=338414773271:parameterName=/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id:region=us-west-2": "ami-0ac74609c6396bed3"
+}

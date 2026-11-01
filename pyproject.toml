@@ -1,0 +1,206 @@
+[project]
+name = "psd401-prr"
+version = "0.1.0"
+description = "Public Records Act request management for Peninsula School District No. 401"
+# The Docker image is python:3.12-slim and CI runs 3.12. Pinning the minor
+# version here keeps `uv sync` from quietly building a local environment on a
+# newer interpreter than production ever runs.
+requires-python = "==3.12.*"
+dependencies = [
+    "Django>=6.0.7,<6.1",
+    "djangorestframework>=3.18.1",
+    "defusedxml>=0.7.1",
+    "psycopg[binary]>=3.3.6",
+    "celery[redis]>=5.6.3",
+    "redis>=6.4,<6.5",
+    "django-celery-beat>=2.9.0",
+    "boto3>=1.43.98",                  # S3 / MinIO object storage
+    "cryptography>=46.0.4",            # Fernet at-rest encryption for stored setting secrets
+    "google-api-python-client>=2.200.0",
+    "google-auth>=2.58.0",
+    "google-cloud-storage>=3.14.1",    # download Vault exports
+    "PyMuPDF>=1.28.2,<2",              # deterministic PDF preview rendering and burn-in
+    "ocrmypdf>=17.12.1,<18",           # searchable PDF normalization via Tesseract
+    "holidays>=0.104",                 # WA holiday calendar
+    "python-dotenv>=1.2.3",
+    "gunicorn>=26.2.0",
+    "uvicorn[standard]>=0.53.0",
+    "whitenoise>=6.12.0",
+    "mcp>=1.29.1,<2",
+    "requests>=2.34.2",
+    "httpx>=0.28.1,<1",
+    "drf-spectacular>=0.30.0",
+    "mozilla-django-oidc>=5.0.2,<6.0",
+]
+
+# Test-quality and security tooling. `uv sync` installs these by default, so
+# the backend lane gets them from the same lockfile it tests against; the
+# production image runs `uv sync --no-dev` and ships none of it. Nothing here
+# is imported by application code, but the test suite does import hypothesis,
+# so a `--no-dev` environment cannot run the backend suite.
+[dependency-groups]
+dev = [
+    "bandit>=1.9.2",
+    "pip-audit>=2.9.0",
+    "coverage>=7.16.2",            # patch-coverage gate (scripts/patch_coverage.py)
+    "hypothesis>=6.169.1",         # property tests for the RCW 42.56.520 engine
+    # Mutation testing, run on a schedule rather than on the merge path.
+    # Pinned below 3.0 deliberately: mutmut 3.x dropped `--runner` and only
+    # drives pytest, while this suite runs under the Django test runner.
+    # Verified against mutmut's own CLI source for 2.5 and 3.8. Without
+    # `--runner`, .github/workflows/mutation-testing.yml has nothing to run.
+    "mutmut>=2.5,<3",
+    # Lint and typecheck (psd-dev-standards standards/05 rules 1-2). Both are
+    # pinned to an exact version rather than a floor: a linter or a type
+    # checker that moves under the gate turns somebody else's green branch
+    # red, and the pyright baseline in `pyright-baseline.json` is only
+    # comparable against the version that produced it. Upgrading either is a
+    # deliberate commit that re-runs the gate.
+    "ruff==0.17.3",
+    "pyright==1.1.414",
+    # Without these, pyright reads every Django model manager and DRF
+    # serializer as untyped: 9,083 errors against 1,848 with them. They are
+    # type information only and nothing imports them at runtime.
+    "django-stubs==6.1.2",
+    "djangorestframework-stubs==3.18.1",
+]
+
+[tool.uv]
+# This repository is a Django project, not an installable distribution: there
+# is no package to build and `manage.py` is run from the checkout. `uv sync`
+# therefore installs dependencies only.
+package = false
+# Older uv writes an older lockfile revision, so the floor is the version that
+# produced the committed `uv.lock`. uv itself enforces this on every
+# invocation; it is not a version `astral-sh/setup-uv` resolves from (the
+# action pins a version only from an exact `required-version`, and CI
+# deliberately takes the current uv instead).
+required-version = ">=0.13.1"
+
+[tool.coverage.run]
+# No `branch = true`. Both the CI shards and `verify-fast.sh --patch-coverage`
+# run under `COVERAGE_CORE=sysmon`, CPython 3.12's own coverage core, which
+# measures lines only and is what keeps instrumentation inside the five-minute
+# CI budget (94s versus 164s on the correspondence shard). Branch coverage
+# would mean dropping back to the slow trace core; `test_quality_gates.py`
+# fails if the two settings ever disagree.
+#
+# Parallel because the backend suite runs as four concurrent shards, locally
+# (scripts/verify-fast.sh) and in CI; each writes its own .coverage.<id> and
+# `coverage combine` merges them.
+parallel = true
+# Every directory holding application Python. `scripts` is in here because the
+# gate runners live there: patch_coverage.py and mutation_score.py decide
+# whether a change may merge, so their own lines are not exempt from the floor
+# they enforce. `infra/aws` holds the backup manifest, which bandit scans and
+# test_backup_system.py exercises.
+source = ["apps", "config", "integrations", "scripts", "infra/aws"]
+omit = [
+    "*/migrations/*",
+    "*/tests/*",
+    "*/tests.py",
+    "*/test_*.py",
+    "manage.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+# No project-percentage floor on purpose: psd-dev-standards standards/05 rule 4
+# gates on patch coverage, because a project number is gameable and punishes a
+# change that touches a long-untested file. See scripts/patch_coverage.py.
+
+# ---------------------------------------------------------------------------
+# ruff: the Python linter half of psd-dev-standards standards/05 rules 1-2.
+# The select list is explicit rather than inherited from ruff's defaults so a
+# ruff upgrade cannot silently widen or narrow the gate between two commits.
+[tool.ruff]
+target-version = "py312"
+# Migrations are generated by `makemigrations`; reformatting them by hand is
+# churn Django will undo on the next model change.
+extend-exclude = ["*/migrations/*"]
+
+[tool.ruff.lint]
+select = [
+    "F",      # pyflakes: real defects (undefined names, unused imports)
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "I",      # import ordering
+    "UP",     # pyupgrade: syntax this interpreter supersedes
+    "B",      # bugbear: likely bugs
+    "C4",     # comprehension clarity
+    "SIM",    # simplifications
+    "RET",    # return-path clarity
+    "PERF",   # obvious performance mistakes
+    "LOG",    # logging misuse
+    "G",      # logging call shape
+    "ISC",    # implicit string concatenation (a missing comma reads as one)
+    "FLY",    # static string joins
+    "FURB",   # modern-stdlib refurbishment
+    "BLE",    # blind excepts
+    "EXE",    # shebang/permission mismatches
+    "PYI",    # stub-file and annotation shape
+    "RUF",    # ruff's own checks
+]
+ignore = [
+    # The formatter is not run over this repository, so line length is not
+    # machine-maintained and E501 would only generate noise.
+    "E501",
+    # Django and DRF declare class-level configuration as plain mutable
+    # literals (`fields = [...]`, `permission_classes = [...]`, `Meta`
+    # attributes). RUF012 wants ClassVar on every one of them, which is 445
+    # annotations that teach a reader nothing.
+    "RUF012",
+    # `contextlib.suppress(Exception)` hides the catch from BLE001, and the
+    # catches this rule points at are exactly the fail-closed ones that have
+    # to stay visible and carry their reason next to the exception.
+    "SIM105",
+]
+# Everything else that does not apply is turned off per line, at the site,
+# with the reason -- or per file below, where a whole file is the exception.
+# A rule switched off repository-wide to excuse eight places stops guarding
+# the other nine hundred.
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert on error paths and build fixtures; two checks aimed at
+# production code are noise there.
+"**/test_*.py" = ["B017", "SIM117"]
+"**/tests/*.py" = ["B017", "SIM117"]
+# Exemption titles, RCW citations, requester-facing letter bodies and the
+# test fixtures that quote them are legal artifacts reproduced verbatim, en
+# dashes and curly quotes included. RUF001-003 would have the linter ask for
+# those characters to be rewritten, which would change what the record says.
+# Scoped to the files that carry that text, so an en dash arriving by
+# mojibake anywhere else is still a finding.
+"apps/api/capabilities.py" = ["RUF001"]
+"apps/api/tests/test_exemptions.py" = ["RUF001"]
+"apps/api/tests/test_records_misc.py" = ["RUF001"]
+"apps/correspondence/tests/test_delivery_notifications.py" = ["RUF001"]
+"apps/correspondence/tests/test_mime_security.py" = ["RUF001"]
+"apps/correspondence/tests/test_models.py" = ["RUF001"]
+"apps/correspondence/tests/test_services.py" = ["RUF001"]
+"apps/records/models.py" = ["RUF001", "RUF003"]
+"apps/records/management/commands/seed_exemptions.py" = ["RUF002"]
+"apps/records/tests/test_deadlines_properties.py" = ["RUF003"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "config", "integrations", "scripts"]
+
+# ---------------------------------------------------------------------------
+# pyright: the Python typecheck half of psd-dev-standards standards/05 rule 1.
+#
+# The tree does not pass clean, and will not for a while: 1,848 errors on the
+# commit that introduced this, nearly all of them django-stubs not modelling
+# a reverse accessor or a test-client keyword. A gate that fails on every
+# branch is a gate people route around, so `scripts/pyright_baseline.py`
+# compares per-file counts against the committed `pyright-baseline.json` and
+# fails on any increase. Removing errors is expected; the baseline is
+# rewritten in the same commit that removes them, which is how the number
+# ratchets down. See `docs/development.md`.
+[tool.pyright]
+include = ["apps", "config", "integrations", "scripts", "infra/aws", "manage.py"]
+# Migrations are generated, and the virtualenv is not this repository's code.
+exclude = ["**/migrations", "**/node_modules", "**/__pycache__", ".venv"]
+pythonVersion = "3.12"
+# `uv sync` puts the environment here, and pyright needs it to see Django.
+venvPath = "."
+venv = ".venv"

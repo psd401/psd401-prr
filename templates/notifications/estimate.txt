@@ -1,0 +1,6 @@
+Request {{ request_number }} has an estimated completion date of {{ estimated_completion }}.
+
+Alert level: {{ level }}
+Review production progress and either produce records or have an accountable human prepare a substantive estimate revision.
+
+Open the staff workspace: {{ status_url }}

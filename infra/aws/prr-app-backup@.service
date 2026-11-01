@@ -1,0 +1,38 @@
+# ABOUTME: Runs one app-layer backup with tightly scoped host access.
+# ABOUTME: The instance name selects the non-secret deployment environment.
+[Unit]
+Description=PSD401 PRR app-layer backup (%i)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+SupplementaryGroups=docker
+WorkingDirectory=/srv/prr/app
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/aws-cli/current/bin:/snap/bin
+Environment=DOCKER_CONFIG=/tmp/prr-docker-config
+Environment=PRR_ENVIRONMENT=%i
+Environment=PRR_BACKUP_BUCKET=psd401-prr-backups-%i
+Environment=PRR_PROJECT_DIR=/srv/prr/app
+Environment=PRR_BACKUP_STATE_DIR=/srv/prr/backups
+Environment=PRR_BACKUP_HELPER=/usr/local/lib/prr-backup/backup_manifest.py
+ExecStart=/usr/local/sbin/prr-run-app-backup
+TimeoutStartSec=2h
+SuccessExitStatus=75
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/srv/prr/app
+ReadWritePaths=/srv/prr/backups /var/run/docker.sock

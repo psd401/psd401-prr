@@ -1,0 +1,30 @@
+{# RCW 42.56.120(2) non-payment closure. Counsel review is required before production use. #}
+{% autoescape off %}
+Subject: Public Records Request {{ request.number }} — Closed for Non-Payment
+
+Dear {{ request.requester.name|default:"Requester" }},
+
+Peninsula School District is closing public records request {{ request.number }},
+received {{ request.received_at|date:"F j, Y" }}, because the payment the
+District requested was not received.
+
+You requested:
+
+"{{ request.description }}"
+
+The District requested {{ amount_due }} on {{ payment_requested_on|date:"F j, Y" }}
+and has not received it. Under RCW 42.56.120(2) the District may stop
+fulfilling a request when a requester does not pay a fee, deposit, or
+installment charge.
+
+Closing this request does not prevent you from making a new request for the
+same records, and any payment you make after this date will be returned rather
+than applied to this closed request.
+
+If you believe this is in error, contact the Public Records Officer at
+{{ pra_officer_email }}.
+
+Sincerely,
+Public Records Officer
+Peninsula School District No. 401
+{% endautoescape %}

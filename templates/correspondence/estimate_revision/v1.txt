@@ -1,0 +1,26 @@
+{# Estimate revision. Counsel review is required before production use. #}
+{% autoescape off %}
+Subject: Public Records Request {{ request.number }} — Revised Time Estimate
+
+Dear {{ request.requester.name|default:"Requester" }},
+
+This letter updates the District's estimate for your public records
+request {{ request.number }}.
+
+{% if previous_date %}Previous estimated completion: {{ previous_date|date:"F j, Y" }}
+{% endif %}Revised estimated completion: {{ new_date|date:"F j, Y" }}
+
+Reason for the revision: {{ reason }}
+
+The District continues to work on your request and will provide records
+in installments as they become available. You may track status at:
+{{ status_url }}
+
+If you have questions or wish to discuss narrowing the request (which may
+allow faster production), contact the Public Records Officer at
+{{ pra_officer_email }}.
+
+Sincerely,
+Public Records Officer
+Peninsula School District No. 401
+{% endautoescape %}

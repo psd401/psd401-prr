@@ -1,0 +1,5 @@
+Request {{ request_number }} has had no substantive activity since {{ last_activity|date:"Y-m-d" }} ({{ stalled_days }} days).
+
+It has {{ revision_count }} estimate revision(s). The configured stall threshold is {{ stall_threshold_days }} days. Review production, prepare a reasoned human estimate revision, or close the request through the normal accountable workflow.
+
+Open the staff workspace: {{ status_url }}

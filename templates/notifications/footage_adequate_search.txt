@@ -1,0 +1,5 @@
+Request {{ request_number }} asks for footage outside the configured {{ camera_retention_days }}-day rolling window ({{ window_start|date:"Y-m-d" }} through {{ window_end|date:"Y-m-d" }}).
+
+Human review and an adequate search are required. Check incident holds, prior exports or saved clips, email and Drive copies, and SRO/front-office copies before deciding or drafting a response. No requester response has been generated.
+
+Open the staff workspace: {{ status_url }}

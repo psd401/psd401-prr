@@ -1,0 +1,5 @@
+#!/bin/bash
+S="${REHEARSAL_STATE:?}"
+echo "aws $*" >> "$S/calls.log"
+echo "rehearsal: unexpected AWS call (release should already be staged): $*" >&2
+exit 1

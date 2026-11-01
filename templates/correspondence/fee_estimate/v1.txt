@@ -1,0 +1,43 @@
+{# RCW 42.56.120 copying-fee estimate and deposit request. Counsel review is required before production use. #}
+{% autoescape off %}
+Subject: Public Records Request {{ request.number }} — Estimated Copying Charge
+
+Dear {{ request.requester.name|default:"Requester" }},
+
+Peninsula School District has estimated the copying charge for public records
+request {{ request.number }}, received {{ request.received_at|date:"F j, Y" }}.
+
+You requested:
+
+"{{ request.description }}"
+
+Estimated charge: {{ estimated_amount }}
+
+How the District arrived at that figure:
+
+{{ estimate_basis }}
+
+This charge is calculated from the District's adopted fee schedule under
+RCW 42.56.120. It covers the cost of copying the records only. The District
+does not charge you for the time its staff spend locating, reviewing, or
+preparing records, and it is not a charge for inspecting them.
+{% if deposit_amount %}
+Before the District does that copying work it asks for a deposit of
+{{ deposit_amount }}. RCW 42.56.120(2) allows a deposit of up to ten
+percent of the estimated charge. The deposit is applied to the charge; it is
+not an additional cost. The District will hold work on this request until the
+deposit is received.
+{% endif %}
+To pay, contact the Public Records Officer at {{ pra_officer_email }} and the
+District will confirm the payment methods it accepts and where to send
+payment. Tell us in the same message if you would like to narrow the request
+to reduce the charge, or to inspect the records instead.
+
+If the District does not hear from you, it may stop work on this request and
+may close it under RCW 42.56.120(2). The District will write to you before it
+does so.
+
+Sincerely,
+Public Records Officer
+Peninsula School District No. 401
+{% endautoescape %}

@@ -1,0 +1,68 @@
+/* ABOUTME: Tailwind entry + PSD brand design tokens and typography.
+   Source Sans keeps dense staff UI legible; Source Serif is an editorial accent. */
+@import "tailwindcss";
+
+@theme {
+  --color-pacific: #25424c;
+  --color-seaglass: #6ca18a;
+  --color-driftwood: #d7cdbe;
+  --color-cedar: #466857;
+  --color-whulge: #346780;
+  --color-seafoam: #eeebe4;
+  --color-meadow: #5d9068;
+  --color-ocean: #7396a9;
+  --color-skylight: #fffaec;
+
+  --font-heading: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  --font-editorial: "Source Serif 4", ui-serif, Georgia, serif;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--color-seafoam);
+  color: var(--color-pacific);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  letter-spacing: -0.018em;
+}
+
+button, input, select, textarea {
+  font: inherit;
+}
+
+::selection {
+  background-color: color-mix(in srgb, var(--color-seaglass) 35%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  dialog,
+  [role='alert'],
+  [aria-current='page'],
+  [aria-pressed='true'] {
+    forced-color-adjust: auto;
+  }
+}

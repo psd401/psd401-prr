@@ -1,0 +1,7 @@
+The hourly mailbox reconciliation found {{ recovered }} message(s) the minute poller never received, and received them now.
+
+Gmail message ids: {% for message_id in message_ids %}{{ message_id }}{% if not forloop.last %}, {% endif %}{% endfor %}
+
+Each is now in the staff Inbox, or opened a case, exactly as if the poller had received it on time. Check their receipt dates: a request inside one has been on the statutory clock since it arrived, not since now.
+
+Open the staff Inbox: {{ inbox_url }}

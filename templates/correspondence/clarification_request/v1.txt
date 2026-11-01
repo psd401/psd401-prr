@@ -1,0 +1,21 @@
+{# RCW 42.56.520 clarification request. Counsel review is required before production use. #}
+{% autoescape off %}
+Subject: Public Records Request {{ request.number }} — Clarification Needed
+
+Dear {{ request.requester.name|default:"Requester" }},
+
+Peninsula School District received your public records request
+({{ request.number }}) on {{ request.received_at|date:"F j, Y" }}. To
+identify responsive records, the District requests clarification:
+
+{{ clarification_questions }}
+
+Please respond by {{ clarification_due|date:"F j, Y" }}. Under
+RCW 42.56.520, the time to respond is measured from receipt of your
+clarification. If no response is received, the District will respond to
+the portions of the request that are clear, and may close the remainder.
+
+Sincerely,
+Public Records Officer
+Peninsula School District No. 401
+{% endautoescape %}
