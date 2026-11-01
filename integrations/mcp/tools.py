@@ -329,9 +329,15 @@ def create_mcp_server(
                 idempotent=False,
             ),
         )
+        # ``ctx`` leads here rather than trailing as it does on the tools
+        # whose parameters are all required: one optional parameter means a
+        # trailing ``ctx`` would follow a default, which Python forbids. This
+        # matches the read tools, which also put it first for that reason.
+        # FastMCP keys its argument model by name and drops ``ctx``, so the
+        # position changes no part of the published schema.
         async def draft_acknowledgment(
-            request_number: str,
             ctx: Context,
+            request_number: str,
             estimated_completion: str | None = None,
         ) -> dict:
             """Create the RCW 42.56.520 acknowledgment draft for one request
