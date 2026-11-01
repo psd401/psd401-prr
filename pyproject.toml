@@ -49,7 +49,7 @@ dev = [
     # drives pytest, while this suite runs under the Django test runner.
     # Verified against mutmut's own CLI source for 2.5 and 3.8. Without
     # `--runner`, .github/workflows/mutation-testing.yml has nothing to run.
-    "mutmut>=2.5,<3",
+    "mutmut>=2.5,<4",
     # Lint and typecheck (psd-dev-standards standards/05 rules 1-2). Both are
     # pinned to an exact version rather than a floor: a linter or a type
     # checker that moves under the gate turns somebody else's green branch
