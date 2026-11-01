@@ -527,7 +527,7 @@ client remain available and retain their existing authorization boundaries.
 
 ## (c) MCP server
 
-Hosted `/mcp` exposes exactly three attributed personal-token draft/proposal
+Hosted `/mcp` exposes exactly four attributed personal-token draft/proposal
 tools; standalone stdio and the shared nonstaff MCP identity remain read-only.
 
 `integrations/mcp/` is an MCP facade (`PRRClient`) over the staff API from
@@ -555,14 +555,16 @@ is the number to report, while `count` is how many rows came back. Only
 the envelope then carries a `warning` sentence saying so. Treat that case as
 a sample, not a statutory total.
 
-Hosted HTTP additionally exposes three tools after counsel and Records Officer
-sign-off: `psd_prr_clarification_letter_draft`,
+Hosted HTTP additionally exposes four tools after counsel and Records Officer
+sign-off: `psd_prr_acknowledgment_draft`,
+`psd_prr_clarification_letter_draft`,
 `psd_prr_collection_task_notes_propose`, and
 `psd_prr_exemption_citations_suggest`. They require an attributed personal
 token.
-Drafting calls only the existing clarification-draft REST primitive; the other
-two read authoritative rows and return `applied: false` proposals for a human
-to accept through normal staff workflow. The standalone stdio deployment
+The two drafting tools call only the existing acknowledgment- and
+clarification-draft REST primitives; the other two read authoritative rows and
+return `applied: false` proposals for a human to accept through normal staff
+workflow. The standalone stdio deployment
 registers none of these tools and remains safe for the shared read-only service
 identity. See (d) for the exact gates.
 
@@ -610,7 +612,7 @@ claude mcp add --env PRR_BASE_URL=https://prr.psd401.net \
 ```
 
 Then `claude mcp list` to confirm it connects. Hosted personal-token clients
-see the eight read tools and three draft/proposal tools; stdio sees only the
+see the eight read tools and four draft/proposal tools; stdio sees only the
 eight reads. The guardrails in (d) remain binding on every result and handoff.
 
 Static-token v1 is not MCP OAuth. Claude.ai and Claude Desktop's remote
@@ -697,12 +699,13 @@ line an agent, or the human directing one, has to hold on its own.
 
 Following counsel confirmation that the human gates remain real and Records
 Officer confirmation that the workflow matches office practice, hosted `/mcp`
-exposes these three personal-token tools. The shared stdio deployment remains
+exposes these four personal-token tools. The shared stdio deployment remains
 read-only, and the dedicated read-only identity is rejected by every tool in
 this table.
 
 | Tool | What it does | Human gate |
 |---|---|---|
+| `psd_prr_acknowledgment_draft` | Calls the existing attributed `POST /api/staff/correspondence/drafts/acknowledgment/` primitive and stores an editable acknowledgment draft rendered from the versioned statutory template. It does not change status, set `acknowledgment_sent_at`, revise a published estimate, or reach the requester, so drafting it neither satisfies nor defers the RCW 42.56.520 five-business-day response. There is no batch form: one call drafts one case. | A Records Officer reviews the stored draft and completes approval and queueing through the interactive staff session; `acknowledged` is applied only by the correspondence service after confirmed delivery. |
 | `psd_prr_clarification_letter_draft` | Calls the existing attributed `POST /api/staff/correspondence/drafts/clarification/` primitive and stores an editable clarification-request draft. It does not change status or reach the requester. | A Records Officer reviews the stored draft and completes approval and queueing through the interactive staff session; token execution is rejected by those endpoints. |
 | `psd_prr_collection_task_notes_propose` | Reads the current `CollectionTask` and returns current/proposed `instructions` plus `applied: false`. It does not PATCH the task. | The assigned custodian or officer reviews and accepts the proposed note via the normal `PATCH /api/staff/collection-tasks/<id>/`. |
 | `psd_prr_exemption_citations_suggest` | Reads the `RecordItem`, validates the proposed citation IDs against active `ExemptionCitation` rows, and returns `applied: false`. It does not change review state or attach evidence. | A reviewer confirms each citation before attaching it to a redaction or withholding. Rule 3 requires every redaction to carry a real exemption FK, and a wrong citation is itself a defect in the RCW 42.56.210(3) exemption log. |

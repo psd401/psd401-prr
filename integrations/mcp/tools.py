@@ -37,6 +37,7 @@ RECORD_SYSTEMS_LIST = "psd_prr_record_systems_list"
 EXEMPTIONS_LIST = "psd_prr_exemptions_list"
 AUDIT_LOG_SEARCH = "psd_prr_audit_log_search"
 CAPABILITIES_LIST = "psd_prr_capabilities_list"
+ACKNOWLEDGMENT_DRAFT = "psd_prr_acknowledgment_draft"
 CLARIFICATION_LETTER_DRAFT = "psd_prr_clarification_letter_draft"
 COLLECTION_TASK_NOTES_PROPOSE = "psd_prr_collection_task_notes_propose"
 EXEMPTION_CITATIONS_SUGGEST = "psd_prr_exemption_citations_suggest"
@@ -53,6 +54,7 @@ READ_TOOL_NAMES = (
 )
 
 WRITE_TOOL_NAMES = (
+    ACKNOWLEDGMENT_DRAFT,
     CLARIFICATION_LETTER_DRAFT,
     COLLECTION_TASK_NOTES_PROPOSE,
     EXEMPTION_CITATIONS_SUGGEST,
@@ -80,6 +82,7 @@ TOOL_CLIENT_METHODS = {
     EXEMPTIONS_LIST: "list_exemptions",
     AUDIT_LOG_SEARCH: "search_audit_log",
     CAPABILITIES_LIST: "list_capabilities",
+    ACKNOWLEDGMENT_DRAFT: "draft_acknowledgment",
     CLARIFICATION_LETTER_DRAFT: "draft_clarification_letter",
     COLLECTION_TASK_NOTES_PROPOSE: "update_collection_task_notes",
     EXEMPTION_CITATIONS_SUGGEST: "suggest_exemption_citations",
@@ -106,9 +109,9 @@ def _read_annotations(title: str) -> ToolAnnotations:
 
 
 def _proposal_annotations(title: str, *, idempotent: bool) -> ToolAnnotations:
-    """Annotate one of the three hosted draft/proposal tools.
+    """Annotate one of the four hosted draft/proposal tools.
 
-    ``readOnlyHint`` is false on all three even though two of them only read
+    ``readOnlyHint`` is false on all four even though two of them only read
     and return a proposal. That is deliberate: these are the tools a gateway
     must route through an approval flow, and the honest-but-weaker hint would
     let a future gateway auto-approve them. ``destructiveHint`` stays false
@@ -134,11 +137,12 @@ READ_INSTRUCTIONS = (
 
 HOSTED_INSTRUCTIONS = (
     "Attributed access to the PSD401 Public Records Request system. Read tools "
-    "inspect staff state. Three personal-token tools may create a clarification "
-    "draft or return task-note and exemption-citation proposals. They never "
-    "approve, queue, send, change request status, apply an estimate, attach a "
-    "citation, resolve a clarification, deny a request, or exclude a camera. "
-    "Every legal effect remains an accountable-human handoff in the staff UI."
+    "inspect staff state. Four personal-token tools may create an acknowledgment "
+    "or clarification draft, or return task-note and exemption-citation "
+    "proposals. They never approve, queue, send, change request status, apply an "
+    "estimate, attach a citation, resolve a clarification, deny a request, or "
+    "exclude a camera. Every legal effect remains an accountable-human handoff "
+    "in the staff UI."
 )
 
 ClientProvider = Callable[[Context], PRRClient]
@@ -316,6 +320,42 @@ def create_mcp_server(
         return await call(CAPABILITIES_LIST, ctx)
 
     if include_write_tools:
+
+        @mcp.tool(
+            name=ACKNOWLEDGMENT_DRAFT,
+            annotations=_proposal_annotations(
+                "Draft a statutory acknowledgment for human review",
+                # Each call stores another draft, so a retry is not free.
+                idempotent=False,
+            ),
+        )
+        async def draft_acknowledgment(
+            request_number: str,
+            ctx: Context,
+            estimated_completion: str | None = None,
+        ) -> dict:
+            """Create the RCW 42.56.520 acknowledgment draft for one request
+            from the district's versioned statutory template, for human
+            review. Requires an attributed personal token. This does not
+            approve, queue, send, or change request status: the request
+            becomes `acknowledged` only after a human approves the draft and
+            delivery is confirmed, so drafting one does not satisfy or defer
+            the five-business-day response.
+
+            `estimated_completion` is optional and must be an ISO date
+            (YYYY-MM-DD). Omit it to use the request's own estimate, or the
+            district default when it has none. A date that disagrees with an
+            estimate already on the request is rejected rather than applied;
+            revising a published estimate is a separate human workflow.
+
+            To work a backlog, call this once per request number; there is no
+            batch form, and each draft is one case a human then reviews."""
+            return await call(
+                ACKNOWLEDGMENT_DRAFT,
+                ctx,
+                request_number=request_number,
+                estimated_completion=estimated_completion,
+            )
 
         @mcp.tool(
             name=CLARIFICATION_LETTER_DRAFT,

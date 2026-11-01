@@ -3,8 +3,9 @@
 The application serves [MCP](https://modelcontextprotocol.io) over streamable
 HTTP at `/mcp`, and retains the standalone stdio entrypoint for local and
 server-side automation. Both transports expose the eight shared read tools.
-Hosted HTTP additionally exposes three attributed, personal-token tools that
-create one clarification draft or return reviewable proposals. The standalone
+Hosted HTTP additionally exposes four attributed, personal-token tools that
+create an acknowledgment or clarification draft, or return reviewable
+proposals. The standalone
 stdio deployment remains strictly read-only.
 
 ## Read-only stdio and gated hosted writes
@@ -15,6 +16,9 @@ personal token. Its separately provisioned nonstaff identity has only
 
 After counsel and Records Officer review, hosted HTTP exposes exactly:
 
+- `psd_prr_acknowledgment_draft`, which calls the existing attributed staff REST
+  primitive and creates only an editable acknowledgment draft from the
+  versioned statutory template;
 - `psd_prr_clarification_letter_draft`, which calls the existing attributed staff REST
   primitive and creates only an editable clarification-request draft;
 - `psd_prr_collection_task_notes_propose`, which reads the task and returns current
@@ -24,7 +28,7 @@ After counsel and Records Officer review, hosted HTTP exposes exactly:
   active candidate citations, then returns a proposal without attaching any
   citation or changing review state.
 
-All three reject the shared read-only MCP identity before their REST work and
+All four reject the shared read-only MCP identity before their REST work and
 require an active `prr_pat_…` personal token. There is no MCP approval,
 queueing, sending, estimate application, citation attachment, request
 transition, clarification resolution, denial, or camera-exclusion tool. The
@@ -34,7 +38,7 @@ existing Django permissions and human-only handoffs remain authoritative.
 
 | File | Purpose |
 |---|---|
-| `client.py` | `PRRClient`, the transport-independent REST contract: shared reads, one clarification-draft POST, and two read-backed proposal methods. |
+| `client.py` | `PRRClient`, the transport-independent REST contract: shared reads, the acknowledgment- and clarification-draft POSTs, and two read-backed proposal methods. |
 | `tools.py` | Shared read registry plus the explicit hosted-only write-tool allowlist. Owns the namespaced tool names, their annotations, and `TOOL_CLIENT_METHODS` — the map that *is* the dispatch, so a tool can only reach its own REST method. |
 | `evals.py` | The eval cases, as data: one per key tool, stating what a response must and must not carry. |
 | `mcp-scan.json` | Scanner config naming the stdio entrypoint with placeholder credentials. |
@@ -75,7 +79,7 @@ response bodies are never written to MCP logs, and all `/mcp` responses use
 
 The read-only service token may still use hosted HTTP for the eight read tools,
 but every hosted write-tool invocation returns an MCP error before it can
-create a draft or read proposal targets. Use a personal token for the three
+create a draft or read proposal targets. Use a personal token for the four
 hosted write tools.
 
 The hosted server is deliberately stateless so the four Gunicorn/Uvicorn
@@ -247,16 +251,17 @@ Use `detailed` when you need the full staff request-summary row, such as
 These tools exist only on hosted `/mcp` and reject the shared read-only
 identity:
 
-All three are annotated `readOnlyHint: false`, `destructiveHint: false`,
+All four are annotated `readOnlyHint: false`, `destructiveHint: false`,
 `openWorldHint: false`. Two of them only read and return a proposal, so
 `readOnlyHint: false` is the conservative answer rather than the literal one:
-these are the three tools a gateway must route through human approval, and
+these are the four tools a gateway must route through human approval, and
 the honest-but-weaker hint would let a future gateway auto-approve them.
-Only the clarification draft is non-idempotent, because each call stores
+Only the two drafting tools are non-idempotent, because each call stores
 another draft.
 
 | Tool | Arguments | Existing REST primitive | Result and human gate |
 |---|---|---|---|
+| `psd_prr_acknowledgment_draft` | `request_number`, optional `estimated_completion` (ISO date) | `POST /api/staff/correspondence/drafts/acknowledgment/` | Stores a draft only. Omit `estimated_completion` to use the request's own estimate; a date that disagrees with a published estimate is rejected rather than applied. `acknowledged` follows human approval and confirmed delivery, so drafting neither satisfies nor defers the five-business-day response. One call per case — there is no batch form. |
 | `psd_prr_clarification_letter_draft` | `request_number`, `clarification_questions`, `clarification_due` | `POST /api/staff/correspondence/drafts/clarification/` | Stores a draft only. A Records Officer must approve and queue it in an interactive staff session. |
 | `psd_prr_collection_task_notes_propose` | `task_id`, `proposed_instructions` | `GET /api/staff/collection-tasks/<id>/` | Returns `applied: false`, current/proposed text, and the normal human PATCH handoff. It never PATCHes. |
 | `psd_prr_exemption_citations_suggest` | `record_item_id`, `candidate_citation_ids`, `rationale` | `GET /api/staff/record-items/<id>/` and `GET /api/staff/exemptions/<id>/` | Returns `applied: false` with active candidate rows. It never attaches a citation, redaction, or withholding. |

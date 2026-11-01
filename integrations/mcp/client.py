@@ -1,5 +1,5 @@
 # ABOUTME: Requests-based client for the PRR staff REST API used by MCP.
-# ABOUTME: Three personal-token tools are limited to one draft and proposals.
+# ABOUTME: Four personal-token tools are limited to drafts and proposals.
 """
 PRRClient wraps the staff API (apps/api, mounted at /api/staff/) with a plain
 `requests.Session`. This module intentionally has no `mcp` import, keeping the
@@ -8,8 +8,10 @@ MCP-facing modules (`tools.py`, `hosted.py`, and `server.py`) layer the SDK
 over this client.
 
 Read methods return the staff API response parsed from JSON. The only write
-request is the existing clarification-draft POST, and every write-tool method
-requires the `prr_pat_` marker used by attributed personal access tokens.
+requests are the acknowledgment- and clarification-draft POSTs, and every
+write-tool method requires the `prr_pat_` marker used by attributed personal
+access tokens. Both drafts stop at `draft`: approving, queueing, sending, and
+the status transition that follows confirmed delivery stay human-only.
 Collection-note and exemption-citation tools fetch authoritative rows and
 return structured proposals; they never PATCH a task or attach legal evidence.
 The standalone stdio server registers only the read methods, so the shared
@@ -88,6 +90,20 @@ OVERDUE_CONCISE_FIELDS = (
 
 def _district_today() -> dt.date:
     return dt.datetime.now(_DISTRICT_TZ).date()
+
+
+def _validated_request_number(value, *, field: str) -> str:
+    """Reject anything that is not a canonical matter number, before any HTTP.
+
+    The number is either interpolated into a REST path or sent as a request
+    body field, so the guard belongs in front of the request rather than
+    behind it. ``field`` names the caller's own parameter so the error
+    teaches the vocabulary for the argument the model actually passed, which
+    is build standard 3's ask.
+    """
+    if not isinstance(value, str) or not _REQUEST_NUMBER.fullmatch(value):
+        raise ValueError(f"{field} must be a canonical PRR request number.")
+    return value
 
 
 def _validated_response_format(value) -> str:
@@ -276,10 +292,7 @@ class PRRClient:
         estimate_revisions, collection_tasks, and footage_preservations for
         the request.
         """
-        if not isinstance(number, str) or not _REQUEST_NUMBER.fullmatch(number):
-            raise ValueError(
-                "number must be a canonical PRR request number."
-            )
+        number = _validated_request_number(number, field="number")
         return self._get(
             f"/api/staff/requests/{quote(number, safe='')}/"
         )
@@ -441,6 +454,53 @@ class PRRClient:
         """
         return self._get("/api/staff/capabilities/")
 
+    def draft_acknowledgment(
+        self,
+        request_number: str,
+        estimated_completion: str | None = None,
+    ):
+        """Create an acknowledgment draft without approval or legal effect.
+
+        POST /api/staff/correspondence/drafts/acknowledgment/ renders the
+        versioned statutory acknowledgment template into an editable draft.
+        It is the one RCW 42.56.520 five-business-day letter a records
+        officer writes for every new request, and before this tool existed
+        the only agent-reachable drafting primitive was the clarification
+        letter -- so an officer facing a backlog of unacknowledged cases had
+        to open each one in the staff UI by hand.
+
+        Omit ``estimated_completion`` and the service uses the request's own
+        estimate, or the district default when the request has none. Passing
+        a date that disagrees with an estimate already on the request is
+        rejected by the service rather than silently revising it: changing a
+        published estimate is the human estimate-revision workflow (rule 6),
+        not a side effect of drafting a letter.
+
+        Like every tool in this module, this creates a draft and stops. It
+        does not approve, queue, send, set ``initial_response_delivered``, or
+        transition the request; ``acknowledged`` is applied only by the
+        correspondence service after a human-approved delivery is confirmed.
+        """
+        self._require_attributed_personal_token()
+        body = {
+            "request_number": _validated_request_number(
+                request_number,
+                field="request_number",
+            ),
+        }
+        if estimated_completion is not None:
+            try:
+                estimate = dt.date.fromisoformat(str(estimated_completion))
+            except ValueError as exc:
+                raise ValueError(
+                    "estimated_completion must be an ISO date (YYYY-MM-DD)."
+                ) from exc
+            body["estimated_completion"] = estimate.isoformat()
+        return self._post(
+            "/api/staff/correspondence/drafts/acknowledgment/",
+            body,
+        )
+
     def draft_clarification_letter(
         self,
         request_number: str,
@@ -449,13 +509,10 @@ class PRRClient:
     ):
         """Create a clarification draft without approval or legal effect."""
         self._require_attributed_personal_token()
-        if (
-            not isinstance(request_number, str)
-            or not _REQUEST_NUMBER.fullmatch(request_number)
-        ):
-            raise ValueError(
-                "request_number must be a canonical PRR request number."
-            )
+        request_number = _validated_request_number(
+            request_number,
+            field="request_number",
+        )
         questions = str(clarification_questions).strip()
         if not questions:
             raise ValueError("clarification_questions cannot be blank.")

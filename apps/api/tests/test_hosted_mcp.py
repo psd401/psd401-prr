@@ -39,10 +39,11 @@ class MCPDocumentationContractTests(SimpleTestCase):
         text = (Path(settings.BASE_DIR) / relative_path).read_text()
         return " ".join(text.split())
 
-    def test_write_tool_registry_is_the_three_draft_proposal_operations(self):
+    def test_write_tool_registry_is_the_draft_proposal_operations(self):
         self.assertSetEqual(
             set(WRITE_TOOL_NAMES),
             {
+                "psd_prr_acknowledgment_draft",
                 "psd_prr_clarification_letter_draft",
                 "psd_prr_collection_task_notes_propose",
                 "psd_prr_exemption_citations_suggest",
@@ -63,7 +64,7 @@ class MCPDocumentationContractTests(SimpleTestCase):
             security,
         )
         self.assertIn(
-            "the three draft/proposal tools require an attributed personal token",
+            "the four draft/proposal tools require an attributed personal token",
             security,
         )
 
@@ -77,17 +78,17 @@ class MCPDocumentationContractTests(SimpleTestCase):
                 "hosted MCP uses attributed personal staff tokens",
                 "never that shared identity for its gated tools",
                 (
-                    "Hosted `/mcp` exposes exactly three attributed personal-token "
+                    "Hosted `/mcp` exposes exactly four attributed personal-token "
                     "draft/proposal tools"
                 ),
             ),
             "README.md": (
-                "Hosted `/mcp` adds exactly three personal-token draft/proposal tools",
+                "Hosted `/mcp` adds exactly four personal-token draft/proposal tools",
                 "standalone stdio and the dedicated nonstaff MCP identity remain read-only",
             ),
             "docs/security.md": (
                 "both identities may use the eight reads",
-                "three gated draft/proposal tools require a personal token",
+                "four gated draft/proposal tools require a personal token",
             ),
             "docs/project-status.md": (
                 "MCP transports",

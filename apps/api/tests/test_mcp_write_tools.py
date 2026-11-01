@@ -13,6 +13,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from apps.api.models import PersonalAccessToken
+from apps.audit.models import AuditLog
 from apps.correspondence.models import (
     ClarificationCycle,
     Correspondence,
@@ -133,6 +134,132 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
                                 await session.call_tool(name, arguments)
                             )
                         return {tool.name for tool in listed.tools}, results
+
+    def test_personal_token_creates_acknowledgment_draft_without_sending_it(self):
+        """Issue #12's acceptance criteria, as one test.
+
+        A records-officer token drafts the statutory acknowledgment over MCP;
+        the row lands as an unsent draft attributed to the token's user, with
+        an audit row naming that user, and nothing about the request moves --
+        the five-business-day clock is answered by a human-approved delivery,
+        not by drafting.
+        """
+        received = PublicRecordsRequest.objects.create(
+            requester=self.requester,
+            description="Board meeting minutes for the last school year.",
+            status=RequestStatus.RECEIVED,
+        )
+        original_event_count = StatusEvent.objects.filter(
+            request=received,
+        ).count()
+
+        _names, results = async_to_sync(self.call_tools)(
+            self.personal_token,
+            [
+                (
+                    "psd_prr_acknowledgment_draft",
+                    {"request_number": received.number},
+                )
+            ],
+        )
+
+        self.assertFalse(results[0].isError, rendered_result(results[0]))
+        draft = Correspondence.objects.get(
+            request=received,
+            kind=Correspondence.Kind.ACKNOWLEDGMENT,
+        )
+        self.assertEqual(draft.status, Correspondence.Status.DRAFT)
+        self.assertEqual(draft.created_by, self.officer)
+        # Rule 6 allows exactly two automated requester-facing paths, and a
+        # tool-created draft is neither of them.
+        self.assertFalse(draft.automated)
+        self.assertIsNone(draft.approved_at)
+        self.assertIsNone(draft.queued_at)
+        self.assertIsNone(draft.sent_at)
+        self.assertFalse(
+            CorrespondenceDelivery.objects.filter(
+                correspondence=draft,
+            ).exists()
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="correspondence.draft_created",
+                actor=self.officer,
+            ).exists(),
+            "the draft must be attributable to the token's user",
+        )
+
+        received.refresh_from_db()
+        self.assertEqual(received.status, RequestStatus.RECEIVED)
+        self.assertIsNone(received.acknowledgment_sent_at)
+        self.assertFalse(received.initial_response_delivered)
+        self.assertEqual(
+            StatusEvent.objects.filter(request=received).count(),
+            original_event_count,
+        )
+
+    def test_acknowledgment_draft_cannot_revise_a_published_estimate(self):
+        """A drafting tool may not move an estimate as a side effect.
+
+        The estimate a requester has already been given changes only through
+        the human estimate-revision workflow, so a disagreeing
+        `estimated_completion` has to fail rather than quietly re-publish.
+        """
+        published_estimate = timezone.localdate() + timedelta(days=20)
+        self.prr.estimated_completion = published_estimate
+        self.prr.save(update_fields=["estimated_completion"])
+
+        _names, results = async_to_sync(self.call_tools)(
+            self.personal_token,
+            [
+                (
+                    "psd_prr_acknowledgment_draft",
+                    {
+                        "request_number": self.prr.number,
+                        "estimated_completion": (
+                            published_estimate + timedelta(days=30)
+                        ).isoformat(),
+                    },
+                )
+            ],
+        )
+
+        self.assertTrue(results[0].isError, rendered_result(results[0]))
+        self.prr.refresh_from_db()
+        self.assertEqual(self.prr.estimated_completion, published_estimate)
+        self.assertFalse(
+            Correspondence.objects.filter(
+                request=self.prr,
+                kind=Correspondence.Kind.ACKNOWLEDGMENT,
+            ).exists()
+        )
+        self.assertFalse(
+            EstimateRevision.objects.filter(request=self.prr).exists()
+        )
+
+    def test_acknowledgment_draft_rejects_a_malformed_request_number(self):
+        # The number reaches a REST body, and the error has to teach what a
+        # request number is instead of returning a stack trace.
+        _names, results = async_to_sync(self.call_tools)(
+            self.personal_token,
+            [
+                (
+                    "psd_prr_acknowledgment_draft",
+                    {"request_number": "../record-items"},
+                )
+            ],
+        )
+
+        self.assertTrue(results[0].isError)
+        self.assertIn(
+            "request number",
+            rendered_result(results[0]).lower(),
+        )
+        self.assertFalse(
+            Correspondence.objects.filter(
+                kind=Correspondence.Kind.ACKNOWLEDGMENT,
+            ).exists()
+        )
 
     def test_personal_token_creates_clarification_draft_without_legal_effect(self):
         original_status = self.prr.status
@@ -314,6 +441,10 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
     def test_shared_readonly_identity_is_rejected_by_every_write_tool(self):
         calls = [
             (
+                "psd_prr_acknowledgment_draft",
+                {"request_number": self.prr.number},
+            ),
+            (
                 "psd_prr_clarification_letter_draft",
                 {
                     "request_number": self.prr.number,
@@ -371,6 +502,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
         self.assertSetEqual(
             set(WRITE_TOOL_NAMES),
             {
+                "psd_prr_acknowledgment_draft",
                 "psd_prr_clarification_letter_draft",
                 "psd_prr_collection_task_notes_propose",
                 "psd_prr_exemption_citations_suggest",
