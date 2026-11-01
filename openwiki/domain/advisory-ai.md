@@ -8,11 +8,12 @@ openwiki:
   roles: [domain, integration, architecture]
   change_kinds: [advisory-ai, model-provider, redaction-proposal, automatic-run]
   source_paths: [apps/records/advisory_ai.py, apps/records/redaction_ai.py, apps/records/models.py, apps/records/tasks.py, apps/api/advisory.py, apps/configuration/registry.py, apps/configuration/prerequisites.py, infra/cdk/lib/advisory-bedrock.ts, docs/advisory-ai.md]
-  symbols: [AdvisoryRun, RedactionProposal, RedactionProposalDecision, request_request_intent_advisory, request_case_title_advisory, request_record_responsiveness_advisory, request_record_redaction_advisory, execute_advisory_run, invoke_advisory_model, prepare_record_review_advisories]
-  test_paths: [apps/records/tests/test_advisory_ai.py, apps/records/tests/test_redaction_ai.py, apps/records/tests/test_case_titles.py, apps/records/tests/test_scope_conversation.py, apps/records/tests/test_verify_advisory_command.py, apps/api/tests/test_advisory_ai.py, apps/api/tests/test_redaction_ai.py]
+  symbols: [AdvisoryRun, RedactionProposal, RedactionProposalDecision, request_request_intent_advisory, request_case_title_advisory, request_record_responsiveness_advisory, request_record_redaction_advisory, request_automatic_record_advisory, defer_automatic_record_advisory, execute_advisory_run, invoke_advisory_model, prepare_record_review_advisories]
+  test_paths: [apps/records/tests/test_advisory_ai.py, apps/records/tests/test_automatic_record_advisory.py, apps/records/tests/test_redaction_ai.py, apps/records/tests/test_case_titles.py, apps/records/tests/test_scope_conversation.py, apps/records/tests/test_verify_advisory_command.py, apps/api/tests/test_advisory_ai.py, apps/api/tests/test_redaction_ai.py]
   invariants:
     - "AdvisoryRun.applied is always false by database constraint; no provider output is a legal action."
     - "Each automatic run keeps a named requester only when a staff member initiated it; manual runs require one."
+    - "A queued automatic run re-checks its switches in the worker before any provider call and fails with automatic_disabled or advisory_disabled instead."
     - "Redaction candidates are immutable proposals; accepting one goes through the normal redaction service with an active exemption citation, one at a time."
     - "The provider never sets request status, scope, collection tasks, fees, estimates, correspondence, review state, redactions, withholding, release, or preservation."
   validation_commands: ["PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_advisory_ai apps.records.tests.test_redaction_ai --settings=config.test_settings"]
@@ -81,9 +82,16 @@ app setting in the [configuration registry](../architecture/configuration.md),
 and each requires `PRR_AI_ADVISORY_ENABLED`:
 
 - `PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED`. A new Vault record queues a
-  responsiveness proposal. A `responsive` or `uncertain` result queues redaction
-  candidates. `prepare_record_review_advisories` runs every five minutes, and
-  bounded retry stops after three substantive automatic failures.
+  responsiveness proposal. Vault ingest calls `defer_automatic_record_advisory()`,
+  which queues the work only after the ingest transaction commits. A human
+  `responsive` confirmation in `review_record()` defers a `record_redactions`
+  run the same way. `request_automatic_record_advisory()` is the single
+  entry point for both, and it reuses an identical completed run. Only the
+  `record_responsiveness` and `record_redactions` kinds are accepted.
+  `prepare_record_review_advisories` runs every five minutes to backfill missed
+  work in bounded batches, and bounded retry stops after three substantive
+  automatic failures. Planned pauses (`advisory_disabled`, `automatic_disabled`)
+  do not consume that retry budget.
 - `PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED`. A new request prepares its intent
   proposal after intake commits and after every attachment has a final malware
   verdict. A completed proposal that maps to an active Vault-backed system queues
@@ -94,6 +102,20 @@ and each requires `PRR_AI_ADVISORY_ENABLED`:
 Every switch defaults off. None is an environment variable. The Application
 Admin sets it on Configuration > District settings with a written reason, and the
 change takes effect without a redeploy.
+
+```mermaid
+flowchart TD
+    A["Vault ingest creates a new record"] -->|after commit| D["defer_automatic_record_advisory"]
+    B["Staff mark a record responsive"] -->|after commit| D
+    D -->|both switches on| R["request_automatic_record_advisory"]
+    S["prepare_record_review_advisories every 5 minutes"] --> R
+    R --> Q["AdvisoryRun pending, execute_advisory_analysis queued"]
+    Q --> W{"Worker re-checks switches"}
+    W -->|off| F["failed: advisory_disabled or automatic_disabled"]
+    W -->|on| P["invoke_advisory_model, then validate proposal"]
+```
+
+*Automatic advisory triggers: every path re-checks the switches in the worker before any model call.*
 
 ## Backfilling case titles
 
@@ -146,8 +168,10 @@ and a matching CDK change, shipped through the
 - Bulk review is a human decision. Never add a path that accepts a candidate
   without its own named decision.
 - Use `test_advisory_ai` and `test_redaction_ai` for the worker and validator.
-  `test_verify_advisory_command` covers the verification command. Run only
-  those modules for a narrow check.
+  `test_automatic_record_advisory` covers the automatic record path: the
+  post-commit deferral, the worker's switch re-check, and the planned-pause
+  exemption from retry limits. `test_verify_advisory_command` covers the
+  verification command. Run only those modules for a narrow check.
 - The `verify_advisory_ai` management command (`apps/records/management/commands/verify_advisory_ai.py`)
   checks Bedrock connectivity and the bounded-JSON contract with synthetic data. It calls
   `invoke_advisory_model()` and `_validate_proposal()` directly and writes no request or
