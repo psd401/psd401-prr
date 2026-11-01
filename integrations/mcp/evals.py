@@ -285,7 +285,17 @@ WRITE_CASES: tuple[EvalCase, ...] = (
             "because rule 6 allows exactly two automated requester-facing "
             "paths and this is neither."
         ),
-        required_keys=("status", "draft_body", "request_number"),
+        required_keys=("status", "request_number", "letter_text"),
+        # The letter quotes the request description in full, which is
+        # unbounded requester text. `forbidden_keys` is the PII assertion and
+        # is recursive, so this states that no rendered body reaches the
+        # caller's model provider by any nesting.
+        forbidden_keys=(
+            "draft_body",
+            "draft_subject",
+            "approved_body",
+            "snippet",
+        ),
         required_values={
             "status": "draft",
             "automated": False,

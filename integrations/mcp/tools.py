@@ -355,7 +355,15 @@ def create_mcp_server(
             revising a published estimate is a separate human workflow.
 
             To work a backlog, call this once per request number; there is no
-            batch form, and each draft is one case a human then reviews."""
+            batch form, and each draft is one case a human then reviews.
+
+            The response confirms the draft -- its status, that nothing is
+            approved, queued or sent, and the estimate the letter states --
+            and does not include the letter text. The acknowledgment quotes
+            the request description in full, which is unbounded requester
+            wording and can name a student, so it is not sent to a caller's
+            model provider. Read and approve the letter in the case Messages
+            tab. Report the draft as created; do not claim to have read it."""
             return await call(
                 ACKNOWLEDGMENT_DRAFT,
                 ctx,

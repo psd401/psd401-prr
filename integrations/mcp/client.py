@@ -51,6 +51,53 @@ CONCISE = "concise"
 DETAILED = "detailed"
 RESPONSE_FORMATS = (CONCISE, DETAILED)
 
+#: The keys ``draft_acknowledgment`` keeps from the staff API's draft response.
+#:
+#: An allowlist, not a denylist of body fields, because the staff serializer
+#: grows: a field added there must be named here before it can leave for a
+#: caller's model provider, rather than starting to flow the day it lands.
+#:
+#: The rendered letter is deliberately not in it. The acknowledgment template
+#: quotes ``request.description`` verbatim ("You requested: ..."), and the
+#: description is the complete legal record of what was asked (rule 9) --
+#: unbounded requester free text that can name a student. The data owner's
+#: 2026-10-19 sign-off covers `subject`, `requester_name` and `requester_email`
+#: leaving for a model provider; a whole letter body carrying the full
+#: description is a wider category than that, and this tool does not need it.
+#: The officer reads the letter in the case Messages tab, which is where they
+#: approve it. ``subject`` and ``snippet`` are out for the same reason --
+#: ``snippet`` is the opening of that body.
+#:
+#: The clarification tool is not shaped this way and does not need to be: its
+#: template interpolates only the questions the caller itself supplied, the
+#: requester name, and the request number.
+ACKNOWLEDGMENT_DRAFT_CONFIRMATION_FIELDS = (
+    "id",
+    "request_number",
+    "direction",
+    "kind",
+    "status",
+    "automated",
+    "created_at",
+    "created_by",
+    "approved_at",
+    "approved_by",
+    "queued_at",
+    "queued_by",
+    "sent_at",
+    "cancelled_at",
+    "version",
+    "recipient_count",
+    "attachment_count",
+    "delivery_status",
+    "template_identifier",
+    "template_version",
+    # The estimate the letter states, as an ISO date. A statutory date, not
+    # requester text, and the one rendered value an agent has to be able to
+    # report back without reading the letter.
+    "draft_metadata",
+)
+
 #: Bounds for the overdue scan. The default is a triage-sized page a Records
 #: Officer can actually act on; the ceiling exists so a caller cannot ask for
 #: the whole backlog in one response. OVERDUE_MAX_PAGES bounds the *work*
@@ -500,6 +547,10 @@ class PRRClient:
         does not approve, queue, send, set ``initial_response_delivered``, or
         transition the request; ``acknowledged`` is applied only by the
         correspondence service after a human-approved delivery is confirmed.
+
+        The response confirms the draft rather than echoing it: see
+        ``ACKNOWLEDGMENT_DRAFT_CONFIRMATION_FIELDS`` for why the rendered
+        letter stays out of a payload bound for a caller's model provider.
         """
         self._require_attributed_personal_token()
         body = {
@@ -513,10 +564,23 @@ class PRRClient:
                 estimated_completion,
                 field="estimated_completion",
             ).isoformat()
-        return self._post(
+        created = self._post(
             "/api/staff/correspondence/drafts/acknowledgment/",
             body,
         )
+        shaped = {
+            key: created[key]
+            for key in ACKNOWLEDGMENT_DRAFT_CONFIRMATION_FIELDS
+            if key in created
+        }
+        shaped["letter_text"] = (
+            "Withheld from this response. The acknowledgment quotes the "
+            "request description in full, which is unbounded requester text "
+            "and can name a student. Read and approve the letter in the case "
+            "Messages tab; this response confirms the draft exists and has "
+            "not been approved, queued, or sent."
+        )
+        return shaped
 
     def draft_clarification_letter(
         self,

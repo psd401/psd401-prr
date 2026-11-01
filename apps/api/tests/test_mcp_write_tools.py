@@ -198,6 +198,87 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
             original_event_count,
         )
 
+    def test_acknowledgment_response_withholds_the_requester_s_own_wording(self):
+        """The letter quotes the request description; the tool result must not.
+
+        `templates/correspondence/acknowledgment/v2.txt` renders
+        `{{ request.description }}` verbatim, and the description is the
+        unbounded legal record of what was asked (rule 9) -- it can name a
+        student. A tool result leaves for the caller's model provider, and the
+        data owner's sign-off covers the subject and requester contact, not a
+        whole letter body. So the draft has to be created with the description
+        in it and reported without it.
+        """
+        description = (
+            "Every email mentioning the suspension of student Jordan Rivera."
+        )
+        received = PublicRecordsRequest.objects.create(
+            requester=self.requester,
+            description=description,
+            status=RequestStatus.RECEIVED,
+        )
+
+        _names, results = async_to_sync(self.call_tools)(
+            self.personal_token,
+            [
+                (
+                    "psd_prr_acknowledgment_draft",
+                    {"request_number": received.number},
+                )
+            ],
+        )
+
+        self.assertFalse(results[0].isError, rendered_result(results[0]))
+        payload = rendered_result(results[0])
+        # The draft itself must still carry the statutory wording.
+        draft = Correspondence.objects.get(
+            request=received,
+            kind=Correspondence.Kind.ACKNOWLEDGMENT,
+        )
+        self.assertIn(description, draft.draft_body)
+        # The response must not, by any key or nesting.
+        self.assertNotIn("Jordan Rivera", payload)
+        self.assertNotIn(description, payload)
+        self.assertNotIn("draft_body", payload)
+        self.assertNotIn("draft_subject", payload)
+        # And it must say where the letter is instead of going silent.
+        self.assertIn("letter_text", payload)
+        self.assertIn("Messages tab", payload)
+
+    def test_acknowledgment_response_still_proves_the_draft_is_unsent(self):
+        # Withholding the letter must not cost the caller the compliance
+        # facts: an agent has to be able to report that nothing was sent.
+        received = PublicRecordsRequest.objects.create(
+            requester=self.requester,
+            description="Transportation routing records.",
+            status=RequestStatus.RECEIVED,
+        )
+
+        _names, results = async_to_sync(self.call_tools)(
+            self.personal_token,
+            [
+                (
+                    "psd_prr_acknowledgment_draft",
+                    {"request_number": received.number},
+                )
+            ],
+        )
+
+        payload = json.loads(rendered_result(results[0]))
+        self.assertEqual(payload["status"], Correspondence.Status.DRAFT)
+        self.assertEqual(payload["request_number"], received.number)
+        self.assertFalse(payload["automated"])
+        for key in ("approved_at", "queued_at", "sent_at"):
+            with self.subTest(key=key):
+                self.assertIsNone(payload[key])
+        self.assertEqual(
+            payload["kind"],
+            Correspondence.Kind.ACKNOWLEDGMENT,
+        )
+        # The estimate the letter states is a statutory date, not requester
+        # text, so it stays -- an agent reports the date without the letter.
+        self.assertIn("estimated_completion", payload["draft_metadata"])
+
     def test_acknowledgment_draft_cannot_revise_a_published_estimate(self):
         """A drafting tool may not move an estimate as a side effect.
 
