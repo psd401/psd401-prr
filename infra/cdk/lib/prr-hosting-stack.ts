@@ -95,6 +95,19 @@ export class PrrHostingStack extends cdk.Stack {
     // The gateway is already attached to the VPC, so there is no attachment
     // resource in this stack for the route to wait on.
     subnet.addDefaultInternetRoute(config.igwId, new DependencyGroup());
+    // The subnet moves to psd-aws-infra, which owns every subnet in a shared
+    // VPC (psd-dev-standards 08 "Shared network"; psd401/psd-aws-infra#42).
+    // Step 1: Retain, deployed on its own, so the next change can drop these
+    // four from the stack and CloudFormation leaves them in place for
+    // Terraform to import.
+    for (const resource of [
+      subnet.node.defaultChild,
+      subnet.node.findChild("RouteTable"),
+      subnet.node.findChild("RouteTableAssociation"),
+      subnet.node.findChild("DefaultRoute"),
+    ]) {
+      (resource as cdk.CfnResource).applyRemovalPolicy(cdk.RemovalPolicy.RETAIN);
+    }
 
     const securityGroup = new ec2.SecurityGroup(this, "SecurityGroup", {
       vpc,

@@ -244,6 +244,24 @@ describe.each(environments)("psd401-prr-%s network", (envName, config) => {
     expect(json).not.toContain("pcx-");
   });
 
+  // Step 1 of handing the subnet to psd-aws-infra (psd-dev-standards 08
+  // "Shared network"; psd401/psd-aws-infra#42): Retain must be deployed
+  // before the next change drops these from the stack, so CloudFormation
+  // leaves them in place for Terraform to import.
+  test("retains its subnet, route table, association and route", () => {
+    for (const type of [
+      "AWS::EC2::Subnet",
+      "AWS::EC2::RouteTable",
+      "AWS::EC2::SubnetRouteTableAssociation",
+      "AWS::EC2::Route",
+    ]) {
+      template.hasResource(type, {
+        DeletionPolicy: "Retain",
+        UpdateReplacePolicy: "Retain",
+      });
+    }
+  });
+
   test("never touches shared DMZ resources", () => {
     for (const id of SHARED_DMZ_IDS) {
       expect(json).not.toContain(id);
