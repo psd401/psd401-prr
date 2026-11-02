@@ -6,9 +6,9 @@ tags: [architecture, frontend, routing, react, access-control]
 openwiki:
   roles: [architecture, integration]
   change_kinds: [route, navigation, frontend-api-client]
-  source_paths: [frontend/src/App.tsx, frontend/src/nav.ts, frontend/src/api/client.ts, frontend/src/layout/AppLayout.tsx, frontend/src/statutory.ts, frontend/src/vaultQuery.ts, frontend/src/scopeCountNotice.ts, frontend/src/caseSort.ts, frontend/src/queueCounts.tsx, frontend/src/messages/MessageWorkspace.tsx, frontend/src/messages/boundedInfiniteCache.ts, frontend/vite.config.ts, frontend/package.json, apps/api/spa.py, apps/api/resources/correspondence.py]
-  symbols: [App, StaffApp, AuthorizedRoute, routeIsAuthorized, defaultLanding, PRIMARY_NAV, CONFIGURATION_NAV, OVERSIGHT_NAV, CASE_TAB_ROLES, api, ApiError, index, MessageWorkspace, invalidateBoundedInfiniteQueries, markBoundedInfiniteQueriesStale, thread_messages]
-  test_paths: [frontend/src/App.test.tsx, frontend/src/AppAuthorizedRoutes.test.tsx, frontend/src/nav.test.ts, frontend/src/layout/AppLayout.test.tsx, frontend/src/case/CaseWorkspace.test.tsx, frontend/src/vaultQuery.test.ts, frontend/src/scopeCountNotice.test.ts, frontend/src/caseSort.test.ts, frontend/src/queueCounts.test.tsx, frontend/src/messages/MessageWorkspace.test.tsx, frontend/src/messages/boundedInfiniteCache.test.ts]
+  source_paths: [frontend/src/App.tsx, frontend/src/nav.ts, frontend/src/api/client.ts, frontend/src/layout/AppLayout.tsx, frontend/src/caseStatus.ts, frontend/src/work.ts, frontend/src/statutory.ts, frontend/src/vaultQuery.ts, frontend/src/scopeCountNotice.ts, frontend/src/caseSort.ts, frontend/src/queueCounts.tsx, frontend/src/messages/MessageWorkspace.tsx, frontend/src/messages/boundedInfiniteCache.ts, frontend/vite.config.ts, frontend/package.json, apps/api/spa.py, apps/api/resources/correspondence.py, apps/api/resources/work_items.py]
+  symbols: [App, StaffApp, AuthorizedRoute, routeIsAuthorized, defaultLanding, PRIMARY_NAV, CONFIGURATION_NAV, OVERSIGHT_NAV, CASE_TAB_ROLES, api, ApiError, index, MessageWorkspace, invalidateBoundedInfiniteQueries, markBoundedInfiniteQueriesStale, thread_messages, statusLabel, statusTone, isTerminalStatus, CASE_STATUS_CHOICES, WorkItemDetail, DISPOSITION_LABELS]
+  test_paths: [frontend/src/App.test.tsx, frontend/src/AppAuthorizedRoutes.test.tsx, frontend/src/nav.test.ts, frontend/src/layout/AppLayout.test.tsx, frontend/src/case/CaseWorkspace.test.tsx, frontend/src/vaultQuery.test.ts, frontend/src/scopeCountNotice.test.ts, frontend/src/caseSort.test.ts, frontend/src/queueCounts.test.tsx, frontend/src/messages/MessageWorkspace.test.tsx, frontend/src/messages/boundedInfiniteCache.test.ts, frontend/src/pages/RequestDetail.test.tsx, frontend/src/pages/Inbox.test.tsx]
   invariants:
     - Route and navigation roles are a client-side convenience; every API endpoint enforces its own role check.
     - Compliance logic stays in Django; the SPA only renders and submits.
@@ -155,14 +155,21 @@ trim behavior in `boundedInfiniteCache.ts` in step with any change to the paging
 
 ## Helpers that mirror server contracts
 
-Some frontend modules restate a server rule so the screen can display it. Four of the five
+Some frontend modules restate a server rule so the screen can display it. Five of the six
 have a server-side twin; the queue-count announcer has none. Where a twin exists, a shared
-fixture or a server test pins the rule, except `statutory.ts`, which has no dedicated unit
-test and is covered through the screen tests listed below. The screens never decide legal
-outcomes with them.
+fixture or a server test pins the rule, except `statutory.ts` and `caseStatus.ts`, which have no
+dedicated unit test and are covered through the screen tests listed below. The screens never
+decide legal outcomes with them.
+
+`frontend/src/work.ts` is the other side of this boundary: it declares the PII-minimal
+work-item response types (`WorkItemSummary`, `WorkItemDetail`, `WorkItemCounts`) and
+`DISPOSITION_LABELS`. Those shapes follow the serializers in
+[`apps/api/resources/work_items.py`](../../apps/api/resources/work_items.py), and the queue
+semantics are in [work queue](../domain/work-queue.md).
 
 | Module | What it mirrors | Invariant | Tests |
 |---|---|---|---|
+| `frontend/src/caseStatus.ts` | `RequestStatus` in `apps/records/models.py` | `statusLabel` and `statusTone` are the only label and colour source for a request status, so the case workspace, the Inbox, and the request detail agree. A closed case is neutral, a denial is red, and an unknown status falls back to neutral rather than active blue. `TERMINAL_STATUSES` is the no-work-owed set. See [requests](../domain/requests.md). | `pages/RequestDetail.test.tsx`, `pages/Inbox.test.tsx`, `case/CaseWorkspace.test.tsx` |
 | `frontend/src/statutory.ts` | The initial-response ladder in `apps/api/resources/requests.py` | Labels and tones name the outstanding step. A draft, an approval, or a queued message is never shown as a delivered response. `outstandingStatutoryStep()` returns no step for a terminal state or for the provider's `deliver` step. See [initial response](../domain/initial-response.md). | `CorrespondencePanel.test.tsx`, `RequestDetail.test.tsx`, `Inbox.test.tsx` |
 | `frontend/src/vaultQuery.ts` | `vault_query_from_intent()` in `apps/records/vault_counts.py` | Required terms are AND-ed and alternatives form one OR group, so the Count button and the automatic count scope the same search. Both read `frontend/src/vaultQueryCases.json`. See [collection and Vault](../domain/collection-and-vault.md#query-construction). | `vaultQuery.test.ts`, `apps/records/tests/test_scope_conversation.py` (`VaultQueryFromIntentTests`) |
 | `frontend/src/scopeCountNotice.ts` | The latest Vault count from `apps/records/vault_counts.py` | Warns when a typed count differs from the latest complete count or while one is running. It never blocks sending. | `scopeCountNotice.test.ts` |
