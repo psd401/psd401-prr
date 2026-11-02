@@ -36,7 +36,10 @@ looks the subnet up instead; psd-aws-infra then imports them.
 
 Step 2 can't change the instance's `SubnetId` in place: CloudFormation
 replaces an instance for any `SubnetId` change, including a reference
-swapped for the same literal ID, and the root volume holds PostgreSQL. So
+swapped for the same literal ID, and the root volume holds PostgreSQL. (This
+was observed, not tested: two unexecuted change sets against the live stack
+on 2026-11-02 reported `Replacement: True`, `SubnetId`, Always, Static,
+with the subnet resources dropped in the same change and with them kept.) So
 the instance and its Elastic IP association leave the stack and come back
 by import:
 
