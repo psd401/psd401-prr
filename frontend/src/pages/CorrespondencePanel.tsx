@@ -315,6 +315,7 @@ interface CorrespondenceItemProps {
   canDraft: boolean
   canManage: boolean
   onEdit: (item: CorrespondenceDetail) => void
+  onDelete: (item: CorrespondenceDetail) => void
   onPreview: (item: CorrespondenceDetail) => void
   onApprove: (item: CorrespondenceDetail) => void
   onQueue: (item: CorrespondenceDetail) => void
@@ -330,6 +331,7 @@ function CorrespondenceItem({
   canDraft,
   canManage,
   onEdit,
+  onDelete,
   onPreview,
   onApprove,
   onQueue,
@@ -358,6 +360,10 @@ function CorrespondenceItem({
     && item.status === 'draft'
     && (canManage || !OFFICER_ONLY_KINDS.has(item.kind))
     && !IMMUTABLE_EVIDENCE_KINDS.has(item.kind)
+  const canDelete =
+    canDraft
+    && item.status === 'draft'
+    && (canManage || !OFFICER_ONLY_KINDS.has(item.kind))
   const timestamps = [
     ['Created at', item.created_at],
     ['Approved at', item.approved_at],
@@ -547,6 +553,16 @@ function CorrespondenceItem({
         {canEdit && (
           <Button variant="ghost" onClick={() => onEdit(item)} disabled={busy}>
             Edit draft
+          </Button>
+        )}
+        {canDelete && (
+          <Button
+            variant="danger"
+            onClick={() => onDelete(item)}
+            disabled={busy}
+            aria-label={`Delete draft ${subject}`}
+          >
+            Delete draft
           </Button>
         )}
         {canManage && item.status === 'draft' && (
@@ -1225,6 +1241,7 @@ export function CorrespondencePanel({
   const [actionConfirmation, setActionConfirmation] =
     useState<DeliveryActionConfirmation | null>(null)
   const [cancelTarget, setCancelTarget] = useState<CorrespondenceDetail | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<CorrespondenceDetail | null>(null)
   const [cancelReason, setCancelReason] = useState('')
   const [resolveTarget, setResolveTarget] = useState<ClarificationCycle | null>(null)
   const [resolutionNotes, setResolutionNotes] = useState('')
@@ -1428,6 +1445,27 @@ export function CorrespondencePanel({
     },
   })
 
+  const deleteDraft = useMutation({
+    mutationFn: (item: CorrespondenceDetail) =>
+      api<void>(`/api/staff/correspondence/${item.id}/delete/`, {
+        method: 'POST',
+        body: { expected_version: item.version },
+      }),
+    onSuccess: (_, item) => {
+      setDeleteTarget(null)
+      if (searchParams.get('message') === item.id) {
+        const next = new URLSearchParams(searchParams)
+        next.delete('message')
+        setSearchParams(next, { replace: true })
+      }
+      qc.removeQueries({
+        queryKey: correspondenceDetailQueryKey(requestNumber, item.id),
+      })
+      refresh()
+      toast('success', 'Draft deleted.')
+    },
+  })
+
   const retry = useMutation({
     mutationFn: (item: CorrespondenceDetail) =>
       api<CorrespondenceDetail>(
@@ -1524,6 +1562,7 @@ export function CorrespondencePanel({
     || approveAndSend.isPending
     || queue.isPending
     || cancel.isPending
+    || deleteDraft.isPending
     || retry.isPending
     || download.isPending
     || loadCycle.isPending
@@ -1842,6 +1881,10 @@ export function CorrespondencePanel({
               canDraft={canDraft}
               canManage={canManage}
               onEdit={openEdit}
+              onDelete={(target) => {
+                deleteDraft.reset()
+                setDeleteTarget(target)
+              }}
               onPreview={(target) => previewMessage.mutate(target)}
               onApprove={(target) => openActionConfirmation('approveAndSend', target)}
               onQueue={(target) => openActionConfirmation('queue', target)}
@@ -3073,6 +3116,39 @@ export function CorrespondencePanel({
               </Button>
             </div>
           </form>
+        )}
+      </Modal>
+
+      <Modal
+        open={deleteTarget !== null && canDraft}
+        title="Delete draft"
+        onClose={() => setDeleteTarget(null)}
+      >
+        {deleteTarget && (
+          <div className="space-y-4">
+            <p className="text-sm text-pacific/80">
+              This draft was never sent. Deleting it removes it from the case;
+              the deletion is recorded in the audit trail.
+            </p>
+            {deleteDraft.isError && <ErrorNote error={deleteDraft.error} />}
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setDeleteTarget(null)}
+              >
+                Keep draft
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                disabled={deleteDraft.isPending}
+                onClick={() => deleteDraft.mutate(deleteTarget)}
+              >
+                {deleteDraft.isPending ? 'Deleting…' : 'Delete draft'}
+              </Button>
+            </div>
+          </div>
         )}
       </Modal>
 

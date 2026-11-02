@@ -23,7 +23,7 @@ from django.core.exceptions import (
 )
 from django.core.validators import validate_email
 from django.db import DatabaseError, IntegrityError, transaction
-from django.db.models import Exists, Max, OuterRef, Q
+from django.db.models import Exists, Max, OuterRef, ProtectedError, Q
 from django.utils import timezone
 
 from apps.api.models import StaffRole
@@ -2767,6 +2767,54 @@ def edit_draft(
         )
     _audit_content("correspondence.draft_edited", correspondence, actor)
     return correspondence
+
+
+@transaction.atomic
+def delete_draft(
+    correspondence: Correspondence,
+    *,
+    actor,
+    expected_version: int,
+) -> None:
+    """Delete a never-approved draft; approved correspondence stays forever.
+
+    A draft is not yet a legal record (the model refuses deleting anything
+    else). Structured template drafts are deletable even though they cannot
+    be edited in place: discarding sends nothing, so there are no template
+    inputs to validate. The draft's own recipients, denial citations, and
+    search chunks cascade with it; a draft other evidence points at — an
+    attachment, a search attestation, a clarification cycle — is refused
+    rather than unwound.
+    """
+    correspondence = (
+        Correspondence.objects.select_for_update(of=("self",))
+        .select_related("request")
+        .get(pk=correspondence.pk)
+    )
+    if correspondence.kind in OFFICER_ONLY_DRAFT_KINDS:
+        actor = _require_records_officer(actor)
+    else:
+        actor = _require_human_staff(actor)
+    _check_version(correspondence, expected_version)
+    if correspondence.status != Correspondence.Status.DRAFT:
+        raise ValidationError("Only a draft may be deleted.")
+    from apps.work_queue.source_reconciliation import (
+        retire_deleted_correspondence_draft_work,
+    )
+
+    _audit_content(
+        "correspondence.draft_deleted",
+        correspondence,
+        actor,
+        kind=correspondence.kind,
+    )
+    retire_deleted_correspondence_draft_work(correspondence)
+    try:
+        correspondence.delete()
+    except ProtectedError as exc:
+        raise ValidationError(
+            "This draft is linked to other case records and cannot be deleted."
+        ) from exc
 
 
 @transaction.atomic
