@@ -1,7 +1,7 @@
 ---
 type: Integration
 title: MCP Server
-description: MCP access to the PSD401 PRR staff API for LLM clients. Standalone stdio server exposes eight read-only tools; the hosted /mcp endpoint adds three attributed draft and proposal tools that never approve, send, or change legal state.
+description: MCP access to the PSD401 PRR staff API for LLM clients. Standalone stdio server exposes eight read-only tools; the hosted /mcp endpoint adds four attributed draft and proposal tools that never approve, send, or change legal state.
 tags: [integration, mcp, agent, llm, read-only]
 timestamp: 2026-10-07T22:37:58-07:00
 ---
@@ -14,7 +14,7 @@ Claude Desktop. There are two transports, and they differ in what they can do:
 - **Standalone stdio** (`integrations/mcp/server.py`): read-only, for local and
   server-side automation under a nonstaff identity.
 - **Hosted streamable HTTP** at `/mcp` (`integrations/mcp/hosted.py`, mounted in
-  `config/asgi.py`): the same reads, plus three personal-token tools that create
+  `config/asgi.py`): the same reads, plus four personal-token tools that create
   drafts or return proposals. It rejects the shared read-only identity.
 
 Both transports are facades over the staff REST API. No MCP tool holds a rule
@@ -80,7 +80,7 @@ stdio server registers no other tools. Wire names are namespaced: every tool nam
 starts with `TOOL_NAMESPACE` (`psd_prr_`) and is defined once as a constant in
 `integrations/mcp/tools.py`. The `PRRClient` method behind each name is a separate
 vocabulary, mapped in `TOOL_CLIENT_METHODS`. The server is capped at `MAX_TOOLS` (15) in
-`tools.py`. The contract gate pins one SHA-256 digest over all eleven tool definitions, so a
+`tools.py`. The contract gate pins one SHA-256 digest over all twelve tool definitions, so a
 change to a name, title, description, or annotation fails until the pin is regenerated on purpose.
 
 | Wire tool name | Client method | Endpoint | Purpose |
@@ -100,6 +100,7 @@ returns something for a human to act on, and none executes a legal action.
 
 | Wire tool name | Client method | Behavior | Human handoff |
 |------|------|----------|---------------|
+| `psd_prr_acknowledgment_draft` | `draft_acknowledgment` | Creates one RCW 42.56.520 acknowledgment draft from the district's versioned statutory template; takes an optional ISO `estimated_completion` and rejects a date that disagrees with a published estimate. There is no batch form. The response confirms the draft but omits the letter text, because the letter quotes the full request description, which can name a student | A human reads and approves the letter in the case Messages tab. Drafting does not satisfy or defer the five-business-day response |
 | `psd_prr_clarification_letter_draft` | `draft_clarification_letter` | Calls the staff clarification draft primitive; creates an editable draft | A Records Officer approves, queues, and sends it in the staff UI |
 | `psd_prr_collection_task_notes_propose` | `update_collection_task_notes` | Reads the task and returns current and proposed instructions | The normal PATCH is performed by a human |
 | `psd_prr_exemption_citations_suggest` | `suggest_exemption_citations` | Validates active candidate citations for one record item and returns a proposal | A reviewer confirms; nothing is attached or withheld |
@@ -120,9 +121,9 @@ psd_prr_clarification_letter_draft(request_number="PRR-2026-0012", clarification
 
 The standalone stdio server is **read-only by construction**. It registers only
 the eight shared read tools, and its dedicated nonstaff credential carries only
-`records.read_staff_api`. Hosted `/mcp` adds the three gated tools above. Those
-tools use `_post` only for the draft and proposal calls described in the tool
-table, and the attributed personal token is required for them. No hosted tool
+`records.read_staff_api`. Hosted `/mcp` adds the four gated tools above. The
+draft tools POST to the staff draft endpoints, and the proposal tools only read and
+return a proposal. The attributed personal token is required for all four. No hosted tool
 approves, queues, sends, applies an estimate, attaches a citation, resolves a
 clarification, denies a request, or excludes a camera.
 
@@ -165,13 +166,13 @@ Client and tool tests run against a Django test server:
 
 - [`apps/api/tests/test_mcp_client.py`](../../apps/api/tests/test_mcp_client.py): shared read tools and transport validation
 - [`apps/api/tests/test_hosted_mcp.py`](../../apps/api/tests/test_hosted_mcp.py): hosted `/mcp` route, token authentication, and the gated tools
-- [`apps/api/tests/test_mcp_write_tools.py`](../../apps/api/tests/test_mcp_write_tools.py): the three hosted draft and proposal tools, the shared read-only identity rejection, and the absence of approval or legal-effect tools
+- [`apps/api/tests/test_mcp_write_tools.py`](../../apps/api/tests/test_mcp_write_tools.py): the four hosted draft and proposal tools, the shared read-only identity rejection, and the absence of approval or legal-effect tools
 - [`apps/api/tests/test_mcp_client_security.py`](../../apps/api/tests/test_mcp_client_security.py): plaintext-URL refusal before a session is created, loopback-only HTTP, and no redirect following
 - [`apps/api/tests/test_mcp_tool_contract.py`](../../apps/api/tests/test_mcp_tool_contract.py): a static gate on the tool list itself. It checks the tool-name namespace, the tool ceiling, that read and write registries do not overlap, that every tool maps to a real `PRRClient` method, the read-only and destructive hints, and the pinned tool-definition digest and `server.json` inventory (`server.json` at the repository root). A change to a tool name, annotation, or description fails here until the manifest and pin are updated.
 - [`apps/api/tests/test_mcp_evals.py`](../../apps/api/tests/test_mcp_evals.py): runs every case in `integrations/mcp/evals.py` over a real hosted MCP session with an attributed personal token, rather than calling `PRRClient` directly. A case fails when the wire contract breaks, for example a renamed tool, a dropped annotation, a changed argument name, or a serializer that stops returning a field an agent is told to read. The suite also requires that every read tool has an eval case.
 
 Focused command:
-`PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_mcp_client apps.api.tests.test_hosted_mcp apps.api.tests.test_mcp_tool_contract --settings=config.test_settings`
+`PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_mcp_client apps.api.tests.test_hosted_mcp apps.api.tests.test_mcp_write_tools apps.api.tests.test_mcp_tool_contract --settings=config.test_settings`
 
 The eval suite exercises the mounted transport, so run `apps.api.tests.test_mcp_evals`
 when a change touches `integrations/mcp/evals.py`, a serializer behind a read tool,
@@ -202,3 +203,4 @@ Tests verify:
 - [../domain/correspondence.md](../domain/correspondence.md) — Correspondence domain, which hosts the draft tools' outputs
 - [cli.md](cli.md) — Terminal client that exposes the same staff capabilities with the same human handoffs
 - [../architecture/overview.md](../architecture/overview.md) — API architecture
+re/overview.md) — API architecture

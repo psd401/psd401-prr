@@ -16,12 +16,15 @@ non-negotiable rules that `AGENTS.md` indexes are written in full in
 [`docs/compliance-rules.md`](../../docs/compliance-rules.md); this page explains how
 the code enforces them.
 
-`AGENTS.md` is kept as a short map, with a ceiling of about 150 lines, and it must keep
-each rule's operative prohibition. `apps/api/tests/test_agent_context_files.py` enforces
-both. It also checks that `docs/compliance-rules.md` still names every enforcement
-anchor, such as `services.transition()`, `ExemptionCitation`, and
-`test_no_automated_path_exists`. Run it after you edit `AGENTS.md` or the rules
-document: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_agent_context_files --settings=config.test_settings`.
+`AGENTS.md` is kept as a short map and must keep each rule's operative prohibition.
+No single test pins the whole file any more: the earlier AGENTS.md line-ceiling and
+rule-anchor test (`test_agent_context_files`) is no longer in the repository. The
+checks that remain are narrower. `apps/api/tests/test_hosted_mcp.py`
+(`test_source_docs_do_not_describe_the_whole_mcp_surface_as_readonly`) asserts the
+hosted-MCP wording that rule 11 and `docs/compliance-rules.md` must keep, and
+`apps/records/tests/test_compliance.py` (`test_no_automated_path_exists`) guards the
+human-only rule. After you edit `AGENTS.md` or the rules document, run
+`PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_hosted_mcp apps.records.tests.test_compliance --settings=config.test_settings`.
 
 ## Guarantee table
 
