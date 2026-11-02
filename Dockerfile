@@ -5,7 +5,7 @@ RUN bun install --frozen-lockfile
 COPY frontend/ .
 RUN bun run build
 
-FROM python:3.12-slim
+FROM python:3.13-slim
 ARG PRR_RELEASE_SHA
 RUN case "$PRR_RELEASE_SHA" in (""|*[!0-9a-f]*) exit 64;; esac \
     && test "${#PRR_RELEASE_SHA}" -eq 40
