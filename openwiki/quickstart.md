@@ -190,8 +190,3 @@ Each has a source anchor and the reason it is deferred.
 - **Design, UX, and sourcing records** — `docs/ux/casework-uat.md`, `docs/superpowers/specs/`, `docs/build-vs-buy.md`. Deferred: these record the rationale and UAT for past decisions rather than current runtime behavior. Read them directly when a UX or sourcing question arises.
 
 
-
-estion arises.
-
-
-
