@@ -1589,10 +1589,21 @@ export class PrrHostingStack extends cdk.Stack {
       });
       allocationId = elasticIp.attrAllocationId;
     }
-    new ec2.CfnEIPAssociation(this, "ElasticIpAssociation", {
-      allocationId,
-      instanceId: instance.instanceId,
-    });
+    const elasticIpAssociation = new ec2.CfnEIPAssociation(
+      this,
+      "ElasticIpAssociation",
+      { allocationId, instanceId: instance.instanceId },
+    );
+    // Handover step 2 (psd401/psd-aws-infra#42) drops the instance and this
+    // association from the stack and imports them back, because changing the
+    // instance's SubnetId in place replaces it. Retain keeps the host and its
+    // public address when they leave the stack.
+    for (const resource of [
+      instance.node.defaultChild as cdk.CfnResource,
+      elasticIpAssociation,
+    ]) {
+      resource.applyRemovalPolicy(cdk.RemovalPolicy.RETAIN);
+    }
 
     const snapshotRole = new iam.Role(this, "SnapshotPolicyRole", {
       assumedBy: new iam.ServicePrincipal("dlm.amazonaws.com"),

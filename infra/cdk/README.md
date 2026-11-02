@@ -34,6 +34,19 @@ keeps its own route table with only the internet route. Step 1 sets Retain on
 all four and is deployed on its own. Step 2 drops them from this stack and
 looks the subnet up instead; psd-aws-infra then imports them.
 
+Step 2 can't change the instance's `SubnetId` in place: CloudFormation
+replaces an instance for any `SubnetId` change, including a reference
+swapped for the same literal ID, and the root volume holds PostgreSQL. So
+the instance and its Elastic IP association leave the stack and come back
+by import:
+
+1. Retain on the instance and the Elastic IP association.
+2. Drop both and the four subnet resources; the deployment association and
+   the `InstanceId` output name the instance by ID meanwhile.
+3. `cdk import` the instance, with the subnet as a literal ID, and the
+   association. An import can't change anything else in the stack.
+4. Point the deployment association and the output back at the instance.
+
 Neither stack owns the VPC, the internet gateway, the Route 53 zone, any DNS
 record, the Elastic IP allocation, or the CDK bootstrap stack. Production
 associates `eipalloc-0f263927cd1983f48` (54.68.97.81) without owning it: both

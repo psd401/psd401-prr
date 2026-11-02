@@ -274,6 +274,28 @@ describe.each(environments)("psd401-prr-%s network", (envName, config) => {
     }
   });
 
+  // Handover step 2 has to drop the instance from the stack and import it
+  // back, because changing its SubnetId in place replaces it. The Elastic IP
+  // association leaves with it: deleting it would take the public address
+  // off the host.
+  test("retains the instance and its Elastic IP association", () => {
+    for (const type of ["AWS::EC2::Instance", "AWS::EC2::EIPAssociation"]) {
+      const resources = template.findResources(type);
+      expect(Object.keys(resources)).toHaveLength(1);
+      for (const [logicalId, resource] of Object.entries(resources)) {
+        expect({
+          logicalId,
+          DeletionPolicy: resource.DeletionPolicy,
+          UpdateReplacePolicy: resource.UpdateReplacePolicy,
+        }).toEqual({
+          logicalId,
+          DeletionPolicy: "Retain",
+          UpdateReplacePolicy: "Retain",
+        });
+      }
+    }
+  });
+
   test("never touches shared DMZ resources", () => {
     for (const id of SHARED_DMZ_IDS) {
       expect(json).not.toContain(id);
