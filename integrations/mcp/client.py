@@ -1,5 +1,5 @@
 # ABOUTME: Requests-based client for the PRR staff REST API used by MCP.
-# ABOUTME: Three personal-token tools are limited to one draft and proposals.
+# ABOUTME: Four personal-token tools are limited to drafts and proposals.
 """
 PRRClient wraps the staff API (apps/api, mounted at /api/staff/) with a plain
 `requests.Session`. This module intentionally has no `mcp` import, keeping the
@@ -8,8 +8,10 @@ MCP-facing modules (`tools.py`, `hosted.py`, and `server.py`) layer the SDK
 over this client.
 
 Read methods return the staff API response parsed from JSON. The only write
-request is the existing clarification-draft POST, and every write-tool method
-requires the `prr_pat_` marker used by attributed personal access tokens.
+requests are the acknowledgment- and clarification-draft POSTs, and every
+write-tool method requires the `prr_pat_` marker used by attributed personal
+access tokens. Both drafts stop at `draft`: approving, queueing, sending, and
+the status transition that follows confirmed delivery stay human-only.
 Collection-note and exemption-citation tools fetch authoritative rows and
 return structured proposals; they never PATCH a task or attach legal evidence.
 The standalone stdio server registers only the read methods, so the shared
@@ -48,6 +50,53 @@ _PERSONAL_TOKEN_MARKER = "prr_pat_"
 CONCISE = "concise"
 DETAILED = "detailed"
 RESPONSE_FORMATS = (CONCISE, DETAILED)
+
+#: The keys ``draft_acknowledgment`` keeps from the staff API's draft response.
+#:
+#: An allowlist, not a denylist of body fields, because the staff serializer
+#: grows: a field added there must be named here before it can leave for a
+#: caller's model provider, rather than starting to flow the day it lands.
+#:
+#: The rendered letter is deliberately not in it. The acknowledgment template
+#: quotes ``request.description`` verbatim ("You requested: ..."), and the
+#: description is the complete legal record of what was asked (rule 9) --
+#: unbounded requester free text that can name a student. The data owner's
+#: 2026-10-19 sign-off covers `subject`, `requester_name` and `requester_email`
+#: leaving for a model provider; a whole letter body carrying the full
+#: description is a wider category than that, and this tool does not need it.
+#: The officer reads the letter in the case Messages tab, which is where they
+#: approve it. ``subject`` and ``snippet`` are out for the same reason --
+#: ``snippet`` is the opening of that body.
+#:
+#: The clarification tool is not shaped this way and does not need to be: its
+#: template interpolates only the questions the caller itself supplied, the
+#: requester name, and the request number.
+ACKNOWLEDGMENT_DRAFT_CONFIRMATION_FIELDS = (
+    "id",
+    "request_number",
+    "direction",
+    "kind",
+    "status",
+    "automated",
+    "created_at",
+    "created_by",
+    "approved_at",
+    "approved_by",
+    "queued_at",
+    "queued_by",
+    "sent_at",
+    "cancelled_at",
+    "version",
+    "recipient_count",
+    "attachment_count",
+    "delivery_status",
+    "template_identifier",
+    "template_version",
+    # The estimate the letter states, as an ISO date. A statutory date, not
+    # requester text, and the one rendered value an agent has to be able to
+    # report back without reading the letter.
+    "draft_metadata",
+)
 
 #: Bounds for the overdue scan. The default is a triage-sized page a Records
 #: Officer can actually act on; the ceiling exists so a caller cannot ask for
@@ -88,6 +137,40 @@ OVERDUE_CONCISE_FIELDS = (
 
 def _district_today() -> dt.date:
     return dt.datetime.now(_DISTRICT_TZ).date()
+
+
+def _validated_request_number(value, *, field: str) -> str:
+    """Reject anything that is not a canonical matter number, before any HTTP.
+
+    The number is either interpolated into a REST path or sent as a request
+    body field, so the guard belongs in front of the request rather than
+    behind it. ``field`` names the caller's own parameter so the error
+    teaches the vocabulary for the argument the model actually passed, which
+    is build standard 3's ask.
+    """
+    if not isinstance(value, str) or not _REQUEST_NUMBER.fullmatch(value):
+        raise ValueError(f"{field} must be a canonical PRR request number.")
+    return value
+
+
+def _validated_iso_date(value, *, field: str) -> dt.date:
+    """Accept only a dashed ``YYYY-MM-DD`` string, which is what we document.
+
+    ``date.fromisoformat`` is wider than that on Python 3.12: it also accepts
+    the compact ``YYYYMMDD`` form, and a caller importing ``PRRClient``
+    directly who passed the integer ``20261020`` would have had it coerced by
+    ``str()`` and silently accepted -- never seeing the error that teaches the
+    documented format. ``strptime`` accepts the one form the docstring and the
+    tool schema promise, and a non-string is rejected rather than stringified.
+    """
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be an ISO date (YYYY-MM-DD).")
+    try:
+        return dt.datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError(
+            f"{field} must be an ISO date (YYYY-MM-DD)."
+        ) from exc
 
 
 def _validated_response_format(value) -> str:
@@ -276,10 +359,7 @@ class PRRClient:
         estimate_revisions, collection_tasks, and footage_preservations for
         the request.
         """
-        if not isinstance(number, str) or not _REQUEST_NUMBER.fullmatch(number):
-            raise ValueError(
-                "number must be a canonical PRR request number."
-            )
+        number = _validated_request_number(number, field="number")
         return self._get(
             f"/api/staff/requests/{quote(number, safe='')}/"
         )
@@ -441,6 +521,67 @@ class PRRClient:
         """
         return self._get("/api/staff/capabilities/")
 
+    def draft_acknowledgment(
+        self,
+        request_number: str,
+        estimated_completion: str | None = None,
+    ):
+        """Create an acknowledgment draft without approval or legal effect.
+
+        POST /api/staff/correspondence/drafts/acknowledgment/ renders the
+        versioned statutory acknowledgment template into an editable draft.
+        It is the one RCW 42.56.520 five-business-day letter a records
+        officer writes for every new request, and before this tool existed
+        the only agent-reachable drafting primitive was the clarification
+        letter -- so an officer facing a backlog of unacknowledged cases had
+        to open each one in the staff UI by hand.
+
+        Omit ``estimated_completion`` and the service uses the request's own
+        estimate, or the district default when the request has none. Passing
+        a date that disagrees with an estimate already on the request is
+        rejected by the service rather than silently revising it: changing a
+        published estimate is the human estimate-revision workflow (rule 6),
+        not a side effect of drafting a letter.
+
+        Like every tool in this module, this creates a draft and stops. It
+        does not approve, queue, send, set ``initial_response_delivered``, or
+        transition the request; ``acknowledged`` is applied only by the
+        correspondence service after a human-approved delivery is confirmed.
+
+        The response confirms the draft rather than echoing it: see
+        ``ACKNOWLEDGMENT_DRAFT_CONFIRMATION_FIELDS`` for why the rendered
+        letter stays out of a payload bound for a caller's model provider.
+        """
+        self._require_attributed_personal_token()
+        body = {
+            "request_number": _validated_request_number(
+                request_number,
+                field="request_number",
+            ),
+        }
+        if estimated_completion is not None:
+            body["estimated_completion"] = _validated_iso_date(
+                estimated_completion,
+                field="estimated_completion",
+            ).isoformat()
+        created = self._post(
+            "/api/staff/correspondence/drafts/acknowledgment/",
+            body,
+        )
+        shaped = {
+            key: created[key]
+            for key in ACKNOWLEDGMENT_DRAFT_CONFIRMATION_FIELDS
+            if key in created
+        }
+        shaped["letter_text"] = (
+            "Withheld from this response. The acknowledgment quotes the "
+            "request description in full, which is unbounded requester text "
+            "and can name a student. Read and approve the letter in the case "
+            "Messages tab; this response confirms the draft exists and has "
+            "not been approved, queued, or sent."
+        )
+        return shaped
+
     def draft_clarification_letter(
         self,
         request_number: str,
@@ -449,22 +590,17 @@ class PRRClient:
     ):
         """Create a clarification draft without approval or legal effect."""
         self._require_attributed_personal_token()
-        if (
-            not isinstance(request_number, str)
-            or not _REQUEST_NUMBER.fullmatch(request_number)
-        ):
-            raise ValueError(
-                "request_number must be a canonical PRR request number."
-            )
+        request_number = _validated_request_number(
+            request_number,
+            field="request_number",
+        )
         questions = str(clarification_questions).strip()
         if not questions:
             raise ValueError("clarification_questions cannot be blank.")
-        try:
-            due = dt.date.fromisoformat(str(clarification_due))
-        except ValueError as exc:
-            raise ValueError(
-                "clarification_due must be an ISO date (YYYY-MM-DD)."
-            ) from exc
+        due = _validated_iso_date(
+            clarification_due,
+            field="clarification_due",
+        )
         return self._post(
             "/api/staff/correspondence/drafts/clarification/",
             {

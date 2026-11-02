@@ -14,6 +14,22 @@ AGENT_NATIVE_PRINCIPLES = {
     "legibility": "Agent actions use the same records, actors, validation, events, and audit trail as the GUI.",
 }
 
+#: What ``mcp_tool`` means on the wire.
+#:
+#: This catalog is itself read by agents, over the MCP tool that serves it,
+#: and an agent that read ``mcp_tool: null`` as "parity promised but tool
+#: missing" is exactly what issue #12 reported. Explaining the field in the
+#: response is the fix that reaches that reader; a source comment is not.
+MCP_TOOL_FIELD_POLICY = (
+    "mcp_tool names the one MCP tool that executes this capability, for "
+    "discovery. It is not a parity promise, and null does not mean agents "
+    "are excluded: every row's agent_transport is rest, so a direct "
+    "capability with no MCP tool is executed by calling its own method and "
+    "path with an attributed personal access token. The MCP server exposes "
+    "the workflows agents drive rather than one tool per route, so most "
+    "rows name no tool."
+)
+
 AGENT_CONSTRAINT_DEFINITIONS = {
     "anonymous_write_only": (
         "The sole anonymous business operation accepts a new request and "
@@ -240,6 +256,25 @@ def _capability(
     mcp_tool=None,
     constraints=None,
 ):
+    """Build one catalog row.
+
+    ``execution`` is the policy: "direct" means an agent may execute this
+    with its own attributed token, "human_confirmation" that it needs an
+    explicit confirmed selection, "human_only" that a token caller gets a
+    handoff instead.
+
+    ``mcp_tool`` is a narrower claim, and the two are easy to confuse. It
+    names the one MCP tool that *executes this operation*, for discovery; it
+    is not a parity promise and ``None`` does not mean agents are shut out.
+    ``agent_transport`` is "rest" on every row, so a "direct" capability with
+    no MCP tool is reachable the same way the catalog itself says: a
+    ``POST``/``PATCH`` to ``path`` with a personal access token. The MCP
+    server stays well under psd-dev-standards standards/07-mcp.md's ~15-tool
+    ceiling by exposing the workflows an agent actually drives, not one tool
+    per REST route, so most rows name no tool and always will.
+    ``test_the_capability_catalog_names_every_executing_tool`` keeps the
+    rows that do name one from drifting.
+    """
     return {
         "id": capability_id,
         "outcome": outcome,
@@ -266,6 +301,7 @@ CAPABILITIES = (
         "GET",
         "/api/staff/capabilities/",
         ["/configuration/agent-access"],
+        mcp_tool="psd_prr_capabilities_list",
     ),
     _capability(
         "requests.submit_public",
@@ -1836,6 +1872,7 @@ CAPABILITIES = (
         "/api/staff/correspondence/drafts/acknowledgment/",
         ["/requests/:number/messages"],
         risk="moderate",
+        mcp_tool="psd_prr_acknowledgment_draft",
     ),
     _capability(
         "correspondence.draft_clarification",
@@ -1844,6 +1881,7 @@ CAPABILITIES = (
         "/api/staff/correspondence/drafts/clarification/",
         ["/requests/:number/messages"],
         risk="moderate",
+        mcp_tool="psd_prr_clarification_letter_draft",
     ),
     _capability(
         "correspondence.draft_estimate_revision",
@@ -2394,6 +2432,7 @@ def capability_catalog():
             "human_only": "Agent must hand off; the accountable human executes this action in the staff UI.",
         },
         "constraint_definitions": deepcopy(AGENT_CONSTRAINT_DEFINITIONS),
+        "mcp_tool_policy": MCP_TOOL_FIELD_POLICY,
         "capabilities": deepcopy(list(CAPABILITIES)),
     }
 
@@ -2418,6 +2457,7 @@ class AgentCapabilityCatalogSerializer(serializers.Serializer):
     principles = serializers.DictField(child=serializers.CharField())
     policy = serializers.DictField(child=serializers.CharField())
     constraint_definitions = serializers.DictField(child=serializers.CharField())
+    mcp_tool_policy = serializers.CharField()
     capabilities = AgentCapabilitySerializer(many=True)
 
 

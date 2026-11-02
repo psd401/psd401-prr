@@ -154,8 +154,11 @@ echo. Every other business/data API requires an explicit identity.
 Shared stdio MCP uses a separate nonstaff token with only
 `records.read_staff_api`; hosted MCP uses attributed personal staff tokens and
 never that shared identity for its gated tools. Hosted `/mcp` exposes exactly
-three attributed personal-token draft/proposal tools; standalone stdio and the
-shared nonstaff MCP identity remain read-only. Never put tokens in source or
+four attributed personal-token draft/proposal tools -- an acknowledgment draft,
+a clarification draft, and two proposals that apply nothing; standalone stdio
+and the shared nonstaff MCP identity remain read-only. Drafting is not
+delivery: every one of them stops short of approving, queueing, or sending, so
+the surface never widens rule 6's two automated requester-facing paths. Never put tokens in source or
 `.env.example`.
 
 The one unattended Vault action is authorized by district decision
