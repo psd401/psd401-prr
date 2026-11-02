@@ -1,7 +1,7 @@
 ---
 type: Operations
 title: Deployment Guide
-description: Local development, the Docker Compose file layering for the AWS host and its object-store overlays, the prr-compose host wrapper that keeps the Gmail activation overlay applied, and the direct production CDK deployment.
+description: Local development, the Docker Compose file layering for the AWS host and its object-store overlays, the Caddy TLS front end and forwarded-proto trust, the prr-compose host wrapper that keeps the Gmail activation overlay applied, and the direct production CDK deployment.
 tags: [operations, deployment, docker, development, production, prr-compose]
 ---
 
@@ -91,6 +91,30 @@ and it is the one to run after editing a compose file. The CI step "Prove the AW
 needs no MinIO credential" also parses the base and AWS overlay with no MinIO values, which
 guards against a required MinIO variable creeping into the base file. Changes to
 `infra/cdk/` or the release path belong to [AWS production release](aws-deployment.md).
+
+## TLS front end
+
+On the AWS host, the only public listener is the `caddy` service that
+`docker-compose.aws.yml` adds, on ports 80 and 443. [`docker/Caddyfile`](../../docker/Caddyfile)
+defines one site for the environment's public hostname, obtains its certificate
+automatically, and reverse-proxies to `web:8000`. Port 80 exists so the ACME HTTP-01
+challenge can complete and plain HTTP can redirect; it carries no application traffic.
+
+```mermaid
+flowchart LR
+  client["Browser or agent"] -->|"HTTPS 443"| caddy["caddy service: TLS and ACME"]
+  caddy -->|"reverse_proxy web:8000, sets X-Forwarded-Proto https"| web["web service: Django on port 8000"]
+```
+
+Caddy overwrites `X-Forwarded-Proto` rather than forwarding the client's value. Django
+honors that header only when `DJANGO_TRUST_X_FORWARDED_PROTO` is `true`, which the AWS
+overlay sets on the `web` service alone. `config/settings.py` attaches
+`SECURE_PROXY_SSL_HEADER` only under that switch. The trust is safe only because Caddy is
+the single route into `web`; the base file binds the web port to loopback. The `caddydata`
+volume holds certificates and account keys, and losing it forces re-issuance against
+Let's Encrypt rate limits. No Django test asserts the Caddy header or the trust switch, so
+the narrow check is the overlay parse in [Compose files](#compose-files) (`config -q`), plus a
+review of `docker/Caddyfile` and the `web` environment in `docker-compose.aws.yml` together.
 
 ## Container startup
 
