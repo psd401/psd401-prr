@@ -255,10 +255,22 @@ describe.each(environments)("psd401-prr-%s network", (envName, config) => {
       "AWS::EC2::SubnetRouteTableAssociation",
       "AWS::EC2::Route",
     ]) {
-      template.hasResource(type, {
-        DeletionPolicy: "Retain",
-        UpdateReplacePolicy: "Retain",
-      });
+      // Every resource of the type, not just one of them: the stack has
+      // exactly one each, so this is the subnet being handed over and not
+      // some other resource that happens to carry Retain.
+      const resources = template.findResources(type);
+      expect(Object.keys(resources)).toHaveLength(1);
+      for (const [logicalId, resource] of Object.entries(resources)) {
+        expect({
+          logicalId,
+          DeletionPolicy: resource.DeletionPolicy,
+          UpdateReplacePolicy: resource.UpdateReplacePolicy,
+        }).toEqual({
+          logicalId,
+          DeletionPolicy: "Retain",
+          UpdateReplacePolicy: "Retain",
+        });
+      }
     }
   });
 
