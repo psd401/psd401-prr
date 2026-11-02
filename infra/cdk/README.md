@@ -3,8 +3,8 @@
 Three stacks in account `338414773271`, `us-west-2`:
 
 - **`psd401-prr-prod`** hosts production at `https://prr.psd401.net`: a
-  dedicated t3a.large host, a subnet whose only route leaves through the
-  internet gateway, a records bucket, a write-only backups bucket, narrow SSM
+  dedicated t3a.large host in a subnet whose only route leaves through the
+  internet gateway (the subnet belongs to psd-aws-infra), a records bucket, a write-only backups bucket, narrow SSM
   managed-node permissions, fixed parameter-free email diagnostics and
   inbound-disabled-incident activation documents,
   an empty Google OIDC client-secret container, a daily EBS snapshot policy,
@@ -23,8 +23,10 @@ provisioned from the console or the CLI.
 The subnet is the point of the design. Every existing subnet in this VPC
 shares a route table that reaches on-prem over a VPN gateway and two VPC
 peerings. An internet-facing host holding FERPA-covered records must not have
-those paths, so the stack builds its own subnet with its own route table and
-never references the shared DMZ route table, NACL, or subnet.
+those paths, so the host sits in a subnet of its own with its own route table,
+and the stack never references the shared DMZ route table, NACL, or subnet.
+This stack built that subnet; psd-aws-infra now owns it, and the stack places
+the host in it by ID.
 
 **Moving to psd-aws-infra (2026-11).** psd-dev-standards 08 gives every
 subnet in a shared VPC to psd-aws-infra, so this subnet, its route table,
@@ -43,12 +45,29 @@ with the subnet resources dropped in the same change and with them kept.) So
 the instance and its Elastic IP association leave the stack and come back
 by import:
 
-1. Retain on the instance and the Elastic IP association.
+1. Retain on the instance and the Elastic IP association, deployed on its
+   own.
 2. Drop both and the four subnet resources; the deployment association and
    the `InstanceId` output name the instance by ID meanwhile.
 3. `cdk import` the instance, with the subnet as a literal ID, and the
    association. An import can't change anything else in the stack.
 4. Point the deployment association and the output back at the instance.
+
+Steps 2 to 4 run from one commit. The code synthesizes the final template;
+the `subnetHandover` context selects the two transitional ones. Version
+reporting stays off for steps 2 and 3 so `CDKMetadata` can't change during
+the import:
+
+```text
+bunx cdk deploy psd401-prr-prod -c subnetHandover=detached --no-version-reporting --require-approval never --profile psd401-prr-prod
+bunx cdk import psd401-prr-prod -c subnetHandover=import --no-version-reporting --resource-mapping handover-mapping.json --profile psd401-prr-prod
+bunx cdk deploy psd401-prr-prod --require-approval never --profile psd401-prr-prod
+```
+
+`handover-mapping.json` maps `InstanceC1063A87` to its `InstanceId` and
+`ElasticIpAssociation` to its `Id`. Run the three back to back. Between
+steps 2 and 3, a plain deploy would create a second instance, because the
+stack no longer holds the first.
 
 Neither stack owns the VPC, the internet gateway, the Route 53 zone, any DNS
 record, the Elastic IP allocation, or the CDK bootstrap stack. Production

@@ -1,5 +1,5 @@
-// ABOUTME: One dedicated public-records host per environment: an isolated
-// ABOUTME: subnet, a hardened EC2 instance, its buckets, role, and snapshots.
+// ABOUTME: One dedicated public-records host per environment: a hardened EC2
+// ABOUTME: instance in an isolated subnet, its buckets, role, and snapshots.
 
 import * as cdk from "aws-cdk-lib";
 import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
@@ -13,7 +13,7 @@ import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as sns from "aws-cdk-lib/aws-sns";
 import * as snsSubscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 import * as ssm from "aws-cdk-lib/aws-ssm";
-import { DependencyGroup, type Construct } from "constructs";
+import type { Construct } from "constructs";
 import * as path from "node:path";
 
 import { grantAdvisoryBedrockInference } from "./advisory-bedrock";
@@ -69,45 +69,23 @@ export class PrrHostingStack extends cdk.Stack {
       availabilityZones: [config.availabilityZone],
     });
 
-    // A subnet of our own, not one of the VPC's existing ones. Those share a
-    // route table that reaches on-prem over a VPN gateway and two VPC
-    // peerings; an internet-facing host holding student records must not have
-    // those paths. The L2 gives this subnet its own route table, and the
-    // default route below is the only entry we add to it.
-    const subnet = new ec2.Subnet(this, "Subnet", {
-      vpcId: config.vpcId,
+    // The host's subnet belongs to psd-aws-infra, which owns every subnet in a
+    // shared VPC (psd-dev-standards 08 "Shared network";
+    // psd401/psd-aws-infra#42). It is not one of the VPC's other subnets:
+    // those share a route table that reaches on-prem over a VPN gateway and
+    // two VPC peerings, and an internet-facing host holding student records
+    // must not have those paths. This one has its own route table whose only
+    // route goes to the internet gateway, and it assigns a public address at
+    // launch so user data reaches the internet before the Elastic IP lands.
+    const subnet = ec2.Subnet.fromSubnetAttributes(this, "Subnet", {
+      subnetId: config.subnetId,
       availabilityZone: config.availabilityZone,
-      cidrBlock: config.subnetCidr,
-      // The host needs outbound internet during user data, before the Elastic
-      // IP association lands. The EIP replaces this ephemeral address.
-      mapPublicIpOnLaunch: true,
     });
-    cdk.Tags.of(subnet).add("Name", `psd401-prr-${config.envName}`);
-    acknowledgeGuard(subnet, {
-      subnet_auto_assign_public_ip_disabled_check:
-        "This subnet holds only the public records host, which is internet " +
-        "facing by design: it serves the public request form. User data " +
-        "needs outbound internet before the Elastic IP association lands, so " +
-        "the launch address is required; the Elastic IP then replaces it. " +
-        "The subnet has its own route table with no VPN or peering route, " +
-        "and the security group opens only 80 and 443.",
-    });
-    // The gateway is already attached to the VPC, so there is no attachment
-    // resource in this stack for the route to wait on.
-    subnet.addDefaultInternetRoute(config.igwId, new DependencyGroup());
-    // The subnet moves to psd-aws-infra, which owns every subnet in a shared
-    // VPC (psd-dev-standards 08 "Shared network"; psd401/psd-aws-infra#42).
-    // Step 1: Retain, deployed on its own, so the next change can drop these
-    // four from the stack and CloudFormation leaves them in place for
-    // Terraform to import.
-    for (const resource of [
-      subnet.node.defaultChild,
-      subnet.node.findChild("RouteTable"),
-      subnet.node.findChild("RouteTableAssociation"),
-      subnet.node.findChild("DefaultRoute"),
-    ]) {
-      (resource as cdk.CfnResource).applyRemovalPolicy(cdk.RemovalPolicy.RETAIN);
-    }
+    cdk.Annotations.of(subnet).acknowledgeWarning(
+      "@aws-cdk/aws-ec2:noSubnetRouteTableId",
+      "This stack places the host in the subnet and never reads or adds to " +
+        "its route table, which psd-aws-infra owns.",
+    );
 
     const securityGroup = new ec2.SecurityGroup(this, "SecurityGroup", {
       vpc,
@@ -522,6 +500,21 @@ export class PrrHostingStack extends cdk.Stack {
         "instance-to-instance traffic. Client traffic is TLS at Caddy, and " +
         "calls to AWS and Google APIs are TLS.",
     });
+
+    // Subnet handover (README, "Moving to psd-aws-infra"): CloudFormation
+    // replaces an instance for any SubnetId change, so the instance and its
+    // Elastic IP association leave the stack ("detached") and come back by
+    // resource import ("import"). An import rejects every other change, so
+    // both phases name the instance by ID; the final template, with no
+    // context, points back at the instance. Each phase is deployed once.
+    const handover: unknown = this.node.tryGetContext("subnetHandover");
+    if (handover !== undefined && handover !== "detached" && handover !== "import") {
+      throw new Error(
+        `subnetHandover must be "detached" or "import", not ${JSON.stringify(handover)}`,
+      );
+    }
+    const instanceId =
+      handover === undefined ? instance.instanceId : config.handoverInstanceId;
 
     const gmailInboundActivationOverlay = [
       "services:",
@@ -1496,7 +1489,7 @@ export class PrrHostingStack extends cdk.Stack {
           commands: [directDeploymentScript],
           executionTimeout: ["3300"],
         },
-        targets: [{ key: "InstanceIds", values: [instance.instanceId] }],
+        targets: [{ key: "InstanceIds", values: [instanceId] }],
         waitForSuccessTimeoutSeconds: 3600,
       },
     );
@@ -1603,6 +1596,11 @@ export class PrrHostingStack extends cdk.Stack {
       elasticIpAssociation,
     ]) {
       resource.applyRemovalPolicy(cdk.RemovalPolicy.RETAIN);
+    }
+    if (handover === "detached") {
+      // The instance construct stays for its profile, which the host keeps.
+      instance.node.tryRemoveChild("Resource");
+      this.node.tryRemoveChild("ElasticIpAssociation");
     }
 
     const snapshotRole = new iam.Role(this, "SnapshotPolicyRole", {
@@ -1761,7 +1759,7 @@ export class PrrHostingStack extends cdk.Stack {
       alarm.addOkAction(alarmAction);
     }
 
-    new cdk.CfnOutput(this, "InstanceId", { value: instance.instanceId });
+    new cdk.CfnOutput(this, "InstanceId", { value: instanceId });
     new cdk.CfnOutput(this, "SubnetId", { value: subnet.subnetId });
     new cdk.CfnOutput(this, "SecurityGroupId", {
       value: securityGroup.securityGroupId,

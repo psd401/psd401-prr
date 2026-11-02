@@ -7,9 +7,13 @@ export interface PrrEnvConfig {
   readonly region: string;
   readonly vpcId: string;
   readonly vpcCidr: string;
-  readonly igwId: string;
   readonly availabilityZone: string;
-  readonly subnetCidr: string;
+  // Owned by psd-aws-infra (psd401/psd-aws-infra#42); this stack only places
+  // the host in it.
+  readonly subnetId: string;
+  // The live instance, named by ID only while the subnet handover's
+  // transitional templates are deployed (README, "Moving to psd-aws-infra").
+  readonly handoverInstanceId: string;
   // Only prod pins to an existing Elastic IP allocation; dev has the stack
   // allocate and own its own EIP.
   readonly eipAllocationId?: string;
@@ -33,7 +37,6 @@ const shared = {
   region: "us-west-2",
   vpcId: "vpc-020d508e4786a5803",
   vpcCidr: "172.25.0.0/16",
-  igwId: "igw-0bb97cc980e1f53c4",
   availabilityZone: "us-west-2a",
   // 8 GiB, not 4: ClamAV holds its signature database in memory and roughly
   // doubles that during a reload, alongside Postgres and the application.
@@ -46,7 +49,9 @@ const shared = {
 export const prodConfig: PrrEnvConfig = {
   ...shared,
   envName: "prod",
-  subnetCidr: "172.25.200.0/24",
+  // psd401-prr-prod, 172.25.200.0/24.
+  subnetId: "subnet-02ccab0368061c253",
+  handoverInstanceId: "i-016ee26e06547aa82",
   // 54.68.97.81 — pinned: both public and district-internal DNS already
   // point here. Never create a second EIP for prod.
   eipAllocationId: "eipalloc-0f263927cd1983f48",
