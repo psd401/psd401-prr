@@ -866,6 +866,34 @@ class DraftActionApiTests(CorrespondenceApiTestCase):
         self.assertEqual(deleted.detail["correspondence_id"], str(draft.id))
         self.assertEqual(deleted.detail["kind"], Correspondence.Kind.GENERAL)
 
+    def test_structured_draft_is_deletable_though_not_editable_in_place(self):
+        draft = services.create_clarification_draft(
+            self.prr,
+            clarification_questions=(
+                "Please identify the employee names and date range requested."
+            ),
+            clarification_due=dt.date(2026, 8, 10),
+            actor=self.liaison,
+        )
+        with self.assertRaisesMessage(ValidationError, "validated template"):
+            services.edit_draft(
+                draft,
+                subject="Rewrite",
+                body="Rewrite body",
+                actor=self.liaison,
+                expected_version=draft.version,
+            )
+        self.login(self.liaison)
+
+        response = self.client.post(
+            f"/api/staff/correspondence/{draft.id}/delete/",
+            {"expected_version": draft.version},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Correspondence.objects.filter(pk=draft.pk).exists())
+
     def test_stale_draft_delete_returns_conflict(self):
         draft = self.general_draft()
         stale_version = draft.version

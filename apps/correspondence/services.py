@@ -2779,8 +2779,12 @@ def delete_draft(
     """Delete a never-approved draft; approved correspondence stays forever.
 
     A draft is not yet a legal record (the model refuses deleting anything
-    else). A draft other evidence points at — an attachment, a search
-    attestation, a clarification cycle — is refused rather than unwound.
+    else). Structured template drafts are deletable even though they cannot
+    be edited in place: discarding sends nothing, so there are no template
+    inputs to validate. The draft's own recipients, denial citations, and
+    search chunks cascade with it; a draft other evidence points at — an
+    attachment, a search attestation, a clarification cycle — is refused
+    rather than unwound.
     """
     correspondence = (
         Correspondence.objects.select_for_update(of=("self",))
