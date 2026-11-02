@@ -26,6 +26,14 @@ peerings. An internet-facing host holding FERPA-covered records must not have
 those paths, so the stack builds its own subnet with its own route table and
 never references the shared DMZ route table, NACL, or subnet.
 
+**Moving to psd-aws-infra (2026-11).** psd-dev-standards 08 gives every
+subnet in a shared VPC to psd-aws-infra, so this subnet, its route table,
+the association and the default route are being handed over
+(psd401/psd-aws-infra#42). The isolation above doesn't change: the subnet
+keeps its own route table with only the internet route. Step 1 sets Retain on
+all four and is deployed on its own. Step 2 drops them from this stack and
+looks the subnet up instead; psd-aws-infra then imports them.
+
 Neither stack owns the VPC, the internet gateway, the Route 53 zone, any DNS
 record, the Elastic IP allocation, or the CDK bootstrap stack. Production
 associates `eipalloc-0f263927cd1983f48` (54.68.97.81) without owning it: both
