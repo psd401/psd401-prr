@@ -599,6 +599,9 @@ describe('CorrespondencePanel', () => {
     expect(await screen.findByText('Case update')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Compose message' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Edit draft' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Delete draft Case update' }),
+    ).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve and send' })).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: 'Resolve clarification' }),
@@ -642,6 +645,9 @@ describe('CorrespondencePanel', () => {
 
     expect(await screen.findByText('Closure review')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Edit draft' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Delete draft Closure review' }),
+    ).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Compose message' }))
     const compose = screen.getByRole('heading', { name: 'Compose correspondence' })
       .closest('dialog') as HTMLElement
@@ -656,6 +662,71 @@ describe('CorrespondencePanel', () => {
         name: 'No-records / out-of-retention closure',
       }),
     ).not.toBeInTheDocument()
+  })
+
+  it('lets a liaison delete an unsent draft after confirming', async () => {
+    const draft = {
+      ...OUTBOUND_DETAIL,
+      id: 'draft-1',
+      status: 'draft',
+      version: 2,
+      approved_subject: '',
+      approved_body: '',
+      delivery: null,
+      failed_at: null,
+      failure_category: '',
+      failure_description: '',
+      delivery_status: null,
+      attachments: [],
+    }
+    let deleted = false
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      if (url === '/api/staff/correspondence/?request=PRR-2026-0001') {
+        return fakeResponse(MESSAGE_PAGE(deleted ? [] : [draft]))
+      }
+      if (url === '/api/staff/correspondence/draft-1/?request=PRR-2026-0001') {
+        return fakeResponse(draft)
+      }
+      if (url === '/api/staff/correspondence/draft-1/delete/' && method === 'POST') {
+        deleted = true
+        return { ok: true, status: 204, text: async () => '' } as Response
+      }
+      if (url === '/api/staff/clarification-cycles/?request=PRR-2026-0001') {
+        return fakeResponse(PAGE([]))
+      }
+      throw new Error(`Unexpected fetch: ${method} ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const user = userEvent.setup()
+    renderPanel(['liaison'])
+
+    await user.click(await screen.findByRole('button', { name: 'Open Case update' }))
+    await user.click(
+      await screen.findByRole('button', { name: 'Delete draft Case update' }),
+    )
+    const dialog = screen.getByRole('heading', { name: 'Delete draft' })
+      .closest('dialog') as HTMLElement
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      '/api/staff/correspondence/draft-1/delete/',
+      expect.anything(),
+    )
+    await user.click(within(dialog).getByRole('button', { name: 'Delete draft' }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/staff/correspondence/draft-1/delete/',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ expected_version: 2 }),
+        }),
+      )
+    })
+    await waitFor(() => {
+      expect(screen.queryByText('Case update')).not.toBeInTheDocument()
+    })
   })
 
   it('does not offer cancellation while a delivery is actively claimed', async () => {

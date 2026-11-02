@@ -2099,6 +2099,17 @@ CAPABILITIES = (
         risk="moderate",
     ),
     _capability(
+        "correspondence.delete_draft",
+        "Delete a never-approved draft with optimistic concurrency; "
+        "approved correspondence and drafts linked to other case evidence "
+        "are refused.",
+        "POST",
+        "/api/staff/correspondence/{id}/delete/",
+        ["/requests/:number/messages"],
+        execution="human_confirmation",
+        risk="moderate",
+    ),
+    _capability(
         "correspondence.preview",
         "Preview the exact recipient-visible content produced by delivery rendering.",
         "GET",

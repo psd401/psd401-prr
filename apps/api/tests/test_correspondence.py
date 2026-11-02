@@ -848,6 +848,117 @@ class DraftActionApiTests(CorrespondenceApiTestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["code"], "version_conflict")
 
+    def test_liaison_can_delete_an_unsent_general_draft(self):
+        draft = self.general_draft()
+        self.login(self.liaison)
+
+        response = self.client.post(
+            f"/api/staff/correspondence/{draft.id}/delete/",
+            {"expected_version": draft.version},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Correspondence.objects.filter(pk=draft.pk).exists())
+        deleted = AuditLog.objects.get(action="correspondence.draft_deleted")
+        self.assertEqual(deleted.actor, self.liaison)
+        self.assertEqual(deleted.target, self.prr.number)
+        self.assertEqual(deleted.detail["correspondence_id"], str(draft.id))
+        self.assertEqual(deleted.detail["kind"], Correspondence.Kind.GENERAL)
+
+    def test_stale_draft_delete_returns_conflict(self):
+        draft = self.general_draft()
+        stale_version = draft.version
+        services.edit_draft(
+            draft,
+            subject="Concurrent edit",
+            body="Another staff member saved first.",
+            actor=self.liaison,
+            expected_version=stale_version,
+        )
+        self.login(self.liaison)
+
+        response = self.client.post(
+            f"/api/staff/correspondence/{draft.id}/delete/",
+            {"expected_version": stale_version},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(Correspondence.objects.filter(pk=draft.pk).exists())
+
+    def test_approved_correspondence_cannot_be_deleted(self):
+        approved = services.approve_draft(
+            self.general_draft(),
+            actor=self.officer,
+            expected_version=1,
+        )
+        self.login()
+
+        response = self.client.post(
+            f"/api/staff/correspondence/{approved.id}/delete/",
+            {"expected_version": approved.version},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "validation_error")
+        self.assertTrue(Correspondence.objects.filter(pk=approved.pk).exists())
+
+    def test_draft_delete_follows_draft_edit_roles(self):
+        closure = services.create_authored_draft(
+            self.prr,
+            kind=Correspondence.Kind.CLOSURE,
+            subject="Officer legal draft",
+            body="Records Officer review required.",
+            actor=self.officer,
+        )
+        general = self.general_draft()
+        for user, draft in ((self.liaison, closure), (self.reviewer, general)):
+            with self.subTest(user=user.username):
+                self.login(user)
+                response = self.client.post(
+                    f"/api/staff/correspondence/{draft.id}/delete/",
+                    {"expected_version": draft.version},
+                    content_type="application/json",
+                )
+
+                self.assertEqual(response.status_code, 403)
+                self.assertTrue(
+                    Correspondence.objects.filter(pk=draft.pk).exists()
+                )
+
+        self.login()
+        response = self.client.post(
+            f"/api/staff/correspondence/{closure.id}/delete/",
+            {"expected_version": closure.version},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 204)
+
+    def test_draft_linked_to_other_records_is_not_deleted(self):
+        draft = self.general_draft()
+        CorrespondenceAttachment.objects.create(
+            correspondence=draft,
+            original_filename="supporting-records.pdf",
+            content_type="application/pdf",
+            size=42,
+            sha256="a" * 64,
+        )
+        self.login()
+
+        response = self.client.post(
+            f"/api/staff/correspondence/{draft.id}/delete/",
+            {"expected_version": draft.version},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(Correspondence.objects.filter(pk=draft.pk).exists())
+        self.assertFalse(
+            AuditLog.objects.filter(action="correspondence.draft_deleted").exists()
+        )
+
     def test_structured_patch_rerenders_and_preserves_requester_delivery(self):
         draft = services.create_clarification_draft(
             self.prr,
