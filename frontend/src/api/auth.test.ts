@@ -47,6 +47,11 @@ describe('Google sign-in return path', () => {
       .toBe('/api/staff/auth/oidc/authenticate/?next=%2Fwork%2F42%3Ftab%3Drecords')
   })
 
+  it('keeps the fragment so the page can restore its anchor', () => {
+    expect(googleLoginHref(base, { pathname: '/work/42', search: '', hash: '#notes' }))
+      .toBe('/api/staff/auth/oidc/authenticate/?next=%2Fwork%2F42%23notes')
+  })
+
   it('adds nothing at the root or after a denied sign-in', () => {
     expect(googleLoginHref(base, { pathname: '/', search: '', hash: '' })).toBe(base)
     expect(googleLoginHref(base, { pathname: '/', search: '?login=denied', hash: '' })).toBe(base)
