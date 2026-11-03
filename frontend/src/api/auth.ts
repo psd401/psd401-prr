@@ -34,6 +34,21 @@ export function authBootstrap() {
   } as const
 }
 
+// The OIDC view keeps a same-site ``next`` in the session and the callback
+// returns there, so a deep link opened while signed out survives sign-in.
+export function googleLoginHref(
+  base: string,
+  location: Pick<Location, 'pathname' | 'search' | 'hash'>,
+) {
+  const params = new URLSearchParams(location.search)
+  params.delete('login')
+  const search = params.toString()
+  const next = `${location.pathname}${search ? `?${search}` : ''}${location.hash}`
+  if (next === '/') return base
+  const separator = base.includes('?') ? '&' : '?'
+  return `${base}${separator}next=${encodeURIComponent(next)}`
+}
+
 export function useMe() {
   return useQuery<StaffUser>({
     queryKey: ['me'],
