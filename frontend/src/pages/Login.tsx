@@ -1,7 +1,7 @@
 // ABOUTME: Branded staff sign-in: Google SSO in deployed mode and a local-only
 // ABOUTME: Django password form so developers need no cloud credentials.
 import { useState, type FormEvent } from 'react'
-import { authBootstrap, useLogin } from '../api/auth'
+import { authBootstrap, googleLoginHref, useLogin } from '../api/auth'
 import { appAsset } from '../appAssets'
 import { Button, ErrorNote, Field, Input } from '../ui'
 
@@ -37,7 +37,7 @@ export function Login() {
         )}
         {auth.mode === 'google' ? (
           <a
-            href={auth.googleLoginUrl}
+            href={googleLoginHref(auth.googleLoginUrl, window.location)}
             className="block w-full rounded-md bg-cedar px-3.5 py-2 text-center font-heading text-sm font-bold tracking-wide text-white transition-colors hover:bg-pacific"
           >
             Sign in with Google

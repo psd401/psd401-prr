@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { clearStaffSessionState } from './auth'
+import { clearStaffSessionState, googleLoginHref } from './auth'
 
 beforeEach(() => {
   sessionStorage.clear()
@@ -36,5 +36,24 @@ describe('staff session isolation', () => {
       'message-search:first-officer:PRR-2026-0001',
     )).toBeNull()
     expect(sessionStorage.getItem('unrelated-preference')).toBe('preserved')
+  })
+})
+
+describe('Google sign-in return path', () => {
+  const base = '/api/staff/auth/oidc/authenticate/'
+
+  it('carries the deep link the user opened through sign-in', () => {
+    expect(googleLoginHref(base, { pathname: '/work/42', search: '?tab=records', hash: '' }))
+      .toBe('/api/staff/auth/oidc/authenticate/?next=%2Fwork%2F42%3Ftab%3Drecords')
+  })
+
+  it('keeps the fragment so the page can restore its anchor', () => {
+    expect(googleLoginHref(base, { pathname: '/work/42', search: '', hash: '#notes' }))
+      .toBe('/api/staff/auth/oidc/authenticate/?next=%2Fwork%2F42%23notes')
+  })
+
+  it('adds nothing at the root or after a denied sign-in', () => {
+    expect(googleLoginHref(base, { pathname: '/', search: '', hash: '' })).toBe(base)
+    expect(googleLoginHref(base, { pathname: '/', search: '?login=denied', hash: '' })).toBe(base)
   })
 })

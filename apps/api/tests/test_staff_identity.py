@@ -777,3 +777,30 @@ class GrantChangeKeepsTheActingAdminSignedInTests(TestCase):
         self.admin.staff_identity.refresh_from_db()
         # Cleared, so the revalidation middleware recomputes their roles.
         self.assertIsNone(self.admin.staff_identity.last_group_check_at)
+
+
+@override_settings(
+    PRR_AUTH_MODE="google",
+    PRR_GOOGLE_OIDC_CLIENT_ID="prr-client.apps.googleusercontent.com",
+)
+class GoogleSignInReturnPathTests(TestCase):
+    """A deep link survives the Google round trip; an off-site one does not."""
+
+    def test_same_site_next_is_kept_for_the_callback(self):
+        response = self.client.get(
+            "/api/staff/auth/oidc/authenticate/",
+            {"next": "/work/42?tab=records"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            self.client.session["oidc_login_next"], "/work/42?tab=records"
+        )
+
+    def test_off_site_next_is_dropped(self):
+        self.client.get(
+            "/api/staff/auth/oidc/authenticate/",
+            {"next": "https://attacker.example/phish"},
+        )
+
+        self.assertIsNone(self.client.session["oidc_login_next"])
