@@ -36,6 +36,13 @@ function templateFor(config: PrrEnvConfig): Template {
   return Template.fromStack(stack);
 }
 
+function handoverTemplate(phase: "detached" | "import"): Template {
+  const app = new App({ context: { subnetHandover: phase } });
+  return Template.fromStack(
+    new PrrHostingStack(app, "psd401-prr-prod", prodConfig),
+  );
+}
+
 function jsonFor(config: PrrEnvConfig): string {
   return JSON.stringify(templateFor(config).toJSON());
 }
@@ -211,7 +218,7 @@ const environments: Array<[string, PrrEnvConfig]> = [["prod", prodConfig]];
 const unpinnedConfig: PrrEnvConfig = {
   ...prodConfig,
   envName: "dev",
-  subnetCidr: "172.25.201.0/24",
+  subnetId: "subnet-00000000000000000",
   eipAllocationId: undefined,
   hostname: "unpinned.example.invalid",
 };
@@ -220,58 +227,43 @@ describe.each(environments)("psd401-prr-%s network", (envName, config) => {
   const template = templateFor(config);
   const json = jsonFor(config);
 
-  test("owns its subnet but never the VPC", () => {
-    template.resourceCountIs("AWS::EC2::VPC", 0);
-    template.resourceCountIs("AWS::EC2::Subnet", 1);
-    template.hasResourceProperties("AWS::EC2::Subnet", {
-      VpcId: config.vpcId,
-      CidrBlock: config.subnetCidr,
-      AvailabilityZone: config.availabilityZone,
-      MapPublicIpOnLaunch: true,
-    });
-  });
-
-  test("routes to the internet gateway and nowhere else", () => {
-    template.resourceCountIs("AWS::EC2::RouteTable", 1);
-    template.resourceCountIs("AWS::EC2::Route", 1);
-    template.hasResourceProperties("AWS::EC2::Route", {
-      DestinationCidrBlock: "0.0.0.0/0",
-      GatewayId: config.igwId,
-    });
+  // psd-aws-infra owns every subnet in a shared VPC (psd-dev-standards 08
+  // "Shared network"; psd401/psd-aws-infra#42). The subnet, its route table,
+  // association and default route left this stack with Retain deployed, so
+  // CloudFormation kept them for Terraform to import.
+  test("owns no network resources", () => {
+    for (const type of [
+      "AWS::EC2::VPC",
+      "AWS::EC2::Subnet",
+      "AWS::EC2::RouteTable",
+      "AWS::EC2::SubnetRouteTableAssociation",
+      "AWS::EC2::Route",
+    ]) {
+      template.resourceCountIs(type, 0);
+    }
     expect(json).not.toContain("10.0.0.0/8");
     expect(json).not.toContain("VpcPeeringConnectionId");
     expect(json).not.toContain("vgw-");
     expect(json).not.toContain("pcx-");
   });
 
-  // Step 1 of handing the subnet to psd-aws-infra (psd-dev-standards 08
-  // "Shared network"; psd401/psd-aws-infra#42): Retain must be deployed
-  // before the next change drops these from the stack, so CloudFormation
-  // leaves them in place for Terraform to import.
-  test("retains its subnet, route table, association and route", () => {
-    for (const type of [
-      "AWS::EC2::Subnet",
-      "AWS::EC2::RouteTable",
-      "AWS::EC2::SubnetRouteTableAssociation",
-      "AWS::EC2::Route",
-    ]) {
-      // Every resource of the type, not just one of them: the stack has
-      // exactly one each, so this is the subnet being handed over and not
-      // some other resource that happens to carry Retain.
-      const resources = template.findResources(type);
-      expect(Object.keys(resources)).toHaveLength(1);
-      for (const [logicalId, resource] of Object.entries(resources)) {
-        expect({
-          logicalId,
-          DeletionPolicy: resource.DeletionPolicy,
-          UpdateReplacePolicy: resource.UpdateReplacePolicy,
-        }).toEqual({
-          logicalId,
-          DeletionPolicy: "Retain",
-          UpdateReplacePolicy: "Retain",
-        });
-      }
-    }
+  test("points the deployment and the InstanceId output at the instance", () => {
+    const instanceRef = {
+      Ref: Object.keys(template.findResources("AWS::EC2::Instance"))[0],
+    };
+    template.hasResourceProperties("AWS::SSM::Association", {
+      AssociationName: `psd401-prr-${envName}-application`,
+      Targets: [{ Key: "InstanceIds", Values: [instanceRef] }],
+    });
+    template.hasOutput("InstanceId", { Value: instanceRef });
+  });
+
+  test("places the host in the handed-over subnet", () => {
+    template.hasResourceProperties("AWS::EC2::Instance", {
+      SubnetId: config.subnetId,
+      AvailabilityZone: config.availabilityZone,
+    });
+    template.hasOutput("SubnetId", { Value: config.subnetId });
   });
 
   // Handover step 2 has to drop the instance from the stack and import it
@@ -1566,5 +1558,63 @@ describe.each(environments)("psd401-prr-%s backups", (envName, config) => {
         { Key: "psd401-prr-backup", Value: envName },
       ],
     });
+  });
+});
+
+// The subnet handover's two transitional templates (README, "Moving to
+// psd-aws-infra"). Each is deployed once with `-c subnetHandover=<phase>`
+// between the Retain deploy and the final one. CloudFormation replaces an
+// instance for any SubnetId change, so the instance leaves the stack
+// ("detached") and comes back by resource import ("import"), which rejects
+// any change besides the imported resources themselves.
+describe("psd401-prr-prod subnet handover", () => {
+  const final = templateFor(prodConfig).toJSON();
+  const detached = handoverTemplate("detached").toJSON();
+  const imported = handoverTemplate("import").toJSON();
+  const imports = ["ElasticIpAssociation", "InstanceC1063A87"];
+
+  test("detached drops only the instance and its Elastic IP association", () => {
+    const dropped = Object.keys(final.Resources).filter(
+      (id) => !(id in detached.Resources),
+    );
+    const added = Object.keys(detached.Resources).filter(
+      (id) => !(id in final.Resources),
+    );
+    expect(dropped.sort()).toEqual(imports);
+    expect(added).toEqual([]);
+    // The instance construct stays for its profile; the live host keeps it.
+    expect(
+      detached.Resources.InstanceInstanceProfileAB5AEF02?.Type,
+    ).toBe("AWS::IAM::InstanceProfile");
+  });
+
+  test("detached and import name the instance by its ID", () => {
+    for (const json of [detached, imported]) {
+      expect(json.Resources.ApplicationDeployment.Properties.Targets).toEqual([
+        { Key: "InstanceIds", Values: [prodConfig.handoverInstanceId] },
+      ]);
+      expect(json.Outputs.InstanceId.Value).toBe(
+        prodConfig.handoverInstanceId,
+      );
+    }
+  });
+
+  test("import adds the two resources and changes nothing else", () => {
+    const rest = { ...imported.Resources };
+    for (const id of imports) {
+      // Exactly as the final template has them, Retain included: an import
+      // needs a DeletionPolicy, and the final deploy must not modify them.
+      expect(rest[id]).toEqual(final.Resources[id]);
+      delete rest[id];
+    }
+    expect(rest).toEqual(detached.Resources);
+    expect(imported.Outputs).toEqual(detached.Outputs);
+  });
+
+  test("an unknown phase fails synthesis", () => {
+    const app = new App({ context: { subnetHandover: "detach" } });
+    expect(
+      () => new PrrHostingStack(app, "psd401-prr-prod", prodConfig),
+    ).toThrow(/subnetHandover/);
   });
 });
