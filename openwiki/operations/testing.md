@@ -97,7 +97,12 @@ The second server is the Vite dev server on port 4173. The e2e script deletes
   under `config.postgres_test_settings`. Those include `test_matter_kinds`, `test_next_response_due`,
   `test_lifecycle_authorization_concurrency`, `test_inbound_concurrency`, and
   `test_outbound_concurrency`. It then seeds a casework fixture and runs
-  `measure_casework_performance`.
+  `measure_casework_performance` under `config.casework_performance_settings`. That module
+  imports `config.postgres_test_settings` and calls `validate_disposable_database()` in
+  [`apps/correspondence/performance_safety.py`](../../apps/correspondence/performance_safety.py) at
+  import. The guard refuses fixture writes unless the explicit disposable sentinel is set and
+  the database is a loopback URL with an allowlisted user. Do not point the performance
+  settings at a shared database.
 - **Quarantine excludes tests from gating.** `GATING` in `verify-fast.sh` passes
   `--exclude-tag=quarantine`. [`FLAKY.md`](../../FLAKY.md) is the register. A row needs an
   owner, an issue, an expiry no more than four weeks out, and two CI runs on the same commit,
