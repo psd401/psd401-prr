@@ -237,10 +237,6 @@ and a matching CDK change, shipped through the
 Related: [Compliance](compliance.md) (human-only and advisory rules),
 [Agent parity](../architecture/agent-parity.md) (AI actions are
 catalogued as human-confirmation or human-only), [Case workspace](case-workspace.md)
-(where the title and the Next due column appear).
-ot to test case behavior.
-
-Related: [Compliance](compliance.md) (human-only and advisory rules),
-[Agent parity](../architecture/agent-parity.md) (AI actions are
-catalogued as human-confirmation or human-only), [Case workspace](case-workspace.md)
-(where the title and the Next due column appear).
+(where the title and the Next due column appear). The intent advisory's district
+input comes from the [District knowledge pack](knowledge-pack.md), and candidate models
+for these kinds are scored offline in [advisory model comparison](advisory-evaluation.md).

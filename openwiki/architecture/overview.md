@@ -201,6 +201,8 @@ Google groups and direct grants, not from directory lookups ([Google identity](g
 - [domain/case-workspace.md](../domain/case-workspace.md) — Case notes, record uploads, and next response due
 - [domain/collection-and-vault.md](../domain/collection-and-vault.md) — Collection tasks, record systems, Vault
 - [domain/advisory-ai.md](../domain/advisory-ai.md) — Bounded AI proposals
+- [domain/knowledge-pack.md](../domain/knowledge-pack.md) — Officer-maintained knowledge the intent advisory reads
+- [domain/advisory-evaluation.md](../domain/advisory-evaluation.md) — Offline scoring of candidate advisory models
 - [domain/compliance.md](../domain/compliance.md) — Deadline engine, exemptions
 - [integrations/mcp.md](../integrations/mcp.md) — MCP server for agents
 - [domain/correspondence.md](../domain/correspondence.md) — Requester correspondence and Gmail transport
