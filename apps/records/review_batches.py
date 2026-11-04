@@ -17,7 +17,8 @@ or ``auto``.
 
 Opening the same set again (same case, kind, outcome, and records) returns
 the batch already open, with its sample, so a cancelled review leaves nothing
-behind.
+behind; the reopen is audited. The sample keeps the size it was drawn with,
+even if the sample-size setting changed since.
 
 ``decide_batch`` takes the reviewer's judgment of every sampled record. Each
 judgment is recorded as an ordinary single review. Only if every judgment
@@ -87,11 +88,20 @@ def _open_batch(*, request, kind, label, state, ids, sample_size, actor, min_con
         )
     # Reopening the same set (a reviewer cancelled and came back) continues
     # the open batch and its sample rather than leaving one behind each time.
-    # ``ids`` is in primary-key order, so equal sets compare equal.
-    for open_batch in ReviewBatch.objects.select_for_update().filter(
+    # ``ids`` is in primary-key order, so equal sets compare equal. Locking
+    # the case serializes two opens of the same new set.
+    PublicRecordsRequest.objects.select_for_update().filter(pk=request.pk).first()
+    for open_batch in ReviewBatch.objects.filter(
         request=request, kind=kind, proposed_state=state, outcome=ReviewBatch.Outcome.OPEN,
     ):
         if open_batch.record_item_ids == ids:
+            audit(
+                "review.batch_reopened",
+                target=request.number,
+                actor=actor,
+                batch_id=open_batch.pk,
+                kind=kind,
+            )
             return open_batch
     batch = ReviewBatch.objects.create(
         request=request,

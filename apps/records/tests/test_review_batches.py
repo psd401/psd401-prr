@@ -158,6 +158,9 @@ class ClusterBatchTests(_Fixture):
         again = create_cluster_batch(list(reversed(ids)), state=R.NON_RESPONSIVE, actor=self.reviewer)
         self.assertEqual(again.pk, first.pk)
         self.assertEqual(again.sample_ids, first.sample_ids)
+        self.assertEqual(
+            AuditLog.objects.get(action="review.batch_reopened").detail["batch_id"], first.pk,
+        )
         other_outcome = create_cluster_batch(ids, state=R.RESPONSIVE, actor=self.reviewer)
         self.assertNotEqual(other_outcome.pk, first.pk)
         self.assertEqual(ReviewBatch.objects.filter(outcome=ReviewBatch.Outcome.OPEN).count(), 2)
