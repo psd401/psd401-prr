@@ -772,3 +772,28 @@ it('requires a substantive reason before lifting a deposit gate', async () => {
   )
   expect(submit).toBeEnabled()
 })
+
+it('offers every release-ready record when the list spans more than one page', async () => {
+  const records = Array.from({ length: 60 }, (_, index) => ({
+    ...readyRecord,
+    id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, '0')}`,
+    original_filename: `record-${index}.pdf`,
+  }))
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.startsWith('/api/staff/record-items/')) {
+      const second = url.includes('page=2')
+      return response({
+        count: records.length,
+        next: second ? null : `${url}&page=2`,
+        previous: null,
+        results: second ? records.slice(50) : records.slice(0, 50),
+      })
+    }
+    return listFor(input, [])
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  renderPage(['records_officer'], 'PRR-2026-0042')
+
+  expect(await screen.findByLabelText('Select all 60')).toBeInTheDocument()
+})
