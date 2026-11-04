@@ -232,6 +232,32 @@ Automatic responsiveness runs (`PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED`) use
 the review model, `PRR_AI_MODEL_RESPONSIVENESS`, falling back to
 `PRR_AI_MODEL` when it is blank.
 
+## Estimates from measured agreement
+
+`apps/records/estimates.estimate_request(request)` (#41) computes an estimate
+for a `public_records` case and stores it, with every input, as an append-only
+`RecordsEstimate`; an `records.estimate_computed` audit row names it. Other
+matter kinds are refused (rule 13). It changes nothing on the case and sends
+nothing: a person revises the statutory estimate and approves any letter.
+
+- **Responsive range.** Reviewed records are certain (withheld counts as
+  responsive). Unreviewed records are grouped by their standing AI suggestion
+  and scaled by how often people found a record responsive after that
+  suggestion (the latest `ReviewDecision` per record, district-wide). The range
+  is each group's 95% Wilson interval; a label with no measured decisions, and
+  a record with no suggestion, span zero to all.
+- **Fee.** The adopted `FeeSchedule` in effect, applied to records that would
+  be released (responsive, not withheld) for the low, expected, and high
+  cases: per-four-file bundles and per-GB, with the scanned-page line at zero
+  because the records are already electronic. The deposit is up to ten percent
+  of the expected fee (RCW 42.56.120(4)); the flat-fee option and the adopted
+  waiver floor are flagged. No adopted schedule means no fee, stated.
+- **Completion date.** `record.reviewed` audit rows per business day over the
+  trailing 20 business days, applied to every unreviewed record in open cases
+  received earlier (all matter kinds, since they share reviewers) plus this
+  case's own, on the WA business-day calendar. It covers review only. No
+  measured throughput means no date, stated.
+
 ## Bulk review is a human decision, not an accept-all
 
 The review queue lets a reviewer mark a whole filtered selection responsive or
