@@ -8,6 +8,7 @@ Wednesday 2026-11-11 (Veterans Day) is a state holiday.
 
 import datetime as dt
 import hashlib
+import math
 from decimal import Decimal
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -20,7 +21,7 @@ from apps.api.identity import apply_staff_roles
 from apps.api.models import StaffRole
 from apps.audit.models import AuditLog
 from apps.records.estimates import estimate_request, wilson_interval
-from apps.records.fees import activate_fee_schedule
+from apps.records.fees import activate_fee_schedule, activate_fee_waiver_floor
 from apps.records.models import (
     AdvisoryRun,
     ExemptionCitation,
@@ -174,9 +175,10 @@ class ResponsiveRangeTests(_Fixture):
         self.assertEqual(rates["non_responsive"], {"decisions": 20, "responsive": 0})
         # 10 x 0.95 + 10 x 0.0
         self.assertEqual(responsive["expected"], 10)
-        self.assertGreaterEqual(responsive["low"], 7)
-        self.assertLessEqual(responsive["high"], 12)
-        self.assertLess(responsive["low"], responsive["high"])
+        low_r, high_r = wilson_interval(19, 20)
+        _low_n, high_n = wilson_interval(0, 20)
+        self.assertEqual(responsive["low"], math.floor(10 * low_r))
+        self.assertEqual(responsive["high"], math.ceil(10 * high_r + 10 * high_n))
 
     def test_superseded_and_duplicate_records_are_not_counted(self):
         self._item(self.prr, RecordItem.ReviewState.SUPERSEDED)
@@ -207,6 +209,36 @@ class FeeTests(_Fixture):
         self.assertFalse(fee["flat_fee_available"])
         self.assertEqual(estimate.inputs["fee_schedule"]["id"], str(schedule.pk))
         self.assertEqual(estimate.inputs["fee_schedule"]["electronic_gb_rate"], "0.1000")
+
+    def test_each_fee_bills_exactly_the_records_its_range_states(self):
+        self._schedule()
+        self._history("responsive", RecordItem.ReviewState.RESPONSIVE, 3)
+        self._history("responsive", RecordItem.ReviewState.NON_RESPONSIVE, 3)
+        for _ in range(5):
+            self._item(self.prr, ai="responsive")  # 5 x 0.5 = 2.5 expected
+
+        result = estimate_request(self.prr, actor=self.officer, as_of=AS_OF).result
+
+        self.assertEqual(result["responsive"]["expected"], 3)
+        for name in ("low", "expected", "high"):
+            self.assertEqual(result["fee"][name]["files"], result["responsive"][name])
+
+    def test_flat_fee_and_waiver_floor_are_flagged(self):
+        self._schedule()
+        activate_fee_waiver_floor(
+            actor=self.officer, amount=Decimal("5.00"),
+            counsel_reference="Synthetic counsel floor 2026", effective_on=dt.date(2026, 1, 1),
+        )
+        for _ in range(4):
+            self._item(self.prr, RecordItem.ReviewState.RESPONSIVE, size=6_000 * MB)
+
+        fee = estimate_request(self.prr, actor=self.officer, as_of=AS_OF).result["fee"]["expected"]
+
+        # 24 GB x $0.10 + one bundle x $0.05 = $2.45: above the $2 flat fee,
+        # below the $5 floor.
+        self.assertEqual(fee["total"], "2.45")
+        self.assertTrue(fee["flat_fee_available"])
+        self.assertTrue(fee["below_waiver_floor"])
 
     def test_the_deposit_never_exceeds_ten_percent(self):
         self._schedule()

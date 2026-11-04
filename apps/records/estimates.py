@@ -11,16 +11,19 @@ stores a ``RecordsEstimate`` holding the answer and every input behind it:
   a record responsive after the AI suggested that label (stored
   ``ReviewDecision`` rows, latest per record, district-wide). The range is
   the 95% Wilson interval of each group's rate; a group with no measured
-  decisions spans 0 to all of its records. Records with no suggestion use the
-  overall measured rate for the point estimate and span 0 to all.
+  decisions spans 0 to all of its records and, like records with no
+  suggestion, uses the overall measured rate (0.5 with no history at all) for
+  the point estimate.
 * **What fee?** The adopted ``FeeSchedule`` in effect on ``as_of``, applied to
   the records that would be released (responsive, not withheld). Records here
   are already electronic, so the per-file bundle and per-GB rates apply and
   the scanned-page line is zero. The deposit is ``deposit_percent`` of the
   expected fee, never more than RCW 42.56.120(4)'s ten percent. No adopted
   schedule means no fee, said plainly, rather than a guessed one.
-* **When?** District-wide review throughput -- ``record.reviewed`` audit rows
-  per business day over a trailing window -- applied to every unreviewed
+* **When?** District-wide review throughput -- every ``record.reviewed`` audit
+  row in a trailing window of business days (weekend or holiday reviews count
+  as work done in that window), divided by its business days -- applied to
+  every unreviewed
   record in open cases received before this one, plus this case's own, on the
   WA business-day calendar. No measured throughput means no date.
 
@@ -127,17 +130,28 @@ def _responsive_range(counts, rates) -> tuple[dict[str, Any], dict[str, dict[str
             point, (low, high) = overall, (0.0, 1.0)
         else:
             low, high = wilson_interval(rate["responsive"], rate["decisions"])
-            point = rate["responsive"] / rate["decisions"] if rate["decisions"] else 0.5
+            point = rate["responsive"] / rate["decisions"] if rate["decisions"] else overall
         mean_bytes = group["bytes"] / group["records"]
         for name, fraction in (("low", low), ("expected", point), ("high", high)):
             scenarios[name] += group["records"] * fraction
             released[name]["records"] += group["records"] * fraction
             released[name]["bytes"] += group["records"] * fraction * mean_bytes
+    # Whole records, rounded once per scenario; the fee bills exactly these
+    # files, so the letter's count and its fee can never disagree.
+    whole = {
+        "low": math.floor(scenarios["low"] + 1e-9),
+        "expected": int(Decimal(scenarios["expected"]).quantize(0, ROUND_HALF_UP)),
+        "high": math.ceil(scenarios["high"] - 1e-9),
+    }
+    for name, records in whole.items():
+        raw = released[name]["records"]
+        released[name] = {
+            "records": records,
+            "bytes": released[name]["bytes"] * records / raw if raw else 0.0,
+        }
     unreviewed = sum(group["records"] for group in counts["unreviewed"].values())
     responsive = {
-        "low": certain + math.floor(scenarios["low"] + 1e-9),
-        "expected": certain + int(Decimal(scenarios["expected"]).quantize(0, ROUND_HALF_UP)),
-        "high": certain + math.ceil(scenarios["high"] - 1e-9),
+        **{name: certain + records for name, records in whole.items()},
         "reviewed_responsive": certain,
         "unreviewed": unreviewed,
     }
@@ -233,7 +247,7 @@ def estimate_request(
         fee = {
             name: _fee(
                 schedule,
-                counts["reviewed_responsive"] + round(released[name]["records"]),
+                counts["reviewed_responsive"] + int(released[name]["records"]),
                 counts["released_bytes"] + released[name]["bytes"],
                 deposit_percent,
                 floor,
@@ -253,6 +267,8 @@ def estimate_request(
             (timeline["backlog_ahead"] + case_unreviewed) / timeline["per_business_day"]
         )
         completion = add_business_days(as_of, days).isoformat()
+        if days == 0:
+            notes.append("No unreviewed records are ahead of or in this case.")
     notes.append("The completion date covers review only, not redaction or release.")
 
     inputs = {
