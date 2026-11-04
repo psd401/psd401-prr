@@ -19,6 +19,7 @@ import { CounselDomains } from './pages/CounselDomains'
 import { DistrictSettings } from './pages/DistrictSettings'
 import { Inbox } from './pages/Inbox'
 import { IdentitySettings } from './pages/IdentitySettings'
+import { Knowledge } from './pages/Knowledge'
 import { Login } from './pages/Login'
 import { MessageTemplates } from './pages/MessageTemplates'
 import { WorkItemDetail } from './pages/WorkItem'
@@ -106,6 +107,7 @@ function StaffApp() {
           path="configuration/exemptions"
           element={guard(<Exemptions roles={user.roles} />)}
         />
+        <Route path="configuration/knowledge" element={guard(<Knowledge />)} />
         <Route path="configuration/counsel-domains" element={guard(<CounselDomains />)} />
         <Route path="configuration/settings" element={guard(<DistrictSettings />)} />
         <Route

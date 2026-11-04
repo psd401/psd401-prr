@@ -167,7 +167,10 @@ payload:
 
 Only public records requests may arrive through the public form or the intake
 mailbox (`apps/records/intake.py`). Intake then runs through the canonical
-`submit_intake` pipeline with `Channel.PORTAL`.
+`submit_intake` pipeline with `Channel.PORTAL`. When the intake-classification switch
+is on, `submit_intake` also defers a suggested label for the new case until after the
+write commits. The label is advisory and changes nothing about the case; see
+[advisory AI](advisory-ai.md).
 
 ```mermaid
 sequenceDiagram

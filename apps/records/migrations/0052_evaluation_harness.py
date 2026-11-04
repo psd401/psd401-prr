@@ -9,7 +9,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('records', '0050_intake_classification'),
+        ('records', '0051_knowledge_pack'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

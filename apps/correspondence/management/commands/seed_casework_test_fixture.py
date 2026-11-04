@@ -41,9 +41,11 @@ from apps.records.models import (
     CollectionTask,
     EvaluationRun,
     EvaluationSet,
+    KnowledgeRoleAccount,
     PublicRecordsRequest,
     RecordItem,
     RecordItemCustodian,
+    RecordSystem,
     Requester,
     RequestStatus,
     StatusEvent,
@@ -110,6 +112,10 @@ FIXTURE_SUPERSEDE_RECORD_COUNT = 3
 #: superseding the Vault collection never touches.
 FIXTURE_BULK_FILTER_DOMAIN = "bulk.example.org"
 FIXTURE_BULK_FILTER_RECORD_COUNT = 3
+#: A synthetic registry system and one role account for the knowledge-pack
+#: flow. The system has no triage keywords, so it routes no fixture case.
+FIXTURE_KNOWLEDGE_SYSTEM_SLUG = "fixture-shared-mailbox"
+FIXTURE_KNOWLEDGE_ROLE = "Principal, Fixture Elementary"
 FIXTURE_FORWARDED_DESCRIPTION = (
     "Copies of the traffic-safety study for the Harborview crossing, and any "
     "district correspondence about it from February 2026."
@@ -989,6 +995,7 @@ def _seed_evaluation_run(officer, request):
                 "synthetic-model-b": {**result, "accuracy": 1.0, "cost_per_item_usd": None},
             },
             "created_by": officer,
+            _seed_knowledge_pack()
         },
     )
 
@@ -2500,6 +2507,7 @@ class Command(BaseCommand):
             _seed_forwarded_requester_case(officer)
             supersede_request = _seed_supersede_case(officer)
             _seed_evaluation_run(officer, supersede_request)
+            _seed_knowledge_pack()
             _seed_email_intake_redirect_cases(officer, inbound_transport)
             _reconcile_fixture_inbound_work(request)
             _seed_role_work(

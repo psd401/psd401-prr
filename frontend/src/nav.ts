@@ -101,6 +101,12 @@ export const CONFIGURATION_NAV: NavItem[] = [
     description: 'Maintain the citation-backed exemption taxonomy.',
   },
   {
+    label: 'Knowledge',
+    path: '/configuration/knowledge',
+    roles: ['records_officer'],
+    description: 'Tell the intent advisory who held each role, which senders are noise, and how each system is searched.',
+  },
+  {
     label: 'District counsel domains',
     path: '/configuration/counsel-domains',
     roles: ['admin'],

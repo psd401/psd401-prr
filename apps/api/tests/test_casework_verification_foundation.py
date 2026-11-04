@@ -101,6 +101,7 @@ class CaseworkVerificationFoundationTests(SimpleTestCase):
                 "officer-supersede-collection",
                 "reviewer-bulk-review-by-filter",
                 "officer-ai-evaluation-report",
+                "officer-knowledge-pack-edit",
             ],
         )
         self.assertEqual(

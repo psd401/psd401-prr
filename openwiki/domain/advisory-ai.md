@@ -1,28 +1,29 @@
 ---
 type: Domain
 title: Advisory AI Proposals
-description: The advisory-only Amazon Bedrock features - request intent, case titles, record responsiveness, and grounded redaction candidates - their proposal-only boundary, persistence (AdvisoryRun and RedactionProposal), switches, prerequisites, and what they may never change. Start here before touching any advisory or model-facing code.
-tags: [domain, advisory-ai, bedrock, redaction, responsiveness, safety]
-timestamp: 2026-09-24T00:00:00Z
+description: The advisory-only Amazon Bedrock features - request intent, case titles, intake classification (new request, follow-up, duplicate, related, non-request, spam), record responsiveness, and grounded redaction candidates - their proposal-only boundary, persistence (AdvisoryRun, AdvisoryFeedback, and RedactionProposal), switches, per-kind models, prerequisites, and what they may never change. Start here before touching any advisory or model-facing code.
+tags: [domain, advisory-ai, bedrock, redaction, responsiveness, intake-classification, safety]
+timestamp: 2026-11-04T00:00:00Z
 openwiki:
   roles: [domain, integration, architecture]
-  change_kinds: [advisory-ai, model-provider, redaction-proposal, automatic-run]
-  source_paths: [apps/records/advisory_ai.py, apps/records/redaction_ai.py, apps/records/models.py, apps/records/tasks.py, apps/api/advisory.py, apps/configuration/registry.py, apps/configuration/prerequisites.py, infra/cdk/lib/advisory-bedrock.ts, docs/advisory-ai.md]
-  symbols: [AdvisoryRun, RedactionProposal, RedactionProposalDecision, request_request_intent_advisory, request_case_title_advisory, request_record_responsiveness_advisory, request_record_redaction_advisory, request_automatic_record_advisory, defer_automatic_record_advisory, execute_advisory_run, invoke_advisory_model, prepare_record_review_advisories]
-  test_paths: [apps/records/tests/test_advisory_ai.py, apps/records/tests/test_automatic_record_advisory.py, apps/records/tests/test_redaction_ai.py, apps/records/tests/test_case_titles.py, apps/records/tests/test_scope_conversation.py, apps/records/tests/test_verify_advisory_command.py, apps/api/tests/test_advisory_ai.py, apps/api/tests/test_redaction_ai.py]
+  change_kinds: [advisory-ai, model-provider, redaction-proposal, automatic-run, intake-classification]
+  source_paths: [apps/records/advisory_ai.py, apps/records/redaction_ai.py, apps/records/models.py, apps/records/intake.py, apps/records/tasks.py, apps/api/advisory.py, apps/api/resources/requests.py, apps/configuration/registry.py, apps/configuration/prerequisites.py, infra/cdk/lib/advisory-bedrock.ts, frontend/src/case/IntakeClassificationCard.tsx, docs/advisory-ai.md]
+  symbols: [AdvisoryRun, AdvisoryFeedback, RedactionProposal, RedactionProposalDecision, request_request_intent_advisory, request_case_title_advisory, request_intake_classification, defer_automatic_intake_classification, request_record_responsiveness_advisory, request_record_redaction_advisory, request_automatic_record_advisory, defer_automatic_record_advisory, execute_advisory_run, invoke_advisory_model, prepare_record_review_advisories, INTAKE_LABELS, advisory_intake]
+  test_paths: [apps/records/tests/test_advisory_ai.py, apps/records/tests/test_automatic_record_advisory.py, apps/records/tests/test_redaction_ai.py, apps/records/tests/test_case_titles.py, apps/records/tests/test_intake_classification.py, apps/records/tests/test_scope_conversation.py, apps/records/tests/test_verify_advisory_command.py, apps/api/tests/test_advisory_ai.py, apps/api/tests/test_redaction_ai.py]
   invariants:
     - "AdvisoryRun.applied is always false by database constraint; no provider output is a legal action."
     - "Each automatic run keeps a named requester only when a staff member initiated it; manual runs require one."
     - "A queued automatic run re-checks its switches in the worker before any provider call and fails with automatic_disabled or advisory_disabled instead."
     - "Redaction candidates are immutable proposals; accepting one goes through the normal redaction service with an active exemption citation, one at a time."
     - "The provider never sets request status, scope, collection tasks, fees, estimates, correspondence, review state, redactions, withholding, release, or preservation."
-  validation_commands: ["PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_advisory_ai apps.records.tests.test_redaction_ai --settings=config.test_settings"]
+    - "An intake classification may name only a candidate case that was shown to the model; a label that points at a case names one, and every other label names none."
+  validation_commands: ["PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_advisory_ai apps.records.tests.test_redaction_ai apps.records.tests.test_intake_classification --settings=config.test_settings"]
 ---
 
 # Advisory AI Proposals
 
 The application uses Amazon Bedrock (the Converse API, in the district's AWS
-account) for four bounded proposals. Every proposal is advisory. The
+account) for five bounded proposals. Every proposal is advisory. The
 authoritative source is the operations document
 [`docs/advisory-ai.md`](../../docs/advisory-ai.md), which also holds the
 approval prerequisites. This page explains the code shape and the invariants a
@@ -32,6 +33,7 @@ change must keep.
 |---|---|---|
 | `request_intent` | Summary, mandatory search anchors, alternative terms, record-system slugs, clarification questions, complexity flags, a date range, and up to four narrowing options | `request_request_intent_advisory`, or the automatic intake path |
 | `case_title` | One title of at most 80 characters, and nothing else | `request_case_title_advisory` |
+| `intake_classification` | One label (`new_request`, `follow_up`, `duplicate_of`, `related_to`, `non_request`, or `spam`), a target case number only for the first three, a confidence, and evidence | `request_intake_classification` (officer) or `defer_automatic_intake_classification` (intake) |
 | `record_responsiveness` | `responsive`, `non_responsive`, or `uncertain`, with confidence, terms, and rationale | `request_record_responsiveness_advisory` and the automatic review path |
 | `record_redactions` | Page-specific candidate spans and an active exemption identifier, for a human-confirmed responsive PDF | `request_record_redaction_advisory` |
 
@@ -49,6 +51,19 @@ closed.
 - **Case title** is shown to Records Officers only, in the case Subject column,
   and marked as AI-suggested. It reads no attachments and is offered no record
   systems or exemption taxonomy, so a completed run starts nothing.
+- **Intake classification** suggests what a new case is, for a Records Officer
+  to confirm or dismiss. `_intake_candidates` offers the model only earlier cases
+  of the same matter kind, received within 180 days, up to 120 of them, plus up to
+  20 from the same requester, each with its immutable fields and a bounded
+  description. Kinds never mix. `_validate_proposal` refuses a target number that
+  was not among the candidates, and refuses a target on a label that names no
+  case. The label merges, closes, and sends nothing. The officer applies it
+  through the ordinary merge, close, or add-to-case action in
+  [requests](requests.md), then records the answer as an `AdvisoryFeedback` row
+  (`confirmed` or `dismissed`, one per run). Only a Records Officer may request
+  the run manually, and no automatic run has an accountable actor. The staff card
+  is `frontend/src/case/IntakeClassificationCard.tsx`, which passes the label to
+  the ordinary dialog and does not act on it.
 - **Responsiveness and redaction** remain proposals. A named reviewer must still
   confirm each responsiveness recommendation. Each redaction candidate needs an
   individual accept, edit, or reject decision with an active exemption citation.
@@ -56,6 +71,26 @@ closed.
   derives normalized boxes from the retained PDF, and an accepted candidate goes
   through the normal redaction service. Second review and raster burn-in still
   apply.
+
+```mermaid
+sequenceDiagram
+    participant I as submit_intake
+    participant D as defer_automatic_intake_classification
+    participant W as execute_advisory_run
+    participant M as invoke_advisory_model
+    participant O as Records Officer
+    I->>D: after the intake write
+    D->>D: queue on commit when both switches are on
+    D->>W: request run and queue it
+    W->>M: request text and shown candidate cases
+    M-->>W: label, target, confidence, evidence
+    W->>W: validate target against shown candidates
+    O->>W: read the completed suggestion
+    O->>O: apply the label through the ordinary merge or close action
+    O->>W: record confirmed or dismissed as feedback
+```
+
+*Intake classification: the model proposes, the officer applies the label through the ordinary action and records the answer.*
 
 ## Persistence and provenance
 
@@ -67,7 +102,11 @@ false (`records_advisory_never_applied`) and that a manual run has a named staff
 requester (`records_manual_advisory_requires_requester`). Run state is
 `pending`, `running`, `complete`, or `failed`. `RedactionProposal` and
 `RedactionProposalDecision` are append-only. A decision links the proposal to the
-resulting `Redaction` when accepted.
+resulting `Redaction` when accepted. `AdvisoryFeedback` is the append-only,
+one-per-run record of what a person did with an intake classification: the
+outcome, the final label they judged, and a reason. It is what lets agreement
+between the model and officers be measured later. It does not record the merge or
+close that followed, which stays in the ordinary request history.
 
 Input is fingerprinted from the full attachment manifest. A scan verdict or an
 attachment change therefore cannot reuse a stale result. Attachments reach
@@ -98,6 +137,11 @@ and each requires `PRR_AI_ADVISORY_ENABLED`:
   an entire-organization count. See [Collection and Vault](collection-and-vault.md).
 - `PRR_AI_AUTOMATIC_CASE_TITLES_ENABLED`. Every new case gets a title run after
   intake commits. It does not wait on scanning, since it reads no files.
+- `PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED`. Each new case is classified
+  after its intake write commits. `intake.py` calls
+  `defer_automatic_intake_classification()`, which queues nothing unless this
+  switch and `PRR_AI_ADVISORY_ENABLED` are both on. A failure to queue is logged
+  without request text, and the case simply has no label.
 
 Every switch defaults off. None is an environment variable. The Application
 Admin sets it on Configuration > District settings with a written reason, and the
@@ -148,6 +192,15 @@ The settings service applies that rule before it accepts the switch, so the swit
 cannot turn on unless the provider is `bedrock`, the AWS region is valid, and the
 model identifier matches the Bedrock format.
 
+Each kind has its own model setting: `PRR_AI_MODEL_INTENT`,
+`PRR_AI_MODEL_CASE_TITLE`, `PRR_AI_MODEL_RESPONSIVENESS`,
+`PRR_AI_MODEL_INTAKE`, and `PRR_AI_MODEL_REDACTION`. A blank one falls back to
+`PRR_AI_MODEL`. `model_for_kind()` in `advisory_ai.py` reads the setting when a run
+is created and stores the identifier on that run, so the call uses the model the
+run recorded. Each kind also has its own output-token budget in `MAX_OUTPUT_TOKENS`.
+Only models the production Bedrock grant names can be called. Any other identifier
+makes the run fail closed.
+
 In production the runtime role receives a `bedrock:InvokeModel` grant from
 [`infra/cdk/lib/advisory-bedrock.ts`](../../infra/cdk/lib/advisory-bedrock.ts),
 which `prr-hosting-stack.ts` applies during the CDK release. The grant is limited to
@@ -168,6 +221,10 @@ and a matching CDK change, shipped through the
 - Bulk review is a human decision. Never add a path that accepts a candidate
   without its own named decision.
 - Use `test_advisory_ai` and `test_redaction_ai` for the worker and validator.
+  `test_intake_classification` covers the intake label: candidate selection and
+  its stability while later cases arrive, refusal of an unshown target, the
+  post-commit deferral, the officer-only request, and feedback recorded once per
+  run.
   `test_automatic_record_advisory` covers the automatic record path: the
   post-commit deferral, the worker's switch re-check, and the planned-pause
   exemption from retry limits. `test_verify_advisory_command` covers the
@@ -176,6 +233,12 @@ and a matching CDK change, shipped through the
   checks Bedrock connectivity and the bounded-JSON contract with synthetic data. It calls
   `invoke_advisory_model()` and `_validate_proposal()` directly and writes no request or
   `AdvisoryRun`. Use it to confirm provider access, not to test case behavior.
+
+Related: [Compliance](compliance.md) (human-only and advisory rules),
+[Agent parity](../architecture/agent-parity.md) (AI actions are
+catalogued as human-confirmation or human-only), [Case workspace](case-workspace.md)
+(where the title and the Next due column appear).
+ot to test case behavior.
 
 Related: [Compliance](compliance.md) (human-only and advisory rules),
 [Agent parity](../architecture/agent-parity.md) (AI actions are
