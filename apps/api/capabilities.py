@@ -2493,6 +2493,15 @@ CAPABILITIES = (
         ["/oversight/audit"],
         mcp_tool="psd_prr_audit_log_search",
     ),
+    _capability(
+        "advisory_evaluations.list",
+        "Read model-comparison evaluation runs: accuracy, safety recall, "
+        "cost, and latency per candidate model on labelled past decisions.",
+        "GET",
+        "/api/staff/advisory-evaluations/",
+        ["/oversight/ai-evaluation"],
+        constraints=["records_officer_authority"],
+    ),
 )
 
 

@@ -39,6 +39,8 @@ from apps.records.models import (
     AdvisoryRun,
     Channel,
     CollectionTask,
+    EvaluationRun,
+    EvaluationSet,
     PublicRecordsRequest,
     RecordItem,
     RecordItemCustodian,
@@ -952,6 +954,43 @@ def _seed_supersede_case(officer):
             },
         )
     return request
+
+
+def _seed_evaluation_run(officer, request):
+    """One synthetic model-comparison run for the AI evaluation screen.
+
+    AI is off in acceptance runs, so the metrics are written, not measured.
+    The set references a fixture case and carries no text.
+    """
+    evaluation_set, _ = EvaluationSet.objects.get_or_create(
+        pk=_fixture_uuid("evaluation-set"),
+        defaults={
+            "kind": EvaluationSet.Kind.INTAKE,
+            "examples": [
+                {"request_id": str(request.pk), "label": "new", "target_case_number": None},
+            ],
+            "label_counts": {"new": 1},
+            "created_by": officer,
+        },
+    )
+    result = {
+        "items": 1, "errors": 0, "safety_recall": 1.0, "target_accuracy": None,
+        "confusion": {"new": {"new": 1}}, "input_tokens_mean": 1200,
+        "output_tokens_mean": 80, "latency_p50_ms": 900, "latency_p95_ms": 900,
+        "predictions": [],
+    }
+    EvaluationRun.objects.get_or_create(
+        pk=_fixture_uuid("evaluation-run"),
+        defaults={
+            "evaluation_set": evaluation_set,
+            "model_identifiers": ["synthetic-model-a", "synthetic-model-b"],
+            "results": {
+                "synthetic-model-a": {**result, "accuracy": 1.0, "cost_per_item_usd": 0.0048},
+                "synthetic-model-b": {**result, "accuracy": 1.0, "cost_per_item_usd": None},
+            },
+            "created_by": officer,
+        },
+    )
 
 
 def _seed_forwarded_requester_case(officer):
@@ -2459,7 +2498,8 @@ class Command(BaseCommand):
                 )
             _seed_awaiting_statutory_response_case(officer)
             _seed_forwarded_requester_case(officer)
-            _seed_supersede_case(officer)
+            supersede_request = _seed_supersede_case(officer)
+            _seed_evaluation_run(officer, supersede_request)
             _seed_email_intake_redirect_cases(officer, inbound_transport)
             _reconcile_fixture_inbound_work(request)
             _seed_role_work(

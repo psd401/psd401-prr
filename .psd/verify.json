@@ -45,7 +45,8 @@
     "complete-reviewer-journey",
     "accessibility-audit",
     "officer-supersede-collection",
-    "reviewer-bulk-review-by-filter"
+    "reviewer-bulk-review-by-filter",
+    "officer-ai-evaluation-report"
   ],
   "e2e_screenshots": {
     "staff-login-open-case": [
@@ -210,6 +211,9 @@
     "reviewer-bulk-review-by-filter": [
       "reviewer-bulk-review-by-filter-confirm.png",
       "reviewer-bulk-review-by-filter-result.png"
+    ],
+    "officer-ai-evaluation-report": [
+      "officer-ai-evaluation-report.png"
     ]
   },
   "strictness": "block",

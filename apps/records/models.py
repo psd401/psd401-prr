@@ -3127,3 +3127,57 @@ class AdvisoryFeedback(AppendOnlyModelMixin, models.Model):
 
     def __str__(self):
         return f"{self.advisory_run.pk}: {self.outcome}"
+
+
+class EvaluationSet(models.Model):
+    """Labelled examples for comparing advisory models, taken from decisions
+    people already made (a merge, a non-request closure, a reviewed record).
+
+    ``examples`` holds references and labels only -- request and record IDs,
+    a coarse label, and a target case number -- never request or record
+    text; the input is rebuilt from the live rows when a run sends it. See
+    ``apps/records/evaluation.py``.
+    """
+
+    class Kind(models.TextChoices):
+        INTAKE = "intake", "Intake classification"
+        RESPONSIVENESS = "responsiveness", "Record responsiveness"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    kind = models.CharField(max_length=30, choices=Kind.choices)
+    examples = models.JSONField(default=list)
+    label_counts = models.JSONField(default=dict)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.PROTECT, related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.kind} set {self.pk} ({len(self.examples)} examples)"
+
+
+class EvaluationRun(models.Model):
+    """Every candidate model scored on one evaluation set.
+
+    ``results`` maps each model identifier to its metrics: accuracy, a
+    confusion matrix, the safety recall (real requests and responsive records
+    not lost), token use, cost when a price was given, and latency. Per-item
+    predictions are stored as labels only, so a disagreement can be traced to
+    its case or record without copying text.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    evaluation_set = models.ForeignKey(
+        EvaluationSet, on_delete=models.PROTECT, related_name="runs",
+    )
+    model_identifiers = models.JSONField(default=list)
+    results = models.JSONField(default=dict)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.PROTECT, related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"evaluation run {self.pk}"

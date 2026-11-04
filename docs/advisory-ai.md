@@ -146,6 +146,50 @@ it to be instead. Web-form cases have no non-request closure, so a
 Every answer is audited (`advisory.feedback_recorded`) with the proposed and
 final label, which is the agreement data the evaluation work (#32) reads.
 
+## Comparing models on past decisions
+
+Models are chosen per kind from evidence, not by trial and error in live
+casework (issue #32). Two management commands do it; both are human
+operations and neither changes a case.
+
+```bash
+uv run python manage.py build_eval_set --kind intake --actor officer@psd401.net
+uv run python manage.py evaluate_models --set <id> \
+  --models us.anthropic.claude-haiku-5-5,us.openai.gpt-6.1-terra \
+  --price us.anthropic.claude-haiku-5-5=<in>/<out> --actor officer@psd401.net
+```
+
+`build_eval_set` labels examples from what staff already decided
+(`apps/records/evaluation.py`) and stores **references and labels only** in an
+`EvaluationSet` -- no request or record text:
+
+- `intake`: `new` (the case went on as a request), `existing` (merged into, or
+  its message added to, another case, with that case's number), or
+  `not_request` (closed as not a records request). An officer's answer to an
+  intake suggestion outranks the case outcome. Cases still `received` are left
+  out.
+- `responsiveness`: `responsive` (reviewed responsive or withheld) or
+  `non_responsive`, for records with searchable text.
+
+Request intent and redaction have no single right answer to score against
+yet, so `build_eval_set` refuses them.
+
+`evaluate_models` rebuilds each input from the live rows with the same builder
+a live advisory uses, sends it to every named model through
+`invoke_advisory_model`, and validates each answer the same way. **Real text
+reaches the provider**, so it refuses to start unless advisory AI is enabled
+and configured, exactly as a live run would. It stores an `EvaluationRun` with,
+per model: accuracy, a confusion matrix, the **safety recall** (real requests
+not labelled non-request; responsive records not labelled non-responsive,
+where `uncertain` counts as kept because a person decides it), the share of
+`existing` cases pointed at the right case, mean tokens, p50/p95 latency, and
+cost per item. A failed call counts as an error and a miss. Cost needs a
+`--price` (USD per million input/output tokens) per model; the application
+holds no price list, so a model without one reports no cost.
+
+Records Officers read the runs side by side under **Oversight → AI
+evaluation** (`advisory_evaluations.list`).
+
 ## Bulk review is a human decision, not an accept-all
 
 The review queue lets a reviewer mark a whole filtered selection responsive or

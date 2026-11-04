@@ -11,6 +11,7 @@ import {
   LegacyRequestRedirect,
 } from './case/LegacyScopedRoutes'
 import { AgentAccess } from './pages/AgentAccess'
+import { AiEvaluation } from './pages/AiEvaluation'
 import { Audit } from './pages/Audit'
 import { Correspondence } from './pages/Correspondence'
 import { Exemptions } from './pages/Exemptions'
@@ -85,6 +86,7 @@ function StaffApp() {
         <Route path="oversight" element={guard(<OversightIndex roles={user.roles} />)} />
         <Route path="oversight/reporting" element={guard(<Reporting roles={user.roles} />)} />
         <Route path="oversight/audit" element={guard(<Audit />)} />
+        <Route path="oversight/ai-evaluation" element={guard(<AiEvaluation />)} />
 
         <Route
           path="configuration"
