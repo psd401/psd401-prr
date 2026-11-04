@@ -307,6 +307,23 @@ SETTINGS: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key="PRR_TRUST_REDACTION_MODE",
+        type=values.CHOICE,
+        default="suggest",
+        choices=("suggest", "batch"),
+        category=CATEGORY_ADVISORY_AI,
+        label="Trust ladder: redaction proposals",
+        consequence=(
+            "Suggest: a reviewer accepts or rejects each proposed redaction. "
+            "Batch: a reviewer may accept every pending proposal with one "
+            "exemption and pattern on a case after accepting a random sample "
+            "of them; one rejection blocks the group. Each accepted proposal "
+            "is still its own redaction with its exemption citation, and "
+            "second review still applies where it is required. There is no "
+            "automatic mode."
+        ),
+    ),
+    SettingSpec(
         key="PRR_TRUST_NON_RESPONSIVE_AUTO_MIN_CONFIDENCE",
         type=values.INTEGER,
         default=95,

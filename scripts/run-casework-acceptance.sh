@@ -41,6 +41,8 @@ marker="$evidence/.gating-lane-ran"
 if [ "$mode" != "--quarantine" ] || [ ! -f "$marker" ]; then
   rm -f "$evidence"/*.png "$evidence"/*.json
   rm -rf "$evidence/playwright-results" "$evidence/playwright-report"
+  # The e2e filesystem object store (config.e2e_settings) is reseeded each run.
+  rm -rf "$evidence/e2e-objects"
   rm -f "$marker"
 fi
 if [ "$mode" != "--quarantine" ]; then

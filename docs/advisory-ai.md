@@ -101,8 +101,10 @@ A named reviewer can load its box into the normal editor, change the bounds,
 exemption, and explanation, and explicitly accept it through the existing
 redaction service, or reject it with a substantive reason. That append-only
 decision links the proposal to the resulting exemption-backed `Redaction` when
-accepted. There is no accept-all path. Existing distinct second-review and
-raster burn-in gates still apply to the final human-created redaction.
+accepted. There is no accept-all path: proposals are accepted one at a time,
+or a group at a time after a sampled check under the trust policy below.
+Existing distinct second-review and raster burn-in gates still apply to the
+final human-created redaction.
 
 The provider has no path to change request status, scope, collection tasks,
 fees, estimates, correspondence, review state, legal redactions, withholding,
@@ -337,6 +339,7 @@ admin-only with a reason, and every change is audited:
 |---|---|---|
 | `PRR_TRUST_RESPONSIVE_MODE` | `suggest`, `batch` (no automatic mode) | `suggest` |
 | `PRR_TRUST_NON_RESPONSIVE_MODE` | `suggest`, `batch`, `auto` | `suggest` |
+| `PRR_TRUST_REDACTION_MODE` | `suggest`, `batch` (no automatic mode) | `suggest` |
 | `PRR_TRUST_NON_RESPONSIVE_AUTO_MIN_CONFIDENCE` | 50-100 percent | 95 |
 | `PRR_TRUST_BATCH_SAMPLE_SIZE` | 1-200 records | 10 |
 | `PRR_TRUST_ELUSION_SAMPLE_SIZE` | 1-500 records | 30 |
@@ -367,6 +370,25 @@ that proposes anything but non-responsive. Release stays a human action.
 Deciding a batch is `review_batches.decide`, human-only; opening one decides
 nothing.
 
+### Redaction proposals, a group at a time
+
+Each redaction proposal now carries a `pattern` (phone, email, address,
+student identifier, government ID, financial account, medical, person's
+name, other); proposals made before that are `other`. The Records tab's
+**Redaction proposals** card groups a case's pending proposals by exemption
+and pattern (`redaction_batches.groups`). With `PRR_TRUST_REDACTION_MODE` set
+to `batch` (choices `suggest`, `batch`; no automatic mode), **Accept all in
+group** opens a `RedactionBatch` and draws a random sample of
+`PRR_TRUST_BATCH_SAMPLE_SIZE`. The reviewer accepts or rejects each sampled
+proposal (a rejection needs a reason). Only if every sampled proposal is
+accepted are the rest accepted, each through `accept_redaction_proposal` ->
+`create_redaction` with its own box and exemption citation (rule 3); one
+rejection blocks the group and leaves the rest pending. Second review follows
+from each redaction's exemption as it always has. **Build redacted PDFs**
+(`redaction_batches.build`) renders every responsive record whose redactions
+are approved and whose required second review is done, and counts the ones
+still waiting. Deciding a group and building PDFs are human-only.
+
 The privilege queue follows the same rule. `counsel_domain` and
 `privilege_marker` are deterministic tags derived from stored message
 metadata and the administrator-managed counsel-domain list; they separate
@@ -393,8 +415,8 @@ the model work ahead of the reviewer:
 Automatic results remain proposals. Responsiveness still needs a named human
 decision: one record at a time, or a sampled batch under the trust policy
 above. Each redaction candidate still needs an individual
-named human accept/edit/reject decision with an active exemption citation; no
-accept-all path exists. Second review and immutable raster burn-in remain
+named human accept/edit/reject decision with an active exemption citation, one
+at a time or as a sampled group (below); no accept-all path exists. Second review and immutable raster burn-in remain
 unchanged.
 
 Request-intent proposals distinguish exact subject identifiers from topical
