@@ -830,8 +830,10 @@ class EstimateRevisionTests(TestCase):
 
         The interpretation-and-estimate letter is the one requester letter the
         system may draft without an author. Rule 6 holds only because the
-        drafting path can do nothing else: no approval, no queue, no send, no
-        state change, no deposit hold. A Records Officer's approve_and_send is
+        drafting path can do nothing else: it calls no approval, queue, send,
+        state-change, or deposit function directly (the shared helpers it
+        reaches, _create_draft and _render_template_draft, are covered by the
+        system_prepared checks and the database constraint). A Records Officer's approve_and_send is
         the only way it reaches a requester.
         """
         import ast

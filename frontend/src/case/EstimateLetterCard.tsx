@@ -41,7 +41,7 @@ export function EstimateLetterCard({ number }: { number: string }) {
   return (
     <Card title="Interpretation and estimate letter ready" className="mb-5">
       <p className="mb-3 text-sm text-ink-muted">
-        {draft.system_prepared ? 'Drafted by the system' : 'Drafted by staff'}
+        Drafted by the system
         {letter.data?.estimate ? ` from the estimate computed ${letter.data.estimate.as_of}` : ''}.
         Nothing has been sent. Approving sends it to the requester now.
       </p>

@@ -180,14 +180,33 @@ class ApproveAndDeliverTests(_LetterFixture):
             structured_data={"interpretation": "Route 12 bus video, March 3, 3-4 p.m."},
         )
         self.assertIn("Route 12 bus video, March 3, 3-4 p.m.", edited.draft_body)
-        self.assertEqual(edited.draft_metadata["estimate_id"], draft.draft_metadata["estimate_id"])
+        for key in ("estimate_id", "record_estimate", "charge_paragraph", "completion_date"):
+            self.assertEqual(edited.draft_metadata[key], draft.draft_metadata[key])
+        # A valid interpretation does not carry a date change with it.
         with self.assertRaises(ValidationError):
             services.edit_structured_draft(
                 edited,
                 actor=self.officer,
                 expected_version=edited.version,
-                structured_data={"interpretation": "x", "completion_date": "2030-01-01"},
+                structured_data={
+                    "interpretation": "Route 12 bus video, March 3, 3-4 p.m.",
+                    "completion_date": "2030-01-01",
+                },
             )
+        edited.refresh_from_db()
+        self.assertEqual(edited.draft_metadata["completion_date"], draft.draft_metadata["completion_date"])
+        self.assertNotIn("2030", edited.draft_body)
+
+    def test_no_charge_is_stated_only_when_even_the_high_case_bills_nothing(self):
+        def fee(expected, high):
+            return {"low": {"total": "0.00"}, "expected": {"total": expected},
+                    "high": {"total": high}}
+
+        self.assertEqual(
+            services._charge_paragraph(fee("0.00", "0.00")),
+            "There is no copying charge for these records.",
+        )
+        self.assertIn("between $0.00 and $0.05", services._charge_paragraph(fee("0.00", "0.05")))
 
     def test_delivery_records_the_stated_date_as_estimate_evidence(self):
         estimate = self._estimate()

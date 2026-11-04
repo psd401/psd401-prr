@@ -1850,7 +1850,8 @@ def _charge_paragraph(fee: dict | None) -> str:
             "these records."
         )
     expected, low, high = fee["expected"], fee["low"], fee["high"]
-    if Decimal(expected["total"]) == 0:
+    # "No charge" only when even the high case bills nothing.
+    if Decimal(high["total"]) == 0:
         return "There is no copying charge for these records."
     charge = f"${expected['total']}"
     if low["total"] != high["total"]:
