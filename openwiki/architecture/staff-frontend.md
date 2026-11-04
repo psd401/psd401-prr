@@ -6,9 +6,9 @@ tags: [architecture, frontend, routing, react, access-control]
 openwiki:
   roles: [architecture, integration]
   change_kinds: [route, navigation, frontend-api-client]
-  source_paths: [frontend/src/App.tsx, frontend/src/nav.ts, frontend/src/api/client.ts, frontend/src/layout/AppLayout.tsx, frontend/src/caseStatus.ts, frontend/src/work.ts, frontend/src/statutory.ts, frontend/src/vaultQuery.ts, frontend/src/scopeCountNotice.ts, frontend/src/caseSort.ts, frontend/src/queueCounts.tsx, frontend/src/messages/MessageWorkspace.tsx, frontend/src/messages/boundedInfiniteCache.ts, frontend/vite.config.ts, frontend/package.json, apps/api/spa.py, apps/api/resources/correspondence.py, apps/api/resources/work_items.py]
-  symbols: [App, StaffApp, AuthorizedRoute, routeIsAuthorized, defaultLanding, PRIMARY_NAV, CONFIGURATION_NAV, OVERSIGHT_NAV, CASE_TAB_ROLES, api, ApiError, index, MessageWorkspace, invalidateBoundedInfiniteQueries, markBoundedInfiniteQueriesStale, thread_messages, statusLabel, statusTone, isTerminalStatus, CASE_STATUS_CHOICES, WorkItemDetail, DISPOSITION_LABELS]
-  test_paths: [frontend/src/App.test.tsx, frontend/src/AppAuthorizedRoutes.test.tsx, frontend/src/nav.test.ts, frontend/src/layout/AppLayout.test.tsx, frontend/src/case/CaseWorkspace.test.tsx, frontend/src/vaultQuery.test.ts, frontend/src/scopeCountNotice.test.ts, frontend/src/caseSort.test.ts, frontend/src/queueCounts.test.tsx, frontend/src/messages/MessageWorkspace.test.tsx, frontend/src/messages/boundedInfiniteCache.test.ts, frontend/src/pages/RequestDetail.test.tsx, frontend/src/pages/Inbox.test.tsx]
+  source_paths: [frontend/src/App.tsx, frontend/src/nav.ts, frontend/src/api/client.ts, frontend/src/layout/AppLayout.tsx, frontend/src/caseStatus.ts, frontend/src/work.ts, frontend/src/statutory.ts, frontend/src/vaultQuery.ts, frontend/src/scopeCountNotice.ts, frontend/src/caseSort.ts, frontend/src/queueCounts.tsx, frontend/src/messages/MessageWorkspace.tsx, frontend/src/messages/boundedInfiniteCache.ts, frontend/src/theme.ts, frontend/src/main.tsx, frontend/src/ui/ThemePicker.tsx, frontend/src/index.css, frontend/src/nexus/SOURCE.txt, frontend/vite.config.ts, frontend/package.json, apps/api/spa.py, apps/api/resources/correspondence.py, apps/api/resources/work_items.py]
+  symbols: [App, StaffApp, AuthorizedRoute, routeIsAuthorized, defaultLanding, PRIMARY_NAV, CONFIGURATION_NAV, OVERSIGHT_NAV, CASE_TAB_ROLES, api, ApiError, index, MessageWorkspace, invalidateBoundedInfiniteQueries, markBoundedInfiniteQueriesStale, thread_messages, statusLabel, statusTone, isTerminalStatus, CASE_STATUS_CHOICES, WorkItemDetail, DISPOSITION_LABELS, THEMES, resolveTheme, applyTheme, startTheme, ThemePicker]
+  test_paths: [frontend/src/App.test.tsx, frontend/src/AppAuthorizedRoutes.test.tsx, frontend/src/nav.test.ts, frontend/src/layout/AppLayout.test.tsx, frontend/src/case/CaseWorkspace.test.tsx, frontend/src/vaultQuery.test.ts, frontend/src/scopeCountNotice.test.ts, frontend/src/caseSort.test.ts, frontend/src/queueCounts.test.tsx, frontend/src/messages/MessageWorkspace.test.tsx, frontend/src/messages/boundedInfiniteCache.test.ts, frontend/src/pages/RequestDetail.test.tsx, frontend/src/pages/Inbox.test.tsx, frontend/src/theme.test.ts, frontend/src/nexus-foundation.test.ts, frontend/src/ui/TrustFooter.test.tsx]
   invariants:
     - Route and navigation roles are a client-side convenience; every API endpoint enforces its own role check.
     - Compliance logic stays in Django; the SPA only renders and submits.
@@ -107,6 +107,34 @@ dropped filters.
   Django static path.
 - **Development.** `bun run dev` serves Vite and proxies `/api` to `http://127.0.0.1:8000`,
   the Django process ([deployment](../operations/deployment.md)).
+
+## Themes and design tokens
+
+The look of the shell comes from a vendored design system, not from app code. The
+Nexus tokens and bundle are copied into `frontend/src/nexus/` and imported by
+`frontend/src/index.css` (`tokens.css` in the base layer, `bundle.css` in the
+components layer). `frontend/src/nexus/SOURCE.txt` pins the upstream commit, and the
+folder must not be edited by hand; `frontend/src/nexus-foundation.test.ts` checks that
+the pin and the files exist. [`frontend/README.md`](../../frontend/README.md) describes
+how to copy a newer export.
+
+`frontend/src/theme.ts` chooses a `data-theme` value on `<html>` from five themes:
+`nexus`, `commons`, `dark`, `commons-dark`, and `high-contrast`. A user picks one in
+`ThemePicker` (`frontend/src/ui/ThemePicker.tsx`, mounted in the shell by
+`layout/AppLayout.tsx`), or leaves it on "Match this device". In that mode,
+`resolveTheme` reads `prefers-contrast: more` and then `prefers-color-scheme: dark`,
+and falls back to `nexus`.
+
+- The choice is a browser preference stored under `prr-theme` in local storage. It is
+  never a district setting, so it does not go through [configuration](configuration.md).
+- `main.tsx` calls `startTheme()` before the app mounts. That applies the stored
+  choice and listens for device changes while the choice is "system".
+- Storage that is blocked falls back to the device setting for the page.
+
+Focused tests: `frontend/src/theme.test.ts` (resolution, persistence, and listeners),
+`frontend/src/ui/TrustFooter.test.tsx` (its footer test loops over all five themes), and
+`frontend/src/nexus-foundation.test.ts` (the vendored files). Run one with
+`cd frontend && bun run test -- src/theme.test.ts`.
 
 ## API client contract
 
