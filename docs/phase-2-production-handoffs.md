@@ -302,7 +302,7 @@ in `test_compliance`.
   or both switches are disabled. The switches live in `.env.app`; the Compose
   overlay intentionally does not override them.
 - **2026-11-03, model acceptance (items 1-3 of the approval prerequisites in
-  `docs/advisory-ai.md`).** The district Public Records Officer accepted seven
+  `docs/advisory-ai.md`).** The CIO, who is also the district Public Records Officer, accepted seven
   US cross-region Bedrock inference profiles for request text and record OCR,
   including student, personnel, legal, and other restricted content:
   `us.amazon.nova-2-lite-v1:0`, `us.anthropic.claude-opus-5-5`,
@@ -313,9 +313,11 @@ in `test_compliance`.
   us-east-1, us-east-2, and us-west-2; and the IAM grant names exactly these
   profiles (`infra/cdk/lib/advisory-bedrock.ts`). Because one acceptance
   covers every data classification, no per-classification routing is
-  required. Still open: item 5, the representative offline evaluation with a
-  written threshold and rollback owner (issue #32) -- choose each kind's model
-  from that evidence before pointing a setting at it.
+  required. Still open: item 4, staff training; and item 5, the
+  representative offline evaluation with a written threshold and rollback
+  owner (issue #32). Until #32 records that evidence, every per-kind
+  `PRR_AI_MODEL_*` setting stays blank and falls back to `PRR_AI_MODEL`;
+  choose each kind's model from the evaluation, not before it.
 - Evaluate representative request text and OCR, including prompt-injection,
   student, personnel, health, legal, multilingual, empty, and adversarial
   examples. Record accuracy and harm thresholds plus rollback ownership.
