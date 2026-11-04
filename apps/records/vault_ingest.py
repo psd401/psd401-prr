@@ -715,6 +715,15 @@ def attach_custodians(item, task, extra_custodians=()):
         item.save(update_fields=["custodian"])
 
 
+#: Records that do not count as a live copy of a message for custodian
+#: attachment: a duplicate defers to its survivor, and a superseded record left
+#: review with its collection.
+_NOT_LIVE_COPY_STATES = (
+    RecordItem.ReviewState.DUPLICATE,
+    RecordItem.ReviewState.SUPERSEDED,
+)
+
+
 def attach_csv_sets_to_sole_records(run, task, csv_metadata):
     """Give the CSV's Message-ID set to each record this run touched that is,
     now that every message of the export has been read, the sole live record
@@ -775,15 +784,6 @@ def attach_csv_sets_to_sole_records(run, task, csv_metadata):
             attach_custodians(record, task, keep)
             attached += 1
     return attached
-
-
-#: Records that do not count as a live copy of a message for custodian
-#: attachment: a duplicate defers to its survivor, and a superseded record left
-#: review with its collection.
-_NOT_LIVE_COPY_STATES = (
-    RecordItem.ReviewState.DUPLICATE,
-    RecordItem.ReviewState.SUPERSEDED,
-)
 
 
 def _message_duplicate(request_id, metadata):
