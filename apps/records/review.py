@@ -257,6 +257,7 @@ def bulk_review_confirmed_selection(
         )
         for item in items
     ])
+    decisions = _store_decisions(items, state=state, actor=actor)
     audit(
         "record.bulk_reviewed",
         target=request.number,
@@ -268,6 +269,12 @@ def bulk_review_confirmed_selection(
         record_item_ids=[str(item.pk) for item in items],
         record_item_count=len(items),
         excluded=selection.excluded,
+        # The suggestions standing at decision time, for agreement only.
+        advisory_run_ids=[
+            str(decision.advisory_run_id)
+            for decision in decisions
+            if decision.advisory_run_id
+        ],
     )
     from apps.work_queue.integration import schedule_source_work_item_reconciliation
 
@@ -290,8 +297,9 @@ def bulk_review_records(record_item_ids, *, state, actor):
     """Apply one human responsiveness decision to a visible set of records.
 
     This is a human decision about a set the reviewer chose and could see — it
-    is *not* an accept-all of AI output. No advisory proposal is read here, and
-    nothing about the model's recommendation changes what this writes. Each
+    is *not* an accept-all of AI output. Nothing about the model's
+    recommendation changes what this writes; the suggestion each record showed
+    is only stored beside the decision so agreement can be measured. Each
     record goes through the same :func:`review_record` service the single-record
     control uses, so each gets its own append-only audit row, its own
     validation, and its own advisory follow-up; one additional row records the
@@ -385,10 +393,11 @@ def bulk_review_records(record_item_ids, *, state, actor):
                 "them non-responsive: "
                 + ", ".join(sorted(str(pk) for pk in blocked))
             )
-    reviewed = [
-        review_record(item.pk, state=state, actor=actor)
+    results = [
+        _review_record(item.pk, state=state, actor=actor, bulk=True)
         for item in items
     ]
+    reviewed = [item for item, _decision in results]
     request = items[0].request
     audit(
         "record.bulk_reviewed",
@@ -398,6 +407,12 @@ def bulk_review_records(record_item_ids, *, state, actor):
         review_state=state,
         record_item_ids=[str(item.pk) for item in reviewed],
         record_item_count=len(reviewed),
+        # The suggestions standing at decision time, for agreement only.
+        advisory_run_ids=[
+            str(decision.advisory_run_id)
+            for _item, decision in results
+            if decision.advisory_run_id
+        ],
     )
     return reviewed
 
@@ -410,6 +425,24 @@ def review_record(
     actor,
     withholding_exemption_ids=(),
 ):
+    item, _decision = _review_record(
+        record_item_id,
+        state=state,
+        actor=actor,
+        withholding_exemption_ids=withholding_exemption_ids,
+    )
+    return item
+
+
+def _review_record(
+    record_item_id,
+    *,
+    state,
+    actor,
+    withholding_exemption_ids=(),
+    bulk=False,
+):
+    """The review itself; also returns the stored decision (#38)."""
     _require_reviewer(actor)
     if state not in _HUMAN_REVIEW_STATES:
         raise ValidationError("A valid human review outcome is required.")
@@ -469,6 +502,7 @@ def review_record(
         RecordItemWithholdingExemption(record_item=item, exemption=exemption)
         for exemption in exemptions
     ])
+    decision = _store_decision(item, state=state, actor=actor, bulk=bulk)
     audit(
         "record.reviewed",
         target=str(item.pk),
@@ -490,7 +524,60 @@ def review_record(
     from apps.work_queue.integration import schedule_source_work_item_reconciliation
 
     schedule_source_work_item_reconciliation("records", item.pk)
-    return item
+    return item, decision
+
+
+def _store_decision(item, *, state, actor, bulk):
+    """Store the decision and the suggestion standing at decision time (#38)."""
+    from .agreement import latest_suggestion_runs
+    from .models import ReviewDecision
+
+    standing = latest_suggestion_runs(item).first()
+    proposal = standing.proposal if standing else {}
+    confidence = proposal.get("confidence")
+    return ReviewDecision.objects.create(
+        record_item=item,
+        request=item.request,
+        review_state=state,
+        advisory_run=standing,
+        advisory_label=proposal.get("suggested_state") or "",
+        advisory_confidence=float(confidence) if confidence is not None else None,
+        bulk=bulk,
+        actor=actor,
+    )
+
+
+def _store_decisions(items, *, state, actor):
+    """``_store_decision`` for a filter decision over up to 10,000 records:
+    each record's standing suggestion, read in one query."""
+    from django.db.models import OuterRef, Subquery
+
+    from .agreement import annotate_latest_suggestion, latest_suggestion_runs
+    from .models import ReviewDecision
+
+    standing = {
+        row["pk"]: row
+        for row in annotate_latest_suggestion(
+            RecordItem.objects.filter(pk__in=[item.pk for item in items]).annotate(
+                advisory_run_id=Subquery(
+                    latest_suggestion_runs(OuterRef("pk")).values("pk")[:1],
+                ),
+            )
+        ).values("pk", "advisory_run_id", "advisory_suggested_state", "advisory_confidence")
+    }
+    return ReviewDecision.objects.bulk_create([
+        ReviewDecision(
+            record_item=item,
+            request=item.request,
+            review_state=state,
+            advisory_run_id=standing[item.pk]["advisory_run_id"],
+            advisory_label=standing[item.pk]["advisory_suggested_state"] or "",
+            advisory_confidence=standing[item.pk]["advisory_confidence"],
+            bulk=True,
+            actor=actor,
+        )
+        for item in items
+    ])
 
 
 @transaction.atomic

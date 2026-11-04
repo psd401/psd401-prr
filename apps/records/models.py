@@ -3217,6 +3217,55 @@ class AdvisoryFeedback(AppendOnlyModelMixin, models.Model):
         return f"{self.advisory_run.pk}: {self.outcome}"
 
 
+class ReviewDecision(AppendOnlyModelMixin, models.Model):
+    """One human responsiveness decision on one record, and the AI suggestion
+    standing when it was made.
+
+    Written by ``review.review_record`` for single and bulk review alike. The
+    suggestion is the record's latest complete responsiveness run at decision
+    time -- the rule the review list uses to show one -- copied here as label
+    and confidence so
+    agreement between model and people can be measured. It never influences
+    what the decision writes. Append-only: a later review is a new row.
+    """
+
+    record_item = models.ForeignKey(
+        RecordItem,
+        on_delete=models.PROTECT,
+        related_name="review_decisions",
+    )
+    request = models.ForeignKey(
+        PublicRecordsRequest,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    review_state = models.CharField(max_length=20, choices=RecordItem.ReviewState.choices)
+    advisory_run = models.ForeignKey(
+        AdvisoryRun,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    advisory_label = models.CharField(max_length=40, blank=True)
+    advisory_confidence = models.FloatField(null=True, blank=True)
+    bulk = models.BooleanField(default=False)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    class Meta:
+        indexes = [models.Index(fields=["request", "record_item", "created_at"])]
+
+    def __str__(self):
+        return f"{self.pk}: {self.review_state}"
+
+
 class EvaluationSet(models.Model):
     """Labelled examples for comparing advisory models, taken from decisions
     people already made (a merge, a non-request closure, a reviewed record).

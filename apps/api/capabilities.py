@@ -1034,6 +1034,15 @@ CAPABILITIES = (
         ["/requests/:number/records"],
     ),
     _capability(
+        "record_items.clusters",
+        "Group the filtered records into clusters -- email thread, sender or "
+        "mailing list, tag, or AI label and confidence band -- with each "
+        "cluster's size, sample records, and majority AI suggestion.",
+        "GET",
+        "/api/staff/record-items/clusters/",
+        ["/requests/:number/records"],
+    ),
+    _capability(
         "record_items.bulk_selection",
         "Preview exactly which records one filter decision would change, "
         "with the count and digest a confirmation must send back.",
@@ -2618,6 +2627,16 @@ CAPABILITIES = (
         "GET",
         "/api/staff/advisory-evaluations/",
         ["/oversight/ai-evaluation"],
+        constraints=["records_officer_authority"],
+    ),
+    _capability(
+        "advisory_agreement.list",
+        "Read how often the AI's responsiveness suggestion matched the human "
+        "review decision, by label and confidence band, district-wide or for "
+        "one case.",
+        "GET",
+        "/api/staff/advisory-agreement/",
+        ["/oversight/ai-agreement"],
         constraints=["records_officer_authority"],
     ),
 )
