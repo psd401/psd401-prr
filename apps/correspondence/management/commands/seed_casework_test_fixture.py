@@ -995,7 +995,28 @@ def _seed_evaluation_run(officer, request):
                 "synthetic-model-b": {**result, "accuracy": 1.0, "cost_per_item_usd": None},
             },
             "created_by": officer,
-            _seed_knowledge_pack()
+        },
+    )
+
+
+def _seed_knowledge_pack():
+    """Seed what the knowledge-pack flow edits: one registry system with no
+    search notes yet and one open-ended role account. Neither touches a case
+    or the work queue."""
+    RecordSystem.objects.get_or_create(
+        slug=FIXTURE_KNOWLEDGE_SYSTEM_SLUG,
+        defaults={
+            "name": "Fixture shared mailbox",
+            "category": "Email & documents",
+            "custodian_title": "Fixture office manager",
+            "triage_keywords": [],
+        },
+    )
+    KnowledgeRoleAccount.objects.get_or_create(
+        role=FIXTURE_KNOWLEDGE_ROLE,
+        defaults={
+            "account_email": "fixture.principal@example.org",
+            "starts_on": date(2024, 7, 1),
         },
     )
 

@@ -171,6 +171,10 @@ uv run python manage.py evaluate_models --set <id> \
 - `responsiveness`: `responsive` (reviewed responsive or withheld) or
   `non_responsive`, for records with searchable text.
 
+Every matter kind is included (rule 13). An intake example's candidate cases
+come from the live builder, which never offers a case of another kind, and the
+set only scores models; it sends no requester mail and starts no clock.
+
 Request intent and redaction have no single right answer to score against
 yet, so `build_eval_set` refuses them.
 
@@ -178,7 +182,10 @@ yet, so `build_eval_set` refuses them.
 a live advisory uses, sends it to every named model through
 `invoke_advisory_model`, and validates each answer the same way. **Real text
 reaches the provider**, so it refuses to start unless advisory AI is enabled
-and configured, exactly as a live run would. It stores an `EvaluationRun` with,
+and configured, exactly as a live run would. It does not check the named
+models itself: the production grant (`infra/cdk/lib/advisory-bedrock.ts`) is the
+allow-list, so AWS refuses a model it does not name and every example for that
+model scores as an error. Name only the profiles listed below. It stores an `EvaluationRun` with,
 per model: accuracy, a confusion matrix, the **safety recall** (real requests
 not labelled non-request; responsive records not labelled non-responsive,
 where `uncertain` counts as kept because a person decides it), the share of

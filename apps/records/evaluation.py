@@ -5,8 +5,11 @@
 ``build_evaluation_set`` labels examples from what staff already decided and
 stores references only. ``evaluate_models`` rebuilds each example's input from
 the live rows -- the same builder a live advisory uses -- sends it to every
-candidate model through ``invoke_advisory_model`` (so the advisory switch and
-model gate apply), validates the answer the same way, and stores metrics.
+candidate model through ``invoke_advisory_model``, validates the answer the
+same way, and stores metrics. Nothing is sent unless advisory AI is on. The
+candidates are not checked in the app: the production Bedrock grant
+(``infra/cdk/lib/advisory-bedrock.ts``) is the allow-list, so AWS refuses a
+model it does not name and every example scores as an error.
 
 Nothing here writes an advisory run, a proposal, a status, or a message. It
 only reads decisions and records how well each model would have matched them.
@@ -78,10 +81,16 @@ _SAFE = {
 
 
 def _intake_examples(limit: int) -> list[dict[str, Any]]:
+    cases = list(
+        PublicRecordsRequest.objects.exclude(status=RequestStatus.RECEIVED)
+        .select_related("merged_into")
+        .order_by("-received_at", "pk")[:limit]
+    )
     answered = {}
     for feedback in (
         AdvisoryFeedback.objects.filter(
             advisory_run__kind=AdvisoryRun.Kind.INTAKE_CLASSIFICATION,
+            advisory_run__request__in=cases,
         )
         .select_related("advisory_run")
         .order_by("created_at")
@@ -97,16 +106,17 @@ def _intake_examples(limit: int) -> list[dict[str, Any]]:
         )
         answered[str(run.request_id)] = (coarse, target if coarse == "existing" else None)
 
+    closed_numbers = [
+        case.number for case in cases if case.status == RequestStatus.CLOSED_NON_REQUEST
+    ]
     redirected = {
         row.detail.get("source_request"): row.detail.get("destination_request")
-        for row in AuditLog.objects.filter(action="records.email_intake_redirected")
+        for row in AuditLog.objects.filter(
+            action="records.email_intake_redirected",
+            detail__source_request__in=closed_numbers,
+        )
     }
     examples = []
-    cases = (
-        PublicRecordsRequest.objects.exclude(status=RequestStatus.RECEIVED)
-        .select_related("merged_into")
-        .order_by("-received_at", "pk")[:limit]
-    )
     for case in cases:
         if str(case.pk) in answered:
             label, target = answered[str(case.pk)]
@@ -144,6 +154,8 @@ def _responsiveness_examples(limit: int) -> list[dict[str, Any]]:
 
 
 def build_evaluation_set(kind: str, *, actor, limit: int = DEFAULT_LIMIT) -> EvaluationSet:
+    if limit < 1:
+        raise ValidationError("The evaluation set limit must be at least 1.")
     if kind == EvaluationSet.Kind.INTAKE:
         examples = _intake_examples(limit)
     elif kind == EvaluationSet.Kind.RESPONSIVENESS:

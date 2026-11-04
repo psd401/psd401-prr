@@ -130,6 +130,8 @@ class IntakeSetTests(_Fixture):
         self._case(description="A distinctive synthetic sentence.")
         evaluation_set = build_evaluation_set("intake", actor=self.officer)
         self.assertNotIn("distinctive", str(evaluation_set.examples))
+        for row in evaluation_set.examples:
+            self.assertEqual(set(row), {"request_id", "label", "target_case_number"})
 
 
 class ResponsivenessSetTests(_Fixture):
@@ -158,6 +160,11 @@ class ResponsivenessSetTests(_Fixture):
             self._record(prr, RecordItem.ReviewState.RESPONSIVE, f"Memo {index}.")
         evaluation_set = build_evaluation_set("responsiveness", actor=self.officer, limit=2)
         self.assertEqual(len(evaluation_set.examples), 2)
+
+    def test_a_limit_below_one_is_refused(self):
+        for limit in (0, -1):
+            with self.subTest(limit=limit), self.assertRaises(ValidationError):
+                build_evaluation_set("responsiveness", actor=self.officer, limit=limit)
 
     def test_unsupported_kinds_are_refused(self):
         with self.assertRaises(ValidationError):
@@ -314,6 +321,12 @@ class EvaluationApiTests(_Fixture):
         self.assertEqual(row["kind"], "responsiveness")
         self.assertEqual(row["items"], 1)
         self.assertEqual(row["results"]["model-a"]["accuracy"], 1.0)
+
+    def test_runs_are_listed_only(self):
+        # The screen and the registered capability are the list; a detail
+        # route would be an ungated second read nobody registered.
+        from apps.api.resources.advisory_evaluations import EvaluationRunViewSet
+        self.assertFalse(hasattr(EvaluationRunViewSet, "retrieve"))
 
     def test_a_reviewer_may_not(self):
         self.api.force_authenticate(_user("eval-reviewer", StaffRole.REVIEWER))

@@ -1,6 +1,6 @@
 # ABOUTME: Read-only staff API for model-comparison evaluation runs (#32):
 # ABOUTME: metrics per model, side by side, for Records Officers.
-from rest_framework import serializers, viewsets
+from rest_framework import mixins, serializers, viewsets
 
 from apps.api.identity import StaffRole
 from apps.records.models import EvaluationRun
@@ -22,7 +22,9 @@ class EvaluationRunSerializer(serializers.Serializer):
         return len(run.evaluation_set.examples)
 
 
-class EvaluationRunViewSet(viewsets.ReadOnlyModelViewSet):
+class EvaluationRunViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    """List only: the latest runs, which is all the screen shows."""
+
     serializer_class = EvaluationRunSerializer
     pagination_class = None
     allowed_roles = {StaffRole.RECORDS_OFFICER}
