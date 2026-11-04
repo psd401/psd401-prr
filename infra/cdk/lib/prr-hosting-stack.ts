@@ -501,21 +501,6 @@ export class PrrHostingStack extends cdk.Stack {
         "calls to AWS and Google APIs are TLS.",
     });
 
-    // Subnet handover (README, "Moving to psd-aws-infra"): CloudFormation
-    // replaces an instance for any SubnetId change, so the instance and its
-    // Elastic IP association leave the stack ("detached") and come back by
-    // resource import ("import"). An import rejects every other change, so
-    // both phases name the instance by ID; the final template, with no
-    // context, points back at the instance. Each phase is deployed once.
-    const handover: unknown = this.node.tryGetContext("subnetHandover");
-    if (handover !== undefined && handover !== "detached" && handover !== "import") {
-      throw new Error(
-        `subnetHandover must be "detached" or "import", not ${JSON.stringify(handover)}`,
-      );
-    }
-    const instanceId =
-      handover === undefined ? instance.instanceId : config.handoverInstanceId;
-
     const gmailInboundActivationOverlay = [
       "services:",
       "  web:",
@@ -1489,7 +1474,7 @@ export class PrrHostingStack extends cdk.Stack {
           commands: [directDeploymentScript],
           executionTimeout: ["3300"],
         },
-        targets: [{ key: "InstanceIds", values: [instanceId] }],
+        targets: [{ key: "InstanceIds", values: [instance.instanceId] }],
         waitForSuccessTimeoutSeconds: 3600,
       },
     );
@@ -1587,20 +1572,14 @@ export class PrrHostingStack extends cdk.Stack {
       "ElasticIpAssociation",
       { allocationId, instanceId: instance.instanceId },
     );
-    // Handover step 2 (psd401/psd-aws-infra#42) drops the instance and this
-    // association from the stack and imports them back, because changing the
-    // instance's SubnetId in place replaces it. Retain keeps the host and its
-    // public address when they leave the stack.
+    // Retain since the subnet handover (psd401/psd-aws-infra#42), when both
+    // left the stack and were imported back: removing either from the stack
+    // keeps the host and its public address.
     for (const resource of [
       instance.node.defaultChild as cdk.CfnResource,
       elasticIpAssociation,
     ]) {
       resource.applyRemovalPolicy(cdk.RemovalPolicy.RETAIN);
-    }
-    if (handover === "detached") {
-      // The instance construct stays for its profile, which the host keeps.
-      instance.node.tryRemoveChild("Resource");
-      this.node.tryRemoveChild("ElasticIpAssociation");
     }
 
     const snapshotRole = new iam.Role(this, "SnapshotPolicyRole", {
@@ -1759,7 +1738,7 @@ export class PrrHostingStack extends cdk.Stack {
       alarm.addOkAction(alarmAction);
     }
 
-    new cdk.CfnOutput(this, "InstanceId", { value: instanceId });
+    new cdk.CfnOutput(this, "InstanceId", { value: instance.instanceId });
     new cdk.CfnOutput(this, "SubnetId", { value: subnet.subnetId });
     new cdk.CfnOutput(this, "SecurityGroupId", {
       value: securityGroup.securityGroupId,

@@ -36,13 +36,6 @@ function templateFor(config: PrrEnvConfig): Template {
   return Template.fromStack(stack);
 }
 
-function handoverTemplate(phase: "detached" | "import"): Template {
-  const app = new App({ context: { subnetHandover: phase } });
-  return Template.fromStack(
-    new PrrHostingStack(app, "psd401-prr-prod", prodConfig),
-  );
-}
-
 function jsonFor(config: PrrEnvConfig): string {
   return JSON.stringify(templateFor(config).toJSON());
 }
@@ -266,10 +259,9 @@ describe.each(environments)("psd401-prr-%s network", (envName, config) => {
     template.hasOutput("SubnetId", { Value: config.subnetId });
   });
 
-  // Handover step 2 has to drop the instance from the stack and import it
-  // back, because changing its SubnetId in place replaces it. The Elastic IP
-  // association leaves with it: deleting it would take the public address
-  // off the host.
+  // Both left the stack and were imported back during the subnet handover.
+  // Retain keeps the host, and the Elastic IP on it, if either ever leaves
+  // the stack again.
   test("retains the instance and its Elastic IP association", () => {
     for (const type of ["AWS::EC2::Instance", "AWS::EC2::EIPAssociation"]) {
       const resources = template.findResources(type);
@@ -1561,60 +1553,14 @@ describe.each(environments)("psd401-prr-%s backups", (envName, config) => {
   });
 });
 
-// The subnet handover's two transitional templates (README, "Moving to
-// psd-aws-infra"). Each is deployed once with `-c subnetHandover=<phase>`
-// between the Retain deploy and the final one. CloudFormation replaces an
-// instance for any SubnetId change, so the instance leaves the stack
-// ("detached") and comes back by resource import ("import"), which rejects
-// any change besides the imported resources themselves.
-describe("psd401-prr-prod subnet handover", () => {
-  const final = templateFor(prodConfig).toJSON();
-  const detached = handoverTemplate("detached").toJSON();
-  const imported = handoverTemplate("import").toJSON();
-  const imports = ["ElasticIpAssociation", "InstanceC1063A87"];
-
-  test("detached drops only the instance and its Elastic IP association", () => {
-    const dropped = Object.keys(final.Resources).filter(
-      (id) => !(id in detached.Resources),
-    );
-    const added = Object.keys(detached.Resources).filter(
-      (id) => !(id in final.Resources),
-    );
-    expect(dropped.sort()).toEqual(imports);
-    expect(added).toEqual([]);
-    // The instance construct stays for its profile; the live host keeps it.
-    expect(
-      detached.Resources.InstanceInstanceProfileAB5AEF02?.Type,
-    ).toBe("AWS::IAM::InstanceProfile");
-  });
-
-  test("detached and import name the instance by its ID", () => {
-    for (const json of [detached, imported]) {
-      expect(json.Resources.ApplicationDeployment.Properties.Targets).toEqual([
-        { Key: "InstanceIds", Values: [prodConfig.handoverInstanceId] },
-      ]);
-      expect(json.Outputs.InstanceId.Value).toBe(
-        prodConfig.handoverInstanceId,
-      );
-    }
-  });
-
-  test("import adds the two resources and changes nothing else", () => {
-    const rest = { ...imported.Resources };
-    for (const id of imports) {
-      // Exactly as the final template has them, Retain included: an import
-      // needs a DeletionPolicy, and the final deploy must not modify them.
-      expect(rest[id]).toEqual(final.Resources[id]);
-      delete rest[id];
-    }
-    expect(rest).toEqual(detached.Resources);
-    expect(imported.Outputs).toEqual(detached.Outputs);
-  });
-
-  test("an unknown phase fails synthesis", () => {
-    const app = new App({ context: { subnetHandover: "detach" } });
-    expect(
-      () => new PrrHostingStack(app, "psd401-prr-prod", prodConfig),
-    ).toThrow(/subnetHandover/);
-  });
+// The subnet handover finished on 2026-11-03 (README, "Moving to
+// psd-aws-infra"). Its transitional "detached" template dropped the instance
+// from the stack; a deploy of it now, with no import to follow, would leave
+// the host unmanaged. The context that selected it must do nothing.
+test("the retired subnetHandover context changes nothing", () => {
+  const app = new App({ context: { subnetHandover: "detached" } });
+  const stack = new PrrHostingStack(app, "psd401-prr-prod", prodConfig);
+  expect(Template.fromStack(stack).toJSON()).toEqual(
+    templateFor(prodConfig).toJSON(),
+  );
 });
