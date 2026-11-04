@@ -62,8 +62,8 @@ navigation lists, and `ROUTE_ROLES` is built from them:
 | Registry | What it covers | Source |
 |---|---|---|
 | `PRIMARY_NAV` | Inbox, Review, Staff Intake, Oversight, Configuration | `nav.ts` |
-| `CONFIGURATION_NAV` | Agent access, identity, registry, templates, exemptions, counsel domains, settings, message operations | `nav.ts` |
-| `OVERSIGHT_NAV` | JLARC reporting, audit log | `nav.ts` |
+| `CONFIGURATION_NAV` | Agent access, identity, registry, templates, exemptions, knowledge pack ([knowledge pack](../domain/knowledge-pack.md)), counsel domains, settings, message operations | `nav.ts` |
+| `OVERSIGHT_NAV` | JLARC reporting, audit log, AI evaluation ([advisory model comparison](../domain/advisory-evaluation.md), Records Officer only) | `nav.ts` |
 
 - `visibleNav(items, roles)` filters a list to the items that share a role with the user.
 - `routeIsAuthorized(path, roles)` checks the path pattern (`/work/:id`,
