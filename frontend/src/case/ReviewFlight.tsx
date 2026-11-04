@@ -35,6 +35,9 @@ const STATE_TEXT: Record<string, string> = {
   superseded: 'Superseded',
 }
 
+//: The staff API's page size (REST_FRAMEWORK PAGE_SIZE).
+const PAGE_SIZE = 50
+
 const KEY_HELP = [
   ['j / k', 'Next / previous record'],
   ['r', 'Responsive'],
@@ -59,9 +62,11 @@ function previewUrl(id: string) {
 export function ReviewFlight({ number }: { number: string }) {
   const qc = useQueryClient()
   const [filter, setFilter] = useState<'unreviewed' | 'all'>('unreviewed')
+  const [page, setPage] = useState(1)
   const [index, setIndex] = useState(0)
   const [selection, setSelection] = useState<string[]>([])
-  const [undoStack, setUndoStack] = useState<string[]>([])
+  // One entry per decision action: a bulk decision is undone as a whole.
+  const [undoStack, setUndoStack] = useState<string[][]>([])
   const [status, setStatus] = useState('')
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [paletteQuery, setPaletteQuery] = useState('')
@@ -80,7 +85,7 @@ export function ReviewFlight({ number }: { number: string }) {
         body: { state: input.state },
       }),
     onSuccess: (record, input) => {
-      setUndoStack((stack) => [...stack, input.id])
+      setUndoStack((stack) => [...stack, [input.id]])
       setStatus(`${record.original_filename}: ${STATE_TEXT[input.state]}.`)
       if (filter === 'all') setIndex((current) => current + 1)
       refresh()
@@ -93,37 +98,67 @@ export function ReviewFlight({ number }: { number: string }) {
         body: { record_item_ids: input.ids, state: input.state },
       }),
     onSuccess: (_records, input) => {
-      setUndoStack((stack) => [...stack, ...input.ids])
+      setUndoStack((stack) => [...stack, input.ids])
       setStatus(`${input.ids.length} selected records: ${STATE_TEXT[input.state]}.`)
       setSelection([])
       refresh()
     },
   })
   const undo = useMutation({
-    mutationFn: (id: string) =>
-      api<FlightRecord>(`/api/staff/record-items/${id}/undo-review/`, {
-        method: 'POST',
-        body: {},
-      }),
-    onSuccess: (record) => {
+    mutationFn: async (ids: string[]) => {
+      const undone: FlightRecord[] = []
+      for (const id of ids) {
+        undone.push(await api<FlightRecord>(`/api/staff/record-items/${id}/undo-review/`, {
+          method: 'POST',
+          body: {},
+        }))
+      }
+      return undone
+    },
+    onSuccess: (records) => {
+      const first = records[0]
+      setStatus(records.length === 1 && first
+        ? `Undone: ${first.original_filename} is ${STATE_TEXT[first.review_state] ?? first.review_state}.`
+        : `Undone: ${records.length} records.`)
+    },
+    // A refused undo is reported and dropped from the stack either way, so
+    // the next u reaches the decision before it instead of retrying forever.
+    onSettled: () => {
       setUndoStack((stack) => stack.slice(0, -1))
-      setStatus(`Undone: ${record.original_filename} is ${STATE_TEXT[record.review_state] ?? record.review_state}.`)
       refresh()
     },
   })
 
   // Reads sit below every mutation so each API literal keeps its own method.
   const list = useQuery({
-    queryKey: ['review-flight', number, filter],
+    queryKey: ['review-flight', number, filter, page],
     queryFn: () =>
       api<Page<FlightRecord> | FlightRecord[]>(
-        `/api/staff/record-items/?request=${encodeURIComponent(number)}${filter === 'unreviewed' ? '&review_state=unreviewed' : ''}`,
+        `/api/staff/record-items/?request=${encodeURIComponent(number)}${filter === 'unreviewed' ? '&review_state=unreviewed' : ''}${page > 1 ? `&page=${page}` : ''}`,
         { fetchAllPages: false },
       ),
     placeholderData: (previous) => previous,
   })
   const rows = useMemo(() => (list.data ? unwrap(list.data) : []), [list.data])
   const total = list.data && !Array.isArray(list.data) ? list.data.count : rows.length
+  const hasNext = Boolean(list.data && !Array.isArray(list.data) && list.data.next)
+  const pageStart = (page - 1) * PAGE_SIZE
+  const switchFilter = (next: 'unreviewed' | 'all') => {
+    setFilter(next)
+    setPage(1)
+    setIndex(0)
+    // A selection is of records the reviewer was looking at; a new list
+    // starts with none.
+    setSelection([])
+  }
+  const moveNext = () => {
+    if (index < rows.length - 1) setIndex(index + 1)
+    else if (hasNext) { setPage(page + 1); setIndex(0) }
+  }
+  const movePrevious = () => {
+    if (index > 0) setIndex(index - 1)
+    else if (page > 1) { setPage(page - 1); setIndex(PAGE_SIZE - 1) }
+  }
   const current = rows[Math.min(index, Math.max(rows.length - 1, 0))] ?? null
   const advisory = useQuery({
     queryKey: ['record-responsiveness-advisory', current?.id],
@@ -168,6 +203,12 @@ export function ReviewFlight({ number }: { number: string }) {
     const last = undoStack.at(-1)
     if (!busy && last) undo.mutate(last)
   }, [busy, undoStack, undo])
+  const moveNextRef = useRef(moveNext)
+  const movePreviousRef = useRef(movePrevious)
+  const switchFilterRef = useRef(switchFilter)
+  moveNextRef.current = moveNext
+  movePreviousRef.current = movePrevious
+  switchFilterRef.current = switchFilter
   const toggleSelected = useCallback(() => {
     if (!current) return
     setSelection((ids) => (ids.includes(current.id) ? ids.filter((id) => id !== current.id) : [...ids, current.id]))
@@ -178,13 +219,13 @@ export function ReviewFlight({ number }: { number: string }) {
     { label: 'Mark non-responsive', run: () => decide('non_responsive') },
     { label: 'Mark duplicate', run: () => decide('duplicate') },
     { label: 'Undo last decision', run: undoLast },
-    { label: 'Next record', run: () => setIndex((i) => Math.min(i + 1, rows.length - 1)) },
-    { label: 'Previous record', run: () => setIndex((i) => Math.max(i - 1, 0)) },
+    { label: 'Next record', run: () => moveNextRef.current() },
+    { label: 'Previous record', run: () => movePreviousRef.current() },
     { label: 'Select or unselect this record', run: toggleSelected },
-    { label: 'Show unreviewed only', run: () => { setFilter('unreviewed'); setIndex(0) } },
-    { label: 'Show all records', run: () => { setFilter('all'); setIndex(0) } },
+    { label: 'Show unreviewed only', run: () => switchFilterRef.current('unreviewed') },
+    { label: 'Show all records', run: () => switchFilterRef.current('all') },
     { label: 'Toggle clusters', run: () => setShowClusters((value) => !value) },
-  ], [decide, undoLast, toggleSelected, rows.length])
+  ], [decide, undoLast, toggleSelected])
   const matching = commands.filter((command) =>
     command.label.toLowerCase().includes(paletteQuery.trim().toLowerCase()),
   )
@@ -199,8 +240,8 @@ export function ReviewFlight({ number }: { number: string }) {
       }
       if (paletteOpen || isTyping(event.target) || event.metaKey || event.ctrlKey || event.altKey) return
       const actions: Record<string, () => void> = {
-        j: () => setIndex((i) => Math.min(i + 1, rows.length - 1)),
-        k: () => setIndex((i) => Math.max(i - 1, 0)),
+        j: () => moveNextRef.current(),
+        k: () => movePreviousRef.current(),
         r: () => decide('responsive'),
         n: () => decide('non_responsive'),
         d: () => decide('duplicate'),
@@ -215,7 +256,7 @@ export function ReviewFlight({ number }: { number: string }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [paletteOpen, rows.length, decide, undoLast, toggleSelected])
+  }, [paletteOpen, decide, undoLast, toggleSelected])
 
   const proposal = advisory.data?.latest?.state === 'complete' ? advisory.data.latest.proposal : null
   const error = single.error ?? bulk.error ?? undo.error
@@ -223,9 +264,9 @@ export function ReviewFlight({ number }: { number: string }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" variant={filter === 'unreviewed' ? 'primary' : 'secondary'}
-          onClick={() => { setFilter('unreviewed'); setIndex(0) }}>Unreviewed</Button>
+          onClick={() => switchFilter('unreviewed')}>Unreviewed</Button>
         <Button type="button" variant={filter === 'all' ? 'primary' : 'secondary'}
-          onClick={() => { setFilter('all'); setIndex(0) }}>All records</Button>
+          onClick={() => switchFilter('all')}>All records</Button>
         <Button type="button" variant="ghost" onClick={() => setShowClusters((value) => !value)}>
           {showClusters ? 'Hide clusters' : 'Show clusters'}
         </Button>
@@ -258,6 +299,12 @@ export function ReviewFlight({ number }: { number: string }) {
       {list.isError && <ErrorNote error={list.error} />}
       {list.isSuccess && rows.length === 0 && (
         <Card><EmptyState>No records to review here.</EmptyState></Card>
+      )}
+      {rows.length > 0 && (
+        <p className="text-sm text-ink-muted">
+          Records {pageStart + 1}–{pageStart + rows.length} of {total}
+          {(page > 1 || hasNext) && '; j and k continue onto the next or previous page.'}
+        </p>
       )}
       {rows.length > 0 && current && (
         <div className="grid gap-4 lg:grid-cols-[minmax(16rem,22rem)_1fr]">

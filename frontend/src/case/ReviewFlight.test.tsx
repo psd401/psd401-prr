@@ -116,3 +116,75 @@ it('says so when there is nothing to review', async () => {
   )
   expect(await screen.findByText('No records to review here.')).toBeInTheDocument()
 })
+
+function stubWith(handler: (url: string, init?: RequestInit) => { status?: number; body: unknown }) {
+  const posts: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (init?.method === 'POST') posts.push(url)
+    const { status = 200, body } = handler(url, init)
+    return { ok: status < 400, status, text: async () => JSON.stringify(body) } as Response
+  }))
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter><ReviewFlight number="PRR-2026-0001" /></MemoryRouter>
+    </QueryClientProvider>,
+  )
+  return { posts, user: userEvent.setup() }
+}
+
+const ADVISORY = { latest: { state: 'complete', proposal: { rationale: 'Mentions the bus route.' } } }
+
+it('undoes a bulk decision as a whole and drops a refused undo from the stack', async () => {
+  let refuse = false
+  const { posts, user } = stubWith((url, init) => {
+    if (url.includes('/advisory-responsiveness/')) return { body: ADVISORY }
+    if (init?.method === 'POST' && url.includes('undo-review')) {
+      return refuse ? { status: 400, body: ['Only the reviewer who made the latest decision may undo it.'] }
+        : { body: { ...ROWS[0], review_state: 'unreviewed' } }
+    }
+    if (init?.method === 'POST') return { body: url.endsWith('/bulk-review/') ? [] : { ...ROWS[2], review_state: 'responsive' } }
+    return { body: { count: 3, next: null, previous: null, results: ROWS } }
+  })
+  await screen.findByText('Mentions the bus route.')
+  await user.keyboard('x')
+  await user.keyboard('j')
+  await user.keyboard('x')
+  await user.keyboard('n')
+  await screen.findByText(/2 selected records: Non-responsive/)
+  await user.keyboard('u')
+  await screen.findByText('Undone: 2 records.')
+  expect(posts.filter((url) => url.includes('undo-review'))).toEqual([
+    '/api/staff/record-items/a/undo-review/', '/api/staff/record-items/b/undo-review/',
+  ])
+
+  // A refused undo is reported, and the next u does not retry it.
+  await user.keyboard('r')
+  await screen.findByText(/: Responsive\./)
+  refuse = true
+  await user.keyboard('u')
+  expect(await screen.findByText(/Only the reviewer who made the latest decision/)).toBeInTheDocument()
+  const before = posts.length
+  await user.keyboard('u')
+  expect(posts.length).toBe(before)
+})
+
+it('pages through all records with j and clears the selection when the filter changes', async () => {
+  const page2 = [{ ...ROWS[2], id: 'p2', original_filename: 'page-two.pdf' }]
+  const { user } = stubWith((url) => {
+    if (url.includes('/advisory-responsiveness/')) return { body: ADVISORY }
+    if (url.includes('page=2')) return { body: { count: 3, next: null, previous: 'p1', results: page2 } }
+    return { body: { count: 3, next: 'p2', previous: null, results: ROWS.slice(0, 2) } }
+  })
+  await screen.findByText(/Records 1–2 of 3/)
+  await user.keyboard('x')
+  expect(screen.getByText(/1 selected/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'All records' }))
+  expect(screen.queryByText(/1 selected/)).not.toBeInTheDocument()
+  await screen.findByText(/Records 1–2 of 3/)
+  await user.keyboard('jj')
+  expect(await screen.findByRole('option', { name: /page-two\.pdf/ })).toHaveAttribute('aria-selected', 'true')
+  expect(screen.getByText(/Records 51–51 of 3/)).toBeInTheDocument()
+  await user.keyboard('k')
+  await waitFor(() => expect(screen.getByText(/Records 1–2 of 3/)).toBeInTheDocument())
+})

@@ -12,6 +12,11 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": BASE_DIR / ".verification" / "e2e.sqlite3",  # noqa: F405
+        # The Review tab renders previews and prefetches the next record while
+        # a decision is written. SQLite refuses a read-to-write lock upgrade
+        # at once rather than waiting, so transactions start IMMEDIATE (they
+        # take the write lock up front and queue on the timeout instead).
+        "OPTIONS": {"timeout": 30, "transaction_mode": "IMMEDIATE"},
     }
 }
 ALLOWED_HOSTS = ["127.0.0.1", "localhost"]

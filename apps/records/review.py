@@ -539,8 +539,9 @@ def undo_review(record_item_id, *, actor):
     """Undo the actor's own latest review decision on one record (#46).
 
     The record goes back to the state recorded as ``before`` in that
-    decision's audit row: unreviewed, or an earlier responsive,
-    non-responsive, or duplicate decision (re-recorded in the actor's name).
+    decision's audit row: unreviewed, or the actor's own earlier responsive,
+    non-responsive, or duplicate decision (re-recorded in their name). An
+    earlier decision by someone else is never re-attributed; undo refuses.
     Only the reviewer who made the latest decision may undo it. A withheld
     decision on either side, and a record with active redactions, are never
     undone this way: each carries a judgement that has to be revisited
@@ -563,7 +564,8 @@ def undo_review(record_item_id, *, actor):
     if last.actor_id != actor.pk or reviewer_pk != actor.pk:
         raise ValidationError("Only the reviewer who made the latest decision may undo it.")
     undone = item.review_state
-    previous = str((last.detail.get("before") or {}).get("state") or "")
+    before = last.detail.get("before") or {}
+    previous = str(before.get("state") or "")
     if RecordItem.ReviewState.WITHHELD in (undone, previous):
         raise ValidationError(
             "A decision to withhold, or one that replaced it, is revisited one at "
@@ -572,6 +574,14 @@ def undo_review(record_item_id, *, actor):
     if Redaction.objects.filter(record_item=item, voided_at__isnull=True).exists():
         raise ValidationError("Void the active redactions before undoing this decision.")
     if previous in _UNDO_RESTORABLE_STATES:
+        # Restoring a decision re-records it in the caller's name, so only
+        # the caller's own earlier decision may come back this way; another
+        # reviewer's is never re-attributed. Review the record again instead.
+        if before.get("reviewed_by_id") != actor.pk:
+            raise ValidationError(
+                "The earlier decision was another reviewer's; review the record "
+                "again instead of undoing."
+            )
         item, _decision = _review_record(item.pk, state=previous, actor=actor)
     elif previous == RecordItem.ReviewState.UNREVIEWED:
         item.review_state = RecordItem.ReviewState.UNREVIEWED

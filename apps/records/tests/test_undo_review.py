@@ -67,14 +67,28 @@ class UndoReviewTests(TestCase):
         self.assertEqual(ReviewDecision.objects.order_by("-created_at")[0].review_state, R.UNREVIEWED)
         self.assertEqual(agreement_report()["decisions"], 0)
 
-    def test_undo_restores_the_previous_human_decision(self):
-        review_record(self.item.pk, state=R.RESPONSIVE, actor=self.other)
+    def test_undo_restores_your_own_previous_decision(self):
+        review_record(self.item.pk, state=R.RESPONSIVE, actor=self.reviewer)
         review_record(self.item.pk, state=R.NON_RESPONSIVE, actor=self.reviewer)
 
         item = undo_review(self.item.pk, actor=self.reviewer)
 
         self.assertEqual(item.review_state, R.RESPONSIVE)
         self.assertEqual(item.reviewed_by, self.reviewer)
+
+    def test_another_reviewers_earlier_decision_is_not_restored_in_your_name(self):
+        review_record(self.item.pk, state=R.RESPONSIVE, actor=self.other)
+        review_record(self.item.pk, state=R.NON_RESPONSIVE, actor=self.reviewer)
+        with self.assertRaises(ValidationError):
+            undo_review(self.item.pk, actor=self.reviewer)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.review_state, R.NON_RESPONSIVE)
+
+    def test_a_bulk_decision_can_be_undone_record_by_record(self):
+        from apps.records.review import bulk_review_records
+
+        bulk_review_records([self.item.pk], state=R.NON_RESPONSIVE, actor=self.reviewer)
+        self.assertEqual(undo_review(self.item.pk, actor=self.reviewer).review_state, R.UNREVIEWED)
 
     def test_only_your_own_latest_decision_can_be_undone(self):
         review_record(self.item.pk, state=R.RESPONSIVE, actor=self.other)
