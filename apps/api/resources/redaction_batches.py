@@ -189,6 +189,7 @@ class RedactionBatchViewSet(viewsets.GenericViewSet):
                     "built": serializers.IntegerField(),
                     "awaiting_second_review": serializers.IntegerField(),
                     "already_current": serializers.IntegerField(),
+                    "failed": serializers.IntegerField(),
                 },
             )
         },

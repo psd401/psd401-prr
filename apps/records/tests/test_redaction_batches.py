@@ -174,6 +174,16 @@ class RedactionBatchTests(TestCase):
             RedactionProposalDecision.Outcome.REJECTED,
         )
         self.assertEqual(proposal_groups(self.prr)[0]["pending"], 2)
+        # The sampled acceptance is a real redaction and is counted as one.
+        self.assertEqual(decided.accepted_count, 1)
+        self.assertEqual(
+            AuditLog.objects.get(action="redaction.batch_decided").detail["accepted_count"], 1,
+        )
+        # Blocked means one at a time from here: the group cannot be re-batched.
+        with self.assertRaises(ValidationError):
+            create_redaction_batch(
+                self.prr, exemption_id=self.phone.pk, pattern="phone", actor=self.reviewer,
+            )
 
     def test_a_rejection_needs_a_reason_and_every_sample_needs_a_judgment(self):
         for _ in range(3):
@@ -217,6 +227,28 @@ class RedactionBatchTests(TestCase):
             self.assertEqual(proposal.record_item.redacted_storage_key, "")
         # A second run builds nothing new.
         self.assertEqual(build_ready_redacted_records(self.prr, actor=self.reviewer)["built"], 0)
+
+    def test_a_record_that_cannot_be_built_is_counted_and_the_rest_still_build(self):
+        good = self._proposal(self.phone, "phone")
+        bad = self._proposal(self.phone, "phone")
+        batch = create_redaction_batch(
+            self.prr, exemption_id=self.phone.pk, pattern="phone", actor=self.reviewer,
+        )
+        decide_redaction_batch(
+            batch.pk, actor=self.reviewer,
+            judgments={pk: {"accept": True} for pk in batch.sample_ids},
+        )
+        # The retained bytes no longer match the record's integrity facts.
+        RecordItem.objects.filter(pk=bad.record_item_id).update(content_type="text/plain")
+
+        result = build_ready_redacted_records(self.prr, actor=self.reviewer)
+
+        self.assertEqual((result["built"], result["failed"]), (1, 1))
+        good.record_item.refresh_from_db()
+        self.assertTrue(good.record_item.redacted_storage_key)
+        self.assertEqual(
+            AuditLog.objects.get(action="redaction.ready_records_built").detail["failed"], 1,
+        )
 
     @override_settings(PRR_TRUST_REDACTION_MODE="suggest")
     def test_suggest_mode_allows_no_group_acceptance(self):

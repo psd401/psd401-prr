@@ -45,6 +45,7 @@ interface Built {
   built: number
   awaiting_second_review: number
   already_current: number
+  failed: number
 }
 
 type Judgment = { accept: boolean | null; reason: string }
@@ -248,6 +249,7 @@ export function RedactionProposals({
             <span role="status" className="text-sm text-ink">
               Built {build.data.built}. {build.data.awaiting_second_review} await second review.
               {build.data.already_current > 0 && ` ${build.data.already_current} already current.`}
+              {build.data.failed > 0 && ` ${build.data.failed} could not be built; open them to see why.`}
             </span>
           )}
           {build.isError && <ErrorNote error={build.error} />}

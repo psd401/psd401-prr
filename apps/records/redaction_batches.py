@@ -12,8 +12,9 @@ accepted are the rest accepted. Every acceptance goes through
 ``redaction_ai.accept_redaction_proposal`` and therefore ``create_redaction``
 with the proposal's own box and exemption citation (rule 3), and the record's
 second-review rule follows from that exemption as it always has. One
-rejection blocks the group: the sample decisions stand and the rest stay
-pending for one-at-a-time review. A proposal that became undecidable since
+rejection blocks the group: the sample decisions stand (and are counted), the
+rest stay pending, and no new batch may cover them; they are decided one at a
+time. A proposal that became undecidable since
 the batch opened (decided, record no longer responsive, source changed) is
 skipped and counted, never forced.
 
@@ -90,6 +91,7 @@ def create_redaction_batch(request, *, exemption_id, pattern, actor) -> Redactio
     _require_reviewer(actor)
     if runtime.get("PRR_TRUST_REDACTION_MODE") != "batch":
         raise ValidationError("The trust policy does not allow accepting proposals as a group.")
+    # Lock the case row (the result is not needed, only the lock).
     PublicRecordsRequest.objects.select_for_update().filter(pk=request.pk).first()
     ids = [
         str(pk)
@@ -103,6 +105,19 @@ def create_redaction_batch(request, *, exemption_id, pattern, actor) -> Redactio
     if len(ids) > MAX_GROUP_PROPOSALS:
         raise ValidationError(
             f"One group covers at most {MAX_GROUP_PROPOSALS} proposals."
+        )
+    # A blocked group goes back to one-at-a-time review for good: a fresh
+    # sample over the same proposals would undo the rejection.
+    wanted = set(ids)
+    if any(
+        wanted.intersection(blocked.proposal_ids)
+        for blocked in RedactionBatch.objects.filter(
+            request=request, outcome=RedactionBatch.Outcome.BLOCKED,
+        )
+    ):
+        raise ValidationError(
+            "A batch over some of these proposals was blocked by a rejection; "
+            "decide them one at a time."
         )
     for open_batch in RedactionBatch.objects.filter(
         request=request, exemption_id=exemption_id, pattern=pattern,
@@ -195,7 +210,9 @@ def decide_redaction_batch(batch_id, *, actor, judgments: dict) -> RedactionBatc
 
     batch.judgments = judgments
     batch.outcome = RedactionBatch.Outcome.APPLIED if agreed else RedactionBatch.Outcome.BLOCKED
-    batch.accepted_count = accepted if agreed else 0
+    # Every acceptance this batch made is counted, including a blocked
+    # batch's sampled acceptances: each is a real redaction.
+    batch.accepted_count = accepted
     batch.skipped_count = skipped
     batch.decided_by = actor
     batch.decided_at = timezone.now()
@@ -221,7 +238,7 @@ def decide_redaction_batch(batch_id, *, actor, judgments: dict) -> RedactionBatc
 def build_ready_redacted_records(request, *, actor) -> dict[str, int]:
     """Render the redacted PDF for every record on the case that is ready."""
     _require_reviewer(actor)
-    built = awaiting = current = 0
+    built = awaiting = current = failed = 0
     candidates = (
         RecordItem.objects.filter(
             request=request,
@@ -231,22 +248,39 @@ def build_ready_redacted_records(request, *, actor) -> dict[str, int]:
         .distinct()
         .order_by("pk")
     )
-    for item in candidates:
-        if item.second_review_required and item.second_reviewed_at is None:
-            awaiting += 1
-            continue
-        before = item.redacted_manifest_sha256
-        rendered = render_redacted_record(item.pk, actor=actor)
-        if rendered.redacted_manifest_sha256 == before and before:
-            current += 1
-        else:
-            built += 1
-    audit(
-        "redaction.ready_records_built",
-        target=request.number,
-        actor=actor,
-        built=built,
-        awaiting_second_review=awaiting,
-        already_current=current,
-    )
-    return {"built": built, "awaiting_second_review": awaiting, "already_current": current}
+    try:
+        for item in candidates:
+            if item.second_review_required and item.second_reviewed_at is None:
+                awaiting += 1
+                continue
+            before = item.redacted_manifest_sha256
+            try:
+                with transaction.atomic():
+                    rendered = render_redacted_record(item.pk, actor=actor)
+            except ValidationError:
+                # One record that cannot be rendered (no reviewable PDF, a
+                # page limit) does not stop the others; it is counted.
+                failed += 1
+                continue
+            if rendered.redacted_manifest_sha256 == before and before:
+                current += 1
+            else:
+                built += 1
+    finally:
+        # Written even if a storage error ends the run early, so a partial
+        # build is in the trail.
+        audit(
+            "redaction.ready_records_built",
+            target=request.number,
+            actor=actor,
+            built=built,
+            awaiting_second_review=awaiting,
+            already_current=current,
+            failed=failed,
+        )
+    return {
+        "built": built,
+        "awaiting_second_review": awaiting,
+        "already_current": current,
+        "failed": failed,
+    }

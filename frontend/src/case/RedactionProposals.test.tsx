@@ -32,7 +32,7 @@ function stub(decideResult: unknown) {
     if (init?.method === 'POST') {
       posts.push({ url, body: JSON.parse(String(init.body)) })
       body = url.endsWith('/decide/') ? decideResult
-        : url.endsWith('/build/') ? { built: 2, awaiting_second_review: 1, already_current: 0 }
+        : url.endsWith('/build/') ? { built: 2, awaiting_second_review: 1, already_current: 0, failed: 1 }
         : BATCH
     }
     return { ok: true, status: 200, text: async () => JSON.stringify(body) } as Response
@@ -82,6 +82,7 @@ it('builds every ready redacted PDF in one action', async () => {
   setup()
   await userEvent.click(await screen.findByRole('button', { name: 'Build redacted PDFs' }))
   expect(await screen.findByText(/Built 2. 1 await second review./)).toBeInTheDocument()
+  expect(screen.getByText(/1 could not be built/)).toBeInTheDocument()
   await waitFor(() => expect(posts).toEqual([{
     url: '/api/staff/redaction-batches/build/', body: { request: 'PRR-2026-0001' },
   }]))
