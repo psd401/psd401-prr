@@ -6,9 +6,9 @@ tags: [domain, record-review, redaction, derivatives, handling, media, opaque-re
 openwiki:
   roles: [domain, workflow]
   change_kinds: [review-workflow, rendering, handling-paths]
-  source_paths: [apps/records/handling.py, apps/records/derivatives.py, apps/records/preview.py, apps/records/review.py, apps/records/opaque_review.py, apps/records/media_review.py]
-  symbols: [handling_for, handling_for_item, build_derivative, review_record, bulk_review_records, bulk_review_selection, bulk_review_confirmed_selection, approve_second_review, render_redacted_record, record_opaque_disposition, create_media_redaction, render_media_redactions]
-  test_paths: [apps/records/tests/test_handling.py, apps/records/tests/test_derivatives.py, apps/records/tests/test_record_review.py, apps/records/tests/test_media_and_opaque_review.py, apps/api/tests/test_records_misc.py, apps/api/tests/test_bulk_review_by_filter.py]
+  source_paths: [apps/records/handling.py, apps/records/derivatives.py, apps/records/preview.py, apps/records/review.py, apps/records/opaque_review.py, apps/records/media_review.py, apps/records/clusters.py, apps/api/resources/records_misc.py, frontend/src/case/RecordClusters.tsx]
+  symbols: [handling_for, handling_for_item, build_derivative, review_record, bulk_review_records, bulk_review_selection, bulk_review_confirmed_selection, approve_second_review, render_redacted_record, record_opaque_disposition, create_media_redaction, render_media_redactions, cluster_records, RecordItemViewSet]
+  test_paths: [apps/records/tests/test_handling.py, apps/records/tests/test_derivatives.py, apps/records/tests/test_record_review.py, apps/records/tests/test_media_and_opaque_review.py, apps/records/tests/test_review_agreement.py, apps/api/tests/test_records_misc.py, apps/api/tests/test_bulk_review_by_filter.py]
   invariants:
     - A record's original bytes are never replaced; a reading copy or redacted copy is always a new derived object.
     - A record that cannot be rendered is never marked reviewed by default; a named human records a basis and reasoning.
@@ -178,6 +178,42 @@ Focused tests in `apps/api/tests/test_bulk_review_by_filter.py`, including
 `test_records_needing_their_own_judgement_are_skipped_and_counted`,
 `test_a_token_caller_is_handed_off_for_a_filter_decision`, and
 `test_too_many_matching_records_are_refused_before_any_lock`.
+
+## Record clusters
+
+The Records tab's **Group by cluster** view helps a reviewer look at related records
+together. It is a way to read the queue, not a decision. `cluster_records(records,
+grouping)` in [`apps/records/clusters.py`](../../apps/records/clusters.py) takes the
+filtered set and one of four groupings:
+
+- `thread`: messages linked by `In-Reply-To` to `Message-ID` within the set. Records with
+  neither header share one "Not email" cluster.
+- `sender`: the mailing list (`List-Id`) when present, otherwise the sending domain.
+- `tag`: one cluster per review tag. A record with two tags appears in both. Tags come from
+  [record facts and tags](record-facts-and-tags.md).
+- `ai_label`: the latest suggested state and its confidence band, read from the standing
+  responsiveness suggestion described in [advisory AI](advisory-ai.md#ai-human-agreement).
+
+The staff endpoint is `GET /api/staff/record-items/clusters/` (`RecordItemViewSet.clusters`
+in [`apps/api/resources/records_misc.py`](../../apps/api/resources/records_misc.py)). It reads
+every record the current filters match, not only the page on screen, because a cluster's
+size and majority label are only true over the full set. The response reports `cluster_count`
+and returns at most the largest clusters. Each cluster carries its size, up to three samples,
+the majority AI suggestion, and the record IDs. An unknown `group_by` is a 400 response.
+`frontend/src/case/RecordClusters.tsx` renders the view and says when the list was cut short.
+
+Invariants:
+
+- Clustering reads stored facts only and never changes review state, tags, or a suggestion.
+- The thread grouping uses a union-find over the in-set `In-Reply-To` links, so a reply chain
+  is one cluster regardless of the order records load in.
+- A mailing list outranks the sender domain as the sender key.
+
+Focused tests are in `apps/records/tests/test_review_agreement.py`:
+`test_a_reply_chain_is_one_thread`, `test_a_mailing_list_outranks_the_sender_domain`,
+`test_tags_and_ai_label_clusters_report_the_majority_label`,
+`test_samples_are_capped_and_unknown_groupings_refused`, `test_a_reviewer_groups_a_case_by_cluster`,
+and `test_an_unknown_grouping_is_a_400`.
 
 ## Opaque record dispositions
 
