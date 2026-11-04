@@ -650,6 +650,10 @@ export function Tasks({
                   </div>
                 ) : (
                   <div className="mt-3 space-y-3">
+                    <p className="text-sm text-pacific/80">
+                      The reason is kept in the audit log and case timeline. Describe the
+                      scope problem; do not name students or include record contents.
+                    </p>
                     <Field label="Reason">
                       <Textarea
                         value={supersedeReason}

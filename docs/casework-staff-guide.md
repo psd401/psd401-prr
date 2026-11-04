@@ -207,8 +207,10 @@ names where a record was found, not who uploaded it.
 
 A Vault export can bring in far more mail than the request asked for. When
 that happens, open the Vault task on the **Collection** tab and choose
-**Supersede collection**. It is a Records Officer action and needs a written
-reason of at least 20 characters.
+**Supersede collection**. It is a Records Officer action, available once the
+collection has finished, and needs a written reason of at least 20
+characters. The reason is kept in the audit log and the case timeline, so
+describe the scope problem without naming students or quoting records.
 
 Every record from that export that nobody has reviewed yet leaves the review
 queue, the work counts, and the release list. Nothing is deleted: the records

@@ -144,6 +144,25 @@ class SupersedeCollectionServiceTests(_SupersessionFixture, TestCase):
             supersede_collection(self.task.pk, actor=self.officer, reason="too broad")
         self.assertFalse(CollectionSupersession.objects.exists())
 
+    def test_only_a_completed_vault_collection_can_be_superseded(self):
+        ingesting = self._vault_task("export-ingesting")
+        CollectionTask.objects.filter(pk=ingesting.pk).update(
+            state=CollectionTask.State.INGESTING,
+        )
+        manual = CollectionTask.objects.create(
+            request=self.prr,
+            kind=CollectionTask.Kind.MANUAL,
+            state=CollectionTask.State.COMPLETE,
+            instructions="Search the department share.",
+        )
+        for index, task in enumerate((ingesting, manual)):
+            item = self._item(100 + index, task=task)
+            with self.assertRaises(ValidationError):
+                supersede_collection(task.pk, actor=self.officer, reason=REASON)
+            item.refresh_from_db()
+            self.assertEqual(item.review_state, RecordItem.ReviewState.UNREVIEWED)
+        self.assertFalse(CollectionSupersession.objects.exists())
+
     def test_only_a_records_officer_may_supersede(self):
         item = self._item(1)
         with self.assertRaises(ValidationError):
@@ -217,6 +236,14 @@ class SupersedeCollectionApiTests(_SupersessionFixture, TestCase):
         self._item(1)
         response = self._post(self.reviewer)
         self.assertEqual(response.status_code, 403)
+
+    def test_an_unfinished_collection_is_a_validation_error(self):
+        CollectionTask.objects.filter(pk=self.task.pk).update(
+            state=CollectionTask.State.INGESTING,
+        )
+        self._item(1)
+        response = self._post(self.officer)
+        self.assertEqual(response.status_code, 400, response.content)
 
     def test_a_short_reason_is_a_validation_error(self):
         self._item(1)

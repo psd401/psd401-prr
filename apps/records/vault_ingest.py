@@ -750,7 +750,7 @@ def attach_csv_sets_to_sole_records(run, task, csv_metadata):
         )
         records = list(
             RecordItem.objects.filter(pk__in=record_ids)
-            .exclude(review_state=RecordItem.ReviewState.DUPLICATE)
+            .exclude(review_state__in=_NOT_LIVE_COPY_STATES)
             .exclude(email_message_id="")
             .order_by("created_at", "pk")
         )
@@ -761,7 +761,7 @@ def attach_csv_sets_to_sole_records(run, task, csv_metadata):
                     record.email_message_id for record in records
                 },
             )
-            .exclude(review_state=RecordItem.ReviewState.DUPLICATE)
+            .exclude(review_state__in=_NOT_LIVE_COPY_STATES)
             .values_list("email_message_id", flat=True)
         )
         for record in records:
@@ -775,6 +775,15 @@ def attach_csv_sets_to_sole_records(run, task, csv_metadata):
             attach_custodians(record, task, keep)
             attached += 1
     return attached
+
+
+#: Records that do not count as a live copy of a message for custodian
+#: attachment: a duplicate defers to its survivor, and a superseded record left
+#: review with its collection.
+_NOT_LIVE_COPY_STATES = (
+    RecordItem.ReviewState.DUPLICATE,
+    RecordItem.ReviewState.SUPERSEDED,
+)
 
 
 def _message_duplicate(request_id, metadata):
