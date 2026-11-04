@@ -48,7 +48,11 @@ function setup(latest: unknown = COMPLETE) {
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <IntakeClassificationCard number="PRR-2026-0002" onConfirm={onConfirm} />
+        <IntakeClassificationCard
+          number="PRR-2026-0002"
+          emailAutoCreated={false}
+          onConfirm={onConfirm}
+        />
       </MemoryRouter>
     </QueryClientProvider>,
   )
@@ -103,4 +107,18 @@ it('reopens the action after a confirmed label, so a cancelled dialog is not a d
 
   expect(onConfirm).toHaveBeenCalledWith('duplicate_of', 'PRR-2026-0001')
   expect(posts).toEqual([])
+})
+
+it('offers no action after agreeing to a label that has none', async () => {
+  setup({
+    ...COMPLETE,
+    latest: {
+      ...COMPLETE.latest,
+      proposal: { label: 'spam', target_case_number: null, confidence: 0.9, evidence: 'Ad.' },
+    },
+    feedback: { outcome: 'confirmed', final_label: 'spam' },
+  })
+
+  expect(await screen.findByText(/You agreed with this label/)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Open the action' })).not.toBeInTheDocument()
 })

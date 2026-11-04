@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { api } from '../api/client'
 import { Badge, Button, Card, ErrorNote, Field, Select, Spinner, Textarea } from '../ui'
-import { INTAKE_LABEL_TEXT, type IntakeLabel } from './intakeLabels'
+import { INTAKE_LABEL_TEXT, intakeAction, type IntakeLabel } from './intakeLabels'
 
 interface IntakeRun {
   id: string
@@ -34,9 +34,11 @@ interface IntakeLatest {
  */
 export function IntakeClassificationCard({
   number,
+  emailAutoCreated,
   onConfirm,
 }: {
   number: string
+  emailAutoCreated: boolean
   onConfirm: (label: IntakeLabel, target: string | null) => void
 }) {
   const qc = useQueryClient()
@@ -118,9 +120,11 @@ export function IntakeClassificationCard({
             {latest.data.feedback?.outcome === 'confirmed' ? (
               <div className="flex flex-wrap items-center gap-2">
                 <p>You agreed with this label.</p>
-                <Button variant="ghost" onClick={() => onConfirm(label, target)}>
-                  Open the action
-                </Button>
+                {intakeAction(label, target, emailAutoCreated) && (
+                  <Button variant="ghost" onClick={() => onConfirm(label, target)}>
+                    Open the action
+                  </Button>
+                )}
               </div>
             ) : latest.data.feedback ? (
               <p>

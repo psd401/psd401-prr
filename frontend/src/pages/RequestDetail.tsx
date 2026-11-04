@@ -8,7 +8,7 @@ import type { StaffRole } from '../api/auth'
 import { isTerminalStatus } from '../caseStatus'
 import { AddToExistingCaseModal } from '../case/AddToExistingCaseModal'
 import { IntakeClassificationCard } from '../case/IntakeClassificationCard'
-import { INTAKE_LABEL_TEXT, type IntakeLabel } from '../case/intakeLabels'
+import { INTAKE_LABEL_TEXT, intakeAction, type IntakeLabel } from '../case/intakeLabels'
 import { CaseActivityFeed } from '../case/CaseActivityFeed'
 import { CaseNotesPanel } from '../case/CaseNotesPanel'
 import {
@@ -720,12 +720,13 @@ export function RequestDetail({
     const reason = `Intake classification confirmed: ${INTAKE_LABEL_TEXT[label].toLowerCase()}${
       target ? ` ${target}` : ''
     }.`
-    if (label === 'follow_up' && target && r?.email_intake_auto_created) {
+    const action = intakeAction(label, target, Boolean(r?.email_intake_auto_created))
+    if (action === 'add_to_case' && target) {
       setAddToCaseDestination(target)
       setAddingToCase(true)
-    } else if ((label === 'follow_up' || label === 'duplicate_of') && target) {
+    } else if (action === 'merge' && target) {
       openMerge(target, reason)
-    } else if ((label === 'non_request' || label === 'spam') && r?.email_intake_auto_created) {
+    } else if (action === 'close_non_request') {
       openNonRequestClosure(reason)
     }
   }
@@ -965,7 +966,11 @@ export function RequestDetail({
             clock is what makes it urgent. */}
         {showActionZone && canManageRequest && !terminalRequest && (
           <div className="lg:col-span-2">
-            <IntakeClassificationCard number={r.number} onConfirm={applyIntakeLabel} />
+            <IntakeClassificationCard
+              number={r.number}
+              emailAutoCreated={Boolean(r.email_intake_auto_created)}
+              onConfirm={applyIntakeLabel}
+            />
           </div>
         )}
         {showActionZone && (

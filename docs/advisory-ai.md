@@ -138,7 +138,9 @@ the ordinary action prefilled: merge for a duplicate or follow-up, add to an
 existing case for a follow-up on an automatically opened email case, or close
 as non-request for a non-request or spam email case. The officer still reads
 and submits that action; agreement is recorded whether or not they do, and
-**Open the action** reopens it after a cancelled dialog. **Not correct** records the label the officer judged
+**Open the action** reopens it after a cancelled dialog. A label with no
+action (a new or related request, or a non-request label on a web-form case)
+shows no such button. **Not correct** records the label the officer judged
 it to be instead. Web-form cases have no non-request closure, so a
 `non_request` or `spam` label there is shown but has no one-click action.
 Every answer is audited (`advisory.feedback_recorded`) with the proposed and
