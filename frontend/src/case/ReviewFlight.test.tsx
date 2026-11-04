@@ -20,6 +20,11 @@ function setup() {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     let body: unknown = { count: 3, next: null, previous: null, results: ROWS }
+    if (url.includes('/clusters/')) body = { group_by: 'sender', cluster_count: 0, clusters: [] }
+    if (url.includes('/review-batches/policy/')) {
+      body = { responsive: 'suggest', non_responsive: 'suggest', min_confidence: 0.95,
+        batch_sample_size: 10, elusion_sample_size: 30, discard_candidates: 0 }
+    }
     if (url.includes('/advisory-responsiveness/')) {
       body = { latest: { state: 'complete', proposal: { suggested_state: 'responsive', confidence: 0.92, rationale: 'Mentions the bus route.' } } }
     }
@@ -82,4 +87,32 @@ it('runs a command from the palette', async () => {
   await waitFor(() => expect(posts.at(-1)).toEqual({
     url: '/api/staff/record-items/a/review/', body: { state: 'non_responsive' },
   }))
+})
+
+it('switches to all records, toggles clusters, and says when a file has no preview', async () => {
+  const { user } = setup()
+  await screen.findByText('Mentions the bus route.')
+  await user.keyboard('jj')
+  expect(screen.getByText(/No preview for this file type/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'All records' }))
+  expect(screen.getByRole('button', { name: 'All records' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Show clusters' }))
+  expect(screen.getByRole('button', { name: 'Hide clusters' })).toBeInTheDocument()
+  // Switching the filter starts at the top; the palette moves like j and k.
+  await user.keyboard('{Meta>}k{/Meta}')
+  await user.click(await screen.findByRole('button', { name: 'Next record' }))
+  expect(screen.getByRole('option', { name: /b\.pdf/ })).toHaveAttribute('aria-selected', 'true')
+})
+
+it('says so when there is nothing to review', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true, status: 200,
+    text: async () => JSON.stringify({ count: 0, next: null, previous: null, results: [] }),
+  }) as Response))
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter><ReviewFlight number="PRR-2026-0001" /></MemoryRouter>
+    </QueryClientProvider>,
+  )
+  expect(await screen.findByText('No records to review here.')).toBeInTheDocument()
 })

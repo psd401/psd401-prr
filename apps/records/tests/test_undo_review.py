@@ -106,3 +106,32 @@ class UndoReviewTests(TestCase):
         response = api.post(f"/api/staff/record-items/{self.item.pk}/undo-review/")
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["review_state"], "unreviewed")
+
+    def test_a_record_with_active_redactions_is_not_undone(self):
+        from apps.records.models import ExemptionCitation, Redaction
+
+        review_record(self.item.pk, state=R.RESPONSIVE, actor=self.reviewer)
+        Redaction.objects.create(
+            record_item=self.item, page_number=1, x0=0.1, y0=0.1, x1=0.2, y1=0.2,
+            exemption=ExemptionCitation.objects.create(citation="RCW 42.56.250(4)", short_name="Phone"),
+            created_by=self.reviewer,
+        )
+        with self.assertRaises(ValidationError):
+            undo_review(self.item.pk, actor=self.reviewer)
+
+    def test_a_superseded_prior_state_is_not_restored(self):
+        review_record(self.item.pk, state=R.RESPONSIVE, actor=self.reviewer)
+        row = AuditLog.objects.get(action="record.reviewed")
+        AuditLog.objects.create(
+            action="record.reviewed", target=row.target, actor=self.reviewer,
+            detail={**row.detail, "before": {"state": "superseded"}},
+        )
+        with self.assertRaises(ValidationError):
+            undo_review(self.item.pk, actor=self.reviewer)
+
+    def test_the_api_reports_a_refused_undo_as_a_400(self):
+        api = APIClient()
+        api.force_authenticate(self.reviewer)
+        response = api.post(f"/api/staff/record-items/{self.item.pk}/undo-review/")
+        self.assertEqual(response.status_code, 400, response.content)
+

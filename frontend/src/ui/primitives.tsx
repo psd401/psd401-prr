@@ -53,7 +53,12 @@ export function FilterChip({
       {count !== undefined && (
         <span
           aria-label={countLabel}
-          className="ml-2 rounded-full bg-current/10 px-1.5 py-0.5 text-xs tabular-nums"
+          // On a selected chip a tint over the action colour lightens it under
+          // the white count and fails WCAG AA (4.41:1); an outline keeps the
+          // chip's own, passing, contrast in every theme.
+          className={`ml-2 rounded-full px-1.5 py-0.5 text-xs tabular-nums ${
+            selected ? 'border border-current/60' : 'bg-current/10'
+          }`}
         >
           <span aria-hidden="true">{count}</span>
         </span>

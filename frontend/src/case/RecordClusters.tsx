@@ -72,6 +72,8 @@ export function RecordClusters({
     placeholderData: (previous) => previous,
   })
   const data = clusters.data
+  // An unexpected payload shows no clusters rather than breaking the tab.
+  const clusterList = Array.isArray(data?.clusters) ? data.clusters : []
   const [batch, setBatch] = useState<ReviewBatch | null>(null)
   const open = useMutation({
     mutationFn: (input: { cluster: RecordCluster; state: string }) =>
@@ -113,16 +115,16 @@ export function RecordClusters({
       {open.isError && <ErrorNote error={open.error} />}
       {clusters.isPending && <Spinner />}
       {clusters.isError && <ErrorNote error={clusters.error} />}
-      {data && data.clusters.length === 0 && (
+      {data && clusterList.length === 0 && (
         <EmptyState>No record items match these filters.</EmptyState>
       )}
-      {data && data.cluster_count > data.clusters.length && (
+      {data && data.cluster_count > clusterList.length && (
         <p className="mb-3 text-sm text-ink-muted">
-          Showing the {data.clusters.length} largest of {data.cluster_count} clusters.
+          Showing the {clusterList.length} largest of {data.cluster_count} clusters.
         </p>
       )}
       <ul className="space-y-3" aria-label="Record clusters">
-        {data?.clusters.map((cluster) => (
+        {clusterList.map((cluster) => (
           <li key={cluster.key || 'none'} className="rounded-lg border border-line px-3 py-2">
             <div className="flex flex-wrap items-baseline gap-2">
               <h3 className="font-heading text-sm font-semibold text-ink">{cluster.label}</h3>
