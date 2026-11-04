@@ -35,6 +35,8 @@ from .models import (
     AdvisoryRun,
     ExemptionCitation,
     IntakeAttachment,
+    KnowledgeNoiseSender,
+    KnowledgeRoleAccount,
     PublicRecordsRequest,
     RecordItem,
     RecordSystem,
@@ -108,7 +110,10 @@ _BEDROCK_MAX_DOCUMENTS = 5
 _BEDROCK_MAX_DOCUMENT_BYTES = int(4.5 * 1024 * 1024)
 _BEDROCK_MAX_IMAGES = 20
 _BEDROCK_MAX_IMAGE_BYTES = int(3.75 * 1024 * 1024)
-_REQUEST_INTENT_SCHEMA_VERSION = 5
+_REQUEST_INTENT_SCHEMA_VERSION = 6
+# A registry checklist or search note longer than this is cut before it is
+# offered; one long checklist must not crowd out every other system.
+_REQUEST_INTENT_SYSTEM_TEXT_LIMIT = 2_000
 
 #: Longest advisory short title a request-intent proposal may carry. It is a
 #: scanning aid for one table column, not a summary, so it is bounded tightly
@@ -366,6 +371,90 @@ def _case_title_subject(request) -> str:
     return (subject or "").strip()[:_CASE_TITLE_SUBJECT_LIMIT]
 
 
+def _json_length(value: Any) -> int:
+    return len(json.dumps(value))
+
+
+def _request_intent_context(budget: int) -> tuple[list[dict[str, Any]], dict[str, Any], bool]:
+    """The registry and district knowledge pack, cut to fit ``budget``.
+
+    Measured as default ``json.dumps`` length, which is never shorter than the
+    canonical encoding, so the sum with the description stays under the
+    input ceiling. Each system's slug, name and keywords are always kept:
+    they are the only vocabulary ``record_system_slugs`` may use. Custodian,
+    retention, checklist and search-note detail is then added system by
+    system, followed by role accounts and noise senders, until the next entry
+    would not fit. Returns the systems, the pack, and whether anything was cut.
+    """
+    rows = list(
+        RecordSystem.objects.filter(active=True)
+        .select_related("knowledge_note")
+        .order_by("slug")
+    )
+    systems: list[dict[str, Any]] = [
+        {"slug": row.slug, "name": row.name, "triage_keywords": row.triage_keywords}
+        for row in rows
+    ]
+    knowledge: dict[str, Any] = {"role_accounts": [], "noise_senders": []}
+    truncated = False
+
+    def fits() -> bool:
+        return (
+            _json_length(
+                {
+                    "available_record_systems": systems,
+                    "district_knowledge": knowledge,
+                }
+            )
+            <= budget
+        )
+
+    def bounded(text: str) -> str:
+        nonlocal truncated
+        if len(text) > _REQUEST_INTENT_SYSTEM_TEXT_LIMIT:
+            truncated = True
+        return text[:_REQUEST_INTENT_SYSTEM_TEXT_LIMIT]
+
+    for entry, row in zip(systems, rows, strict=True):
+        note = getattr(row, "knowledge_note", None)
+        detail = {
+            "custodian_title": row.custodian_title,
+            "custodian_email": row.custodian_email,
+            "retention_days": row.retention_days,
+            "retention_note": row.retention_note,
+            "search_checklist": bounded(row.search_checklist),
+            "search_notes": bounded(note.notes) if note else "",
+        }
+        entry.update(detail)
+        if not fits():
+            for key in detail:
+                del entry[key]
+            truncated = True
+    candidates: list[tuple[str, dict[str, Any]]] = [
+        (
+            "role_accounts",
+            {
+                "role": row.role,
+                "account_email": row.account_email,
+                "starts_on": row.starts_on.isoformat() if row.starts_on else None,
+                "ends_on": row.ends_on.isoformat() if row.ends_on else None,
+                "note": row.note,
+            },
+        )
+        for row in KnowledgeRoleAccount.objects.all()
+    ]
+    candidates += [
+        ("noise_senders", {"kind": row.kind, "value": row.value})
+        for row in KnowledgeNoiseSender.objects.filter(active=True)
+    ]
+    for section, item in candidates:
+        knowledge[section].append(item)
+        if not fits():
+            knowledge[section].pop()
+            truncated = True
+    return systems, knowledge, truncated
+
+
 def _intake_candidates(request) -> list[dict[str, Any]]:
     """Earlier cases of the same matter kind the new one might belong to.
 
@@ -452,12 +541,10 @@ def _build_advisory_input(run: AdvisoryRun) -> _AdvisoryInput:
             truncated=len(description) > limit,
         )
     if run.kind == AdvisoryRun.Kind.REQUEST_INTENT:
-        systems = list(
-            RecordSystem.objects.filter(active=True)
-            .order_by("slug")
-            .values("slug", "name", "triage_keywords")
-        )
         description = run.request.description
+        systems, knowledge, context_truncated = _request_intent_context(
+            max(0, limit - len(description[:limit]))
+        )
         attachments, attachment_manifest, attachment_omitted = (
             _request_intent_attachments(run.request)
         )
@@ -475,6 +562,7 @@ def _build_advisory_input(run: AdvisoryRun) -> _AdvisoryInput:
                 for attachment in attachments
             ],
             "available_record_systems": systems,
+            "district_knowledge": knowledge,
         }
         return _AdvisoryInput(
             payload=payload,
@@ -483,7 +571,9 @@ def _build_advisory_input(run: AdvisoryRun) -> _AdvisoryInput:
                 "payload": payload,
                 "attachment_manifest": attachment_manifest,
             },
-            truncated=len(description) > limit or attachment_omitted,
+            truncated=(
+                len(description) > limit or attachment_omitted or context_truncated
+            ),
         )
     if run.record_item_id is None:
         raise ValidationError("A record advisory requires a record item.")
@@ -1430,7 +1520,18 @@ def _advisory_system_message(kind: str) -> str:
             "choose, whose rationale says in plain language what that option "
             "would cover and what it would leave out. Narrowing options are "
             "drafting material for a human conversation; never state or imply "
-            "that a requester must narrow, and never propose a denial."
+            "that a requester must narrow, and never propose a denial. "
+            "The supplied district_knowledge is the Records Officer's own "
+            "context. role_accounts say which district account held a named "
+            "role and between which dates; prefer that account over a "
+            "district-wide search when the request names a role, and match "
+            "the holder to the dates the request reaches. noise_senders are "
+            "district mass mail, newsletters, and notifications that a "
+            "responsive search almost never wants; never propose one of them "
+            "as a search term. Each available record system's custodian, "
+            "retention, search_checklist, and search_notes describe how that "
+            "system is actually searched; use them to choose systems and "
+            "terms, not to state an outcome."
         )
     elif kind == AdvisoryRun.Kind.RECORD_RESPONSIVENESS:
         output_contract = (

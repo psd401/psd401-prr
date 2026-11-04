@@ -231,6 +231,25 @@ messages puts it back in review as **Unreviewed**. Superseded records count as
 decided for a no-records closure. The supersession, every record it moved,
 your reason, and the count are written to the audit log under your name.
 
+### The district knowledge pack
+
+**Configuration > Knowledge** (Records Officers only) holds what you know
+about where district records live, so the intent advisory scopes a search the
+way you would:
+
+- **Role accounts**: which district account held a role, such as a school's
+  principal or the HR director, and from when until when. Leave a date blank
+  for an open end. Ranges for one role may overlap, for a handover or shared
+  role; the advisory is given every holder.
+- **Noise senders**: sender domains, addresses, and mailing lists that are
+  district mass mail. The advisory is told never to search for them.
+- **System search notes**: how each registry system is actually searched, in
+  your own words. Re-seeding the registry never changes them.
+
+Every add, edit, and removal is written to the audit log under your name. The
+pack is advisory input only: it routes nothing, holds nothing, and reaches no
+requester. Use role titles and district accounts, never student names.
+
 ### An email that belongs to a case you already have
 
 When a requester follows up from a fresh email thread, intake opens a new case

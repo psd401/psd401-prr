@@ -45,7 +45,8 @@
     "complete-reviewer-journey",
     "accessibility-audit",
     "officer-supersede-collection",
-    "reviewer-bulk-review-by-filter"
+    "reviewer-bulk-review-by-filter",
+    "officer-knowledge-pack-edit"
   ],
   "e2e_screenshots": {
     "staff-login-open-case": [
@@ -210,6 +211,10 @@
     "reviewer-bulk-review-by-filter": [
       "reviewer-bulk-review-by-filter-confirm.png",
       "reviewer-bulk-review-by-filter-result.png"
+    ],
+    "officer-knowledge-pack-edit": [
+      "officer-knowledge-pack-edit.png",
+      "officer-knowledge-pack-saved.png"
     ]
   },
   "strictness": "block",

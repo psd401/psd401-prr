@@ -39,9 +39,11 @@ from apps.records.models import (
     AdvisoryRun,
     Channel,
     CollectionTask,
+    KnowledgeRoleAccount,
     PublicRecordsRequest,
     RecordItem,
     RecordItemCustodian,
+    RecordSystem,
     Requester,
     RequestStatus,
     StatusEvent,
@@ -108,6 +110,10 @@ FIXTURE_SUPERSEDE_RECORD_COUNT = 3
 #: superseding the Vault collection never touches.
 FIXTURE_BULK_FILTER_DOMAIN = "bulk.example.org"
 FIXTURE_BULK_FILTER_RECORD_COUNT = 3
+#: A synthetic registry system and one role account for the knowledge-pack
+#: flow. The system has no triage keywords, so it routes no fixture case.
+FIXTURE_KNOWLEDGE_SYSTEM_SLUG = "fixture-shared-mailbox"
+FIXTURE_KNOWLEDGE_ROLE = "Principal, Fixture Elementary"
 FIXTURE_FORWARDED_DESCRIPTION = (
     "Copies of the traffic-safety study for the Harborview crossing, and any "
     "district correspondence about it from February 2026."
@@ -952,6 +958,28 @@ def _seed_supersede_case(officer):
             },
         )
     return request
+
+
+def _seed_knowledge_pack():
+    """Seed what the knowledge-pack flow edits: one registry system with no
+    search notes yet and one open-ended role account. Neither touches a case
+    or the work queue."""
+    RecordSystem.objects.get_or_create(
+        slug=FIXTURE_KNOWLEDGE_SYSTEM_SLUG,
+        defaults={
+            "name": "Fixture shared mailbox",
+            "category": "Email & documents",
+            "custodian_title": "Fixture office manager",
+            "triage_keywords": [],
+        },
+    )
+    KnowledgeRoleAccount.objects.get_or_create(
+        role=FIXTURE_KNOWLEDGE_ROLE,
+        defaults={
+            "account_email": "fixture.principal@example.org",
+            "starts_on": date(2024, 7, 1),
+        },
+    )
 
 
 def _seed_forwarded_requester_case(officer):
@@ -2460,6 +2488,7 @@ class Command(BaseCommand):
             _seed_awaiting_statutory_response_case(officer)
             _seed_forwarded_requester_case(officer)
             _seed_supersede_case(officer)
+            _seed_knowledge_pack()
             _seed_email_intake_redirect_cases(officer, inbound_transport)
             _reconcile_fixture_inbound_work(request)
             _seed_role_work(
