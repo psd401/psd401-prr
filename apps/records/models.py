@@ -3219,11 +3219,12 @@ class AdvisoryFeedback(AppendOnlyModelMixin, models.Model):
 
 class ReviewDecision(AppendOnlyModelMixin, models.Model):
     """One human responsiveness decision on one record, and the AI suggestion
-    that was on screen when it was made.
+    standing when it was made.
 
     Written by ``review.review_record`` for single and bulk review alike. The
-    suggestion is the record's latest complete responsiveness run -- the same
-    one the review list shows -- copied here as label and confidence so
+    suggestion is the record's latest complete responsiveness run at decision
+    time -- the rule the review list uses to show one -- copied here as label
+    and confidence so
     agreement between model and people can be measured. It never influences
     what the decision writes. Append-only: a later review is a new row.
     """

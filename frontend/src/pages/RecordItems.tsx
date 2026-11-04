@@ -1488,6 +1488,9 @@ export function RecordItems({
           onOpen={(id) => updateListParams({ item: id })}
         />
       )}
+      {activeGroup === 'cluster' && request === '' && (
+        <Card><EmptyState>Open a case to group its records into clusters.</EmptyState></Card>
+      )}
       {list.isSuccess && activeGroup !== 'cluster' && (
         <Card>
           {listRows.length === 0 ? (

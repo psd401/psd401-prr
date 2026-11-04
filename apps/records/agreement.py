@@ -2,10 +2,14 @@
 # ABOUTME: decision, by label and confidence band, from stored ReviewDecisions.
 """Stored AI-human agreement on record responsiveness (issue #38).
 
-The suggestion a reviewer sees is a record's latest *complete*
-responsiveness run. :func:`latest_suggestion_runs` is that rule, used both by
-the review list and by ``review.review_record`` when it stores a decision, so
-what is measured is exactly what was shown.
+A record's standing suggestion is its latest *complete* responsiveness run.
+:func:`latest_suggestion_runs` is that rule, used both by the review list and
+by ``review.review_record`` when it stores a decision. What is stored is the
+suggestion standing when the decision was written. That is what the reviewer
+saw unless a newer run completed after their page loaded; the request does
+not name the run it rendered, so that rare case is not distinguished. For
+measuring the model against the human answer this is the right quantity
+either way.
 
 Agreement compares the suggested state with the human outcome, where a record
 withheld in full counts as responsive (it was responsive and then exempt).
@@ -129,7 +133,7 @@ def agreement_report(*, request=None) -> dict[str, Any]:
     scored = sum(row["decisions"] for row in scored_rows)
     agreed_total = sum(row["agreed"] for row in scored_rows)
     return {
-        # Decisions made with a suggestion on screen; ``scored`` leaves out
+        # Decisions made while a suggestion stood; ``scored`` leaves out
         # the uncertain ones, which have no right answer to agree with.
         "decisions": sum(row["decisions"] for row in rows),
         "scored": scored,

@@ -269,7 +269,7 @@ def bulk_review_confirmed_selection(
         record_item_ids=[str(item.pk) for item in items],
         record_item_count=len(items),
         excluded=selection.excluded,
-        # The suggestions that were on screen, recorded for agreement only.
+        # The suggestions standing at decision time, for agreement only.
         advisory_run_ids=[
             str(decision.advisory_run_id)
             for decision in decisions
@@ -407,7 +407,7 @@ def bulk_review_records(record_item_ids, *, state, actor):
         review_state=state,
         record_item_ids=[str(item.pk) for item in reviewed],
         record_item_count=len(reviewed),
-        # The suggestions that were on screen, recorded for agreement only.
+        # The suggestions standing at decision time, for agreement only.
         advisory_run_ids=[
             str(decision.advisory_run_id)
             for _item, decision in results
@@ -528,18 +528,18 @@ def _review_record(
 
 
 def _store_decision(item, *, state, actor, bulk):
-    """Store the decision and the suggestion that was on screen (#38)."""
+    """Store the decision and the suggestion standing at decision time (#38)."""
     from .agreement import latest_suggestion_runs
     from .models import ReviewDecision
 
-    shown = latest_suggestion_runs(item).first()
-    proposal = shown.proposal if shown else {}
+    standing = latest_suggestion_runs(item).first()
+    proposal = standing.proposal if standing else {}
     confidence = proposal.get("confidence")
     return ReviewDecision.objects.create(
         record_item=item,
         request=item.request,
         review_state=state,
-        advisory_run=shown,
+        advisory_run=standing,
         advisory_label=proposal.get("suggested_state") or "",
         advisory_confidence=float(confidence) if confidence is not None else None,
         bulk=bulk,
@@ -549,13 +549,13 @@ def _store_decision(item, *, state, actor, bulk):
 
 def _store_decisions(items, *, state, actor):
     """``_store_decision`` for a filter decision over up to 10,000 records:
-    the suggestion each record showed, read in one query."""
+    each record's standing suggestion, read in one query."""
     from django.db.models import OuterRef, Subquery
 
     from .agreement import annotate_latest_suggestion, latest_suggestion_runs
     from .models import ReviewDecision
 
-    shown = {
+    standing = {
         row["pk"]: row
         for row in annotate_latest_suggestion(
             RecordItem.objects.filter(pk__in=[item.pk for item in items]).annotate(
@@ -570,9 +570,9 @@ def _store_decisions(items, *, state, actor):
             record_item=item,
             request=item.request,
             review_state=state,
-            advisory_run_id=shown[item.pk]["advisory_run_id"],
-            advisory_label=shown[item.pk]["advisory_suggested_state"] or "",
-            advisory_confidence=shown[item.pk]["advisory_confidence"],
+            advisory_run_id=standing[item.pk]["advisory_run_id"],
+            advisory_label=standing[item.pk]["advisory_suggested_state"] or "",
+            advisory_confidence=standing[item.pk]["advisory_confidence"],
             bulk=True,
             actor=actor,
         )

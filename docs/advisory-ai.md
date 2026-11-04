@@ -201,10 +201,14 @@ evaluation** (`advisory_evaluations.list`).
 
 Every human responsiveness decision -- single, selected bulk, or filter bulk
 -- writes an append-only `ReviewDecision` (`apps/records/review.py`). It keeps
-the outcome, the reviewer, whether it was bulk, and the suggestion that was on
-screen: the record's latest *complete* responsiveness run, the same rule the
-review list uses (`apps/records/agreement.latest_suggestion_runs`), with its
-label and confidence copied. A bulk audit row also lists those run ids
+the outcome, the reviewer, whether it was bulk, and the suggestion standing at
+decision time: the record's latest *complete* responsiveness run, the same rule
+the review list uses to show one (`apps/records/agreement.latest_suggestion_runs`),
+with its label and confidence copied. If a newer run completed after the
+reviewer's page loaded, the stored suggestion is that newer one; the review
+request does not name the run it rendered. Agreement therefore measures the
+model's standing answer against the human one, not anchoring on what was
+displayed. A bulk audit row also lists those run ids
 (`advisory_run_ids`). Storing the suggestion never changes the decision.
 
 `agreement_report` turns those rows into agreement by suggested label and
@@ -238,9 +242,9 @@ than a matter of wording:
 
 * The request carries the record identifiers the reviewer selected and the
   outcome the reviewer chose. It carries no advisory run, no proposal, and no
-  confidence threshold. The service looks up the suggestion each record was
-  showing only to store it beside the decision (see below); it never decides
-  what is written.
+  confidence threshold. The service looks up each record's standing
+  suggestion only to store it beside the decision (see below); it never
+  decides what is written.
 * The set is what the reviewer filtered and could see. Tag, sender-domain,
   custodian, and text filters are facts about the records; the AI-confidence
   filter and sort only change what a reviewer looks at first, never what the

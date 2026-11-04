@@ -7,7 +7,7 @@ from typing import NoReturn
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
 from django.http import HttpResponse, QueryDict
-from drf_spectacular.utils import extend_schema, extend_schema_field
+from drf_spectacular.utils import extend_schema, extend_schema_field, inline_serializer
 from rest_framework import filters, mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -415,32 +415,44 @@ def _truthy_flag(value) -> bool:
 CLUSTER_LIMIT = 200
 
 
-class ClusterSampleSerializer(serializers.Serializer):
-    id = serializers.UUIDField()
-    original_filename = serializers.CharField()
-    review_state = serializers.CharField()
-    advisory_suggested_state = serializers.CharField(allow_null=True)
-    advisory_confidence = serializers.FloatField(allow_null=True)
-
-
-class ClusterMajoritySerializer(serializers.Serializer):
-    label = serializers.CharField()
-    count = serializers.IntegerField()
-
-
-class RecordClusterSerializer(serializers.Serializer):
-    key = serializers.CharField(allow_blank=True)
-    label = serializers.CharField()
-    size = serializers.IntegerField()
-    ai_majority = ClusterMajoritySerializer(allow_null=True)
-    samples = ClusterSampleSerializer(many=True)
-    record_item_ids = serializers.ListField(child=serializers.UUIDField())
-
-
-class RecordClustersSerializer(serializers.Serializer):
-    group_by = serializers.CharField()
-    cluster_count = serializers.IntegerField()
-    clusters = RecordClusterSerializer(many=True)
+# Declared through inline_serializer: a serializer *class* attribute named
+# ``label`` collides with Field.label in the type stubs.
+RECORD_CLUSTERS_SCHEMA = inline_serializer(
+    "RecordClusters",
+    fields={
+        "group_by": serializers.CharField(),
+        "cluster_count": serializers.IntegerField(),
+        "clusters": inline_serializer(
+            "RecordCluster",
+            many=True,
+            fields={
+                "key": serializers.CharField(allow_blank=True),
+                "label": serializers.CharField(),
+                "size": serializers.IntegerField(),
+                "ai_majority": inline_serializer(
+                    "RecordClusterMajority",
+                    allow_null=True,
+                    fields={
+                        "label": serializers.CharField(),
+                        "count": serializers.IntegerField(),
+                    },
+                ),
+                "samples": inline_serializer(
+                    "RecordClusterSample",
+                    many=True,
+                    fields={
+                        "id": serializers.UUIDField(),
+                        "original_filename": serializers.CharField(),
+                        "review_state": serializers.CharField(),
+                        "advisory_suggested_state": serializers.CharField(allow_null=True),
+                        "advisory_confidence": serializers.FloatField(allow_null=True),
+                    },
+                ),
+                "record_item_ids": serializers.ListField(child=serializers.UUIDField()),
+            },
+        ),
+    },
+)
 
 
 class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
@@ -698,7 +710,7 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             ),
         })
 
-    @extend_schema(responses=RecordClustersSerializer)
+    @extend_schema(responses=RECORD_CLUSTERS_SCHEMA)
     @action(detail=False, methods=["get"], url_path="clusters")
     def clusters(self, request):
         """Group the currently filtered records into clusters (#38).
@@ -706,6 +718,9 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         A way to look at records, not a decision: each cluster reports its
         size, a few samples, and the majority AI suggestion inside it.
         """
+        # Every filtered record is read, not just the clusters returned: the
+        # review filters bound the set (one case, or a narrower filter), and a
+        # cluster's size and majority are only true over all of it.
         grouping = request.query_params.get("group_by", "thread")
         queryset = self.get_queryset()
         try:
@@ -727,7 +742,7 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
 
         A human decision about records the reviewer chose and could see. This
         is not an accept-all of AI output: the model's recommendation changes
-        nothing about what is written. The suggestion each record showed is
+        nothing about what is written. Each record's standing suggestion is
         only stored beside the decision so agreement can be measured (#38).
         Withholding and duplicate outcomes are deliberately unavailable here
         because each needs its own citation or judgement.
