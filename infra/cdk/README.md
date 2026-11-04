@@ -28,46 +28,20 @@ and the stack never references the shared DMZ route table, NACL, or subnet.
 This stack built that subnet; psd-aws-infra now owns it, and the stack places
 the host in it by ID.
 
-**Moving to psd-aws-infra (2026-11).** psd-dev-standards 08 gives every
-subnet in a shared VPC to psd-aws-infra, so this subnet, its route table,
-the association and the default route are being handed over
-(psd401/psd-aws-infra#42). The isolation above doesn't change: the subnet
-keeps its own route table with only the internet route. Step 1 sets Retain on
-all four and is deployed on its own. Step 2 drops them from this stack and
-looks the subnet up instead; psd-aws-infra then imports them.
+**Moved to psd-aws-infra (2026-11-03).** psd-dev-standards 08 gives every
+subnet in a shared VPC to psd-aws-infra, so this stack handed over the
+subnet, its route table, the association and the default route
+(psd401/psd-aws-infra#42); psd-aws-infra imports them. The isolation above
+doesn't change: the subnet keeps its own route table with only the internet
+route. The four left this stack with Retain deployed first (#22).
 
-Step 2 can't change the instance's `SubnetId` in place: CloudFormation
-replaces an instance for any `SubnetId` change, including a reference
-swapped for the same literal ID, and the root volume holds PostgreSQL. (This
-was observed, not tested: two unexecuted change sets against the live stack
-on 2026-11-02 reported `Replacement: True`, `SubnetId`, Always, Static,
-with the subnet resources dropped in the same change and with them kept.) So
-the instance and its Elastic IP association leave the stack and come back
-by import:
-
-1. Retain on the instance and the Elastic IP association, deployed on its
-   own.
-2. Drop both and the four subnet resources; the deployment association and
-   the `InstanceId` output name the instance by ID meanwhile.
-3. `cdk import` the instance, with the subnet as a literal ID, and the
-   association. An import can't change anything else in the stack.
-4. Point the deployment association and the output back at the instance.
-
-Steps 2 to 4 run from one commit. The code synthesizes the final template;
-the `subnetHandover` context selects the two transitional ones. Version
-reporting stays off for steps 2 and 3 so `CDKMetadata` can't change during
-the import:
-
-```text
-bunx cdk deploy psd401-prr-prod -c subnetHandover=detached --no-version-reporting --require-approval never --profile psd401-prr-prod
-bunx cdk import psd401-prr-prod -c subnetHandover=import --no-version-reporting --resource-mapping handover-mapping.json --profile psd401-prr-prod
-bunx cdk deploy psd401-prr-prod --require-approval never --profile psd401-prr-prod
-```
-
-`handover-mapping.json` maps `InstanceC1063A87` to its `InstanceId` and
-`ElasticIpAssociation` to its `Id`. Run the three back to back. Between
-steps 2 and 3, a plain deploy would create a second instance, because the
-stack no longer holds the first.
+The instance's `SubnetId` couldn't change in place: CloudFormation replaces
+an instance for any `SubnetId` change, including a reference swapped for the
+same literal ID, and the root volume holds PostgreSQL. (Observed, not tested:
+unexecuted change sets against the live stack on 2026-11-02 reported
+`Replacement: True`, `SubnetId`, Always, Static.) So the instance and its
+Elastic IP association, both retained (#24), left the stack and came back by
+`cdk import` with the subnet as a literal ID (#25). Both keep Retain.
 
 Neither stack owns the VPC, the internet gateway, the Route 53 zone, any DNS
 record, the Elastic IP allocation, or the CDK bootstrap stack. Production
