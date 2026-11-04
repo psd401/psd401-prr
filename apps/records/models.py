@@ -3303,6 +3303,79 @@ class RecordsEstimate(AppendOnlyModelMixin, models.Model):
         return f"{self.pk}: estimate as of {self.as_of}"
 
 
+class ReviewBatch(models.Model):
+    """A batch decision a reviewer approves after judging a random sample (#39).
+
+    ``cluster``: a reviewer proposes one outcome for a cluster's unreviewed
+    records; ``discard``: the Ready to discard pile of records the AI calls
+    non-responsive above the trust-policy floor. Either way a random sample
+    (``sample_ids``) is drawn when the batch is opened, the reviewer judges
+    each sampled record, and only if every judgment matches
+    ``proposed_state`` is that outcome applied to the rest, in the
+    reviewer's name. One disagreement blocks the batch: the sampled
+    judgments are recorded as ordinary reviews and every other record goes
+    back to per-record review. For a discard batch that sample is the
+    elusion test. The AI applies nothing; the reviewer's decision does.
+    """
+
+    class Kind(models.TextChoices):
+        CLUSTER = "cluster", "Cluster approval"
+        DISCARD = "discard", "Ready to discard"
+
+    class Outcome(models.TextChoices):
+        OPEN = "open", "Open"
+        APPLIED = "applied", "Applied"
+        BLOCKED = "blocked", "Blocked"
+
+    request = models.ForeignKey(
+        PublicRecordsRequest,
+        on_delete=models.PROTECT,
+        related_name="review_batches",
+    )
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    label = models.CharField(max_length=500, blank=True)
+    proposed_state = models.CharField(max_length=20)
+    record_item_ids = models.JSONField()
+    sample_ids = models.JSONField()
+    min_confidence = models.FloatField(null=True, blank=True)
+    judgments = models.JSONField(default=dict, blank=True)
+    outcome = models.CharField(max_length=20, choices=Outcome.choices, default=Outcome.OPEN)
+    applied_count = models.PositiveIntegerField(default=0)
+    skipped_count = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(proposed_state__in=["responsive", "non_responsive"]),
+                name="review_batch_proposed_state_allowed",
+            ),
+            # Nothing may discard as responsive: a discard batch only ever
+            # proposes non-responsive.
+            models.CheckConstraint(
+                condition=~Q(kind="discard") | Q(proposed_state="non_responsive"),
+                name="review_batch_discard_is_non_responsive",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.kind} batch {self.pk}: {self.outcome}"
+
+
 class EvaluationSet(models.Model):
     """Labelled examples for comparing advisory models, taken from decisions
     people already made (a merge, a non-request closure, a reviewed record).

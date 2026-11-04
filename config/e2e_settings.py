@@ -22,3 +22,11 @@ PRR_TEST_FIXTURE_SEED_ENABLED = True
 # Multi-role acceptance flows deliberately switch among five deterministic
 # identities in one browser run; keep production's login throttle unchanged.
 PRR_STAFF_LOGIN_RATE = "100/min"
+
+# Trust ladder for the sampled-batch flows (#39): non-responsive may be batched
+# and auto-staged; responsive stays per-record. Only PRR-E2E-0011 carries AI
+# suggestions, so no other case's Records tab gains a Ready-to-discard pile.
+PRR_TRUST_NON_RESPONSIVE_MODE = "auto"
+PRR_TRUST_NON_RESPONSIVE_AUTO_MIN_CONFIDENCE = 90
+PRR_TRUST_BATCH_SAMPLE_SIZE = 2
+PRR_TRUST_ELUSION_SAMPLE_SIZE = 3

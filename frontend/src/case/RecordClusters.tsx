@@ -1,8 +1,11 @@
 // ABOUTME: Records tab "Group by cluster" view (#38): every filtered record in
 // ABOUTME: clusters by thread, sender or list, tag, or AI label band.
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { api } from '../api/client'
-import { Badge, Card, EmptyState, ErrorNote, Select, Spinner } from '../ui'
+import { Badge, Button, Card, EmptyState, ErrorNote, Select, Spinner } from '../ui'
+import { BatchReviewPanel } from './BatchReview'
+import { type ReviewBatch, useTrustPolicy } from './trustPolicy'
 
 interface ClusterSample {
   id: string
@@ -69,6 +72,26 @@ export function RecordClusters({
     placeholderData: (previous) => previous,
   })
   const data = clusters.data
+  const [batch, setBatch] = useState<ReviewBatch | null>(null)
+  const open = useMutation({
+    mutationFn: (input: { cluster: RecordCluster; state: string }) =>
+      api<ReviewBatch>('/api/staff/review-batches/', {
+        method: 'POST',
+        body: {
+          record_item_ids: input.cluster.record_item_ids,
+          state: input.state,
+          cluster_label: input.cluster.label,
+        },
+      }),
+    onSuccess: setBatch,
+  })
+  const trust = useTrustPolicy(filters.get('request') ?? '')
+  const batchStates = (['responsive', 'non_responsive'] as const).filter(
+    (state) => trust.data && trust.data[state] !== 'suggest',
+  )
+  if (batch) {
+    return <BatchReviewPanel batch={batch} onOpen={onOpen} onClose={() => setBatch(null)} />
+  }
   return (
     <Card>
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -87,6 +110,7 @@ export function RecordClusters({
           A cluster is a way to look at records; it decides nothing.
         </span>
       </div>
+      {open.isError && <ErrorNote error={open.error} />}
       {clusters.isPending && <Spinner />}
       {clusters.isError && <ErrorNote error={clusters.error} />}
       {data && data.clusters.length === 0 && (
@@ -106,6 +130,17 @@ export function RecordClusters({
                 {cluster.size} {cluster.size === 1 ? 'record' : 'records'}
               </span>
               <Badge tone={cluster.ai_majority ? 'blue' : 'neutral'}>{majorityText(cluster)}</Badge>
+              {batchStates.map((state) => (
+                <Button
+                  key={state}
+                  type="button"
+                  variant="secondary"
+                  disabled={open.isPending}
+                  onClick={() => open.mutate({ cluster, state })}
+                >
+                  Approve cluster as {SUGGESTION_TEXT[state]?.toLowerCase()}
+                </Button>
+              ))}
             </div>
             <ul className="mt-1 text-sm" aria-label={`Sample records in ${cluster.label}`}>
               {cluster.samples.map((sample) => (

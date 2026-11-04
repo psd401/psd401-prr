@@ -324,7 +324,48 @@ than a matter of wording:
   service refuses a batch that carries one rather than overturning it.
 
 There is still no path by which a model result becomes an applied legal
-outcome, in bulk or otherwise.
+outcome on its own. The trust ladder below lets a named reviewer decide a set
+after checking a random sample of it; that is the Records Officer's chosen
+policy, and the reviewer's decision, not the model's, is what applies.
+
+## Trust ladder: sampled batch approval and the elusion test
+
+The Records Officer's trust policy (#39) lives in the in-app settings store,
+admin-only with a reason, and every change is audited:
+
+| Setting | Values | Default |
+|---|---|---|
+| `PRR_TRUST_RESPONSIVE_MODE` | `suggest`, `batch` (no automatic mode) | `suggest` |
+| `PRR_TRUST_NON_RESPONSIVE_MODE` | `suggest`, `batch`, `auto` | `suggest` |
+| `PRR_TRUST_NON_RESPONSIVE_AUTO_MIN_CONFIDENCE` | 50-100 percent | 95 |
+| `PRR_TRUST_BATCH_SAMPLE_SIZE` | 1-200 records | 10 |
+| `PRR_TRUST_ELUSION_SAMPLE_SIZE` | 1-500 records | 30 |
+
+- **Suggest** is per-record review, as before.
+- **Batch.** In the Records tab's cluster view, **Approve cluster as ...**
+  opens a `ReviewBatch` over the cluster's unreviewed records and draws a
+  random sample (`random.SystemRandom`). The reviewer judges each sampled
+  record. If every judgment matches, the outcome is applied to the whole
+  cluster through the ordinary review service in the reviewer's name (each
+  record gets its own audit row and `ReviewDecision`). One disagreement blocks
+  the batch: the sample judgments are recorded and every other record stays
+  unreviewed for per-record review.
+- **Auto (non-responsive only).** Unreviewed records whose standing AI
+  suggestion is non-responsive at or above the floor are staged as **Ready to
+  discard**. Nothing is applied until a reviewer runs the elusion check: a
+  random sample of the pile, judged one by one. Zero responsive findings
+  applies non-responsive to the pile in the reviewer's name; any responsive
+  finding blocks it. The batch stores the sample, the judgments, the floor,
+  and the outcome; `review.batch_decided` records `elusion_responsive_found`.
+  With no finding in 30 sampled records the pile's miss rate is below about
+  10% at 95% confidence; larger samples catch rarer misses.
+
+Responsive is never automatic: its mode has no `auto` value, the service
+treats a stored `auto` as `batch`, and the database refuses a discard batch
+that proposes anything but non-responsive. Release stays a human action.
+`AdvisoryRun.applied` stays false: the batch decision is the reviewer's.
+Deciding a batch is `review_batches.decide`, human-only; opening one decides
+nothing.
 
 The privilege queue follows the same rule. `counsel_domain` and
 `privilege_marker` are deterministic tags derived from stored message
@@ -349,8 +390,9 @@ the model work ahead of the reviewer:
    run stopped by the global or automatic runtime gate records a planned pause
    and does not consume that retry budget.
 
-Automatic results remain proposals. Responsiveness still needs one explicit
-named human confirmation. Each redaction candidate still needs an individual
+Automatic results remain proposals. Responsiveness still needs a named human
+decision: one record at a time, or a sampled batch under the trust policy
+above. Each redaction candidate still needs an individual
 named human accept/edit/reject decision with an active exemption citation; no
 accept-all path exists. Second review and immutable raster burn-in remain
 unchanged.
