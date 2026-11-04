@@ -2,7 +2,7 @@
 // ABOUTME: network isolation, host hardening, and IAM limits the review demanded.
 
 import { describe, expect, test } from "bun:test";
-import { App } from "aws-cdk-lib";
+import { App, ContextProvider, Stack } from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { spawnSync } from "node:child_process";
 import {
@@ -19,6 +19,11 @@ import { join } from "node:path";
 
 import { prodConfig, type PrrEnvConfig } from "../lib/config";
 import { PrrHostingStack } from "../lib/prr-hosting-stack";
+import {
+  SHARED_SUBNET_LOOKUP_PROVIDER,
+  sharedSubnetQuery,
+  type SharedSubnetCandidate,
+} from "../lib/shared-subnet";
 
 // Route tables, NACLs and subnets belonging to the shared DMZ that serves the
 // district's legacy automation production box. A single reference to one of
@@ -30,10 +35,54 @@ const SHARED_DMZ_IDS = [
   "subnet-0f692ddb4076078e9",
 ];
 
+// A stand-in for the subnet psd-aws-infra tags for this host, so the suite
+// exercises the tag lookup rather than its synth-time dummy.
+const TEST_SUBNET_ID = "subnet-0123456789abcdef0";
+
+function taggedSubnet(
+  config: PrrEnvConfig,
+  subnetId: string,
+  tags: Record<string, string> = {
+    Name: `psd401-prr-${config.envName}`,
+    "psd:shared": "network",
+  },
+): SharedSubnetCandidate {
+  return {
+    Identifier: subnetId,
+    AvailabilityZone: config.availabilityZone,
+    Tags: Object.entries(tags).map(([Key, Value]) => ({ Key, Value })),
+  };
+}
+
+// What `cdk synth` would have cached in cdk.context.json for the subnet
+// lookup, keyed exactly as the stack asks for it.
+function subnetContext(
+  config: PrrEnvConfig,
+  subnets: SharedSubnetCandidate[],
+): Record<string, unknown> {
+  const probe = new Stack(new App(), "ContextKeyProbe", {
+    env: { account: config.account, region: config.region },
+  });
+  const { key } = ContextProvider.getKey(probe, {
+    provider: SHARED_SUBNET_LOOKUP_PROVIDER,
+    props: sharedSubnetQuery(config.vpcId),
+  });
+  return { [key]: subnets };
+}
+
+function stackFor(
+  config: PrrEnvConfig,
+  subnets: SharedSubnetCandidate[] = [taggedSubnet(config, TEST_SUBNET_ID)],
+  extraContext: Record<string, unknown> = {},
+): PrrHostingStack {
+  const app = new App({
+    context: { ...subnetContext(config, subnets), ...extraContext },
+  });
+  return new PrrHostingStack(app, `psd401-prr-${config.envName}`, config);
+}
+
 function templateFor(config: PrrEnvConfig): Template {
-  const app = new App();
-  const stack = new PrrHostingStack(app, `psd401-prr-${config.envName}`, config);
-  return Template.fromStack(stack);
+  return Template.fromStack(stackFor(config));
 }
 
 function jsonFor(config: PrrEnvConfig): string {
@@ -211,7 +260,6 @@ const environments: Array<[string, PrrEnvConfig]> = [["prod", prodConfig]];
 const unpinnedConfig: PrrEnvConfig = {
   ...prodConfig,
   envName: "dev",
-  subnetId: "subnet-00000000000000000",
   eipAllocationId: undefined,
   hostname: "unpinned.example.invalid",
 };
@@ -253,10 +301,65 @@ describe.each(environments)("psd401-prr-%s network", (envName, config) => {
 
   test("places the host in the handed-over subnet", () => {
     template.hasResourceProperties("AWS::EC2::Instance", {
-      SubnetId: config.subnetId,
+      SubnetId: TEST_SUBNET_ID,
       AvailabilityZone: config.availabilityZone,
     });
-    template.hasOutput("SubnetId", { Value: config.subnetId });
+    template.hasOutput("SubnetId", { Value: TEST_SUBNET_ID });
+  });
+
+  // psd-dev-standards 08 "Shared network": an app finds a shared network
+  // resource by its psd:shared tag and stable Name, never by an ID in code.
+  test("finds the subnet by tag inside the configured VPC, not by ID", () => {
+    expect(config).not.toHaveProperty("subnetId");
+    expect(sharedSubnetQuery(config.vpcId)).toEqual({
+      typeName: "AWS::EC2::Subnet",
+      propertyMatch: { VpcId: config.vpcId },
+      propertiesToReturn: ["AvailabilityZone", "Tags"],
+      expectedMatchCount: "at-least-one",
+    });
+  });
+
+  test("picks the one subnet carrying both tags", () => {
+    const picked = Template.fromStack(
+      stackFor(config, [
+        taggedSubnet(config, "subnet-0aaaaaaaaaaaaaaa1", {
+          Name: `psd401-prr-${envName}`,
+        }),
+        taggedSubnet(config, "subnet-0aaaaaaaaaaaaaaa2", {
+          Name: "some-other-app",
+          "psd:shared": "network",
+        }),
+        taggedSubnet(config, TEST_SUBNET_ID),
+      ]),
+    );
+    picked.hasResourceProperties("AWS::EC2::Instance", {
+      SubnetId: TEST_SUBNET_ID,
+    });
+  });
+
+  // An untagged VPC or a second subnet with the same tags must stop synth,
+  // never quietly move a FERPA host somewhere else.
+  test("fails synth unless exactly one subnet matches", () => {
+    expect(() =>
+      stackFor(config, [
+        taggedSubnet(config, "subnet-0aaaaaaaaaaaaaaa1", { Name: "other" }),
+      ]),
+    ).toThrow(/found 0/);
+    expect(() =>
+      stackFor(config, [
+        taggedSubnet(config, TEST_SUBNET_ID),
+        taggedSubnet(config, "subnet-0aaaaaaaaaaaaaaa2"),
+      ]),
+    ).toThrow(/found 2/);
+  });
+
+  // The first `cdk synth` pass, before the CLI has done the lookup, sees
+  // CDK's dummy value. It must still build so the CLI can ask AWS.
+  test("synthesizes with the dummy value before the lookup is cached", () => {
+    const app = new App();
+    expect(
+      () => new PrrHostingStack(app, `psd401-prr-${envName}`, config),
+    ).not.toThrow();
   });
 
   // Both left the stack and were imported back during the subnet handover.
@@ -1558,8 +1661,9 @@ describe.each(environments)("psd401-prr-%s backups", (envName, config) => {
 // from the stack; a deploy of it now, with no import to follow, would leave
 // the host unmanaged. The context that selected it must do nothing.
 test("the retired subnetHandover context changes nothing", () => {
-  const app = new App({ context: { subnetHandover: "detached" } });
-  const stack = new PrrHostingStack(app, "psd401-prr-prod", prodConfig);
+  const stack = stackFor(prodConfig, undefined, {
+    subnetHandover: "detached",
+  });
   expect(Template.fromStack(stack).toJSON()).toEqual(
     templateFor(prodConfig).toJSON(),
   );

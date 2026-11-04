@@ -1,3 +1,255 @@
 {
-  "ssm:account=338414773271:parameterName=/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id:region=us-west-2": "ami-0ac74609c6396bed3"
+  "ssm:account=338414773271:parameterName=/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id:region=us-west-2": "ami-0ac74609c6396bed3",
+  "cc-api-provider:account=338414773271:expectedMatchCount=at-least-one:propertiesToReturn.0=AvailabilityZone:propertiesToReturn.1=Tags:propertyMatch.VpcId=vpc-020d508e4786a5803:region=us-west-2:typeName=AWS$:$:EC2$:$:Subnet": [
+    {
+      "AvailabilityZone": "us-west-2a",
+      "Tags": [
+        {
+          "Value": "CFPSD401DMZSubnet1",
+          "Key": "aws:cloudformation:logical-id"
+        },
+        {
+          "Value": "terraform",
+          "Key": "psd:managed-by"
+        },
+        {
+          "Value": "psd-aws-infra",
+          "Key": "psd:application"
+        },
+        {
+          "Value": "internal",
+          "Key": "psd:data-classification"
+        },
+        {
+          "Value": "PSD-INFRA-CORE-DMZ-Subnet-1",
+          "Key": "Name"
+        },
+        {
+          "Value": "PSD-INFRA-CORE",
+          "Key": "aws:cloudformation:stack-name"
+        },
+        {
+          "Value": "prod",
+          "Key": "psd:environment"
+        },
+        {
+          "Value": "network",
+          "Key": "psd:shared"
+        },
+        {
+          "Value": "tsd-engineering@psd401.net",
+          "Key": "psd:owner"
+        },
+        {
+          "Value": "arn:aws:cloudformation:us-west-2:338414773271:stack/PSD-INFRA-CORE/f7c791d0-5fed-11e9-adb5-063a4d9c7b3c",
+          "Key": "aws:cloudformation:stack-id"
+        },
+        {
+          "Value": "psd401/psd-aws-infra",
+          "Key": "psd:repo"
+        }
+      ],
+      "Identifier": "subnet-0f692ddb4076078e9"
+    },
+    {
+      "AvailabilityZone": "us-west-2b",
+      "Tags": [
+        {
+          "Value": "tsd-engineering@psd401.net",
+          "Key": "psd:owner"
+        },
+        {
+          "Value": "psd401/psd-aws-infra",
+          "Key": "psd:repo"
+        },
+        {
+          "Value": "network",
+          "Key": "psd:shared"
+        },
+        {
+          "Value": "PSD-INFRA-CORE",
+          "Key": "aws:cloudformation:stack-name"
+        },
+        {
+          "Value": "PSD-INFRA-CORE-DMZ-Subnet-2",
+          "Key": "Name"
+        },
+        {
+          "Value": "prod",
+          "Key": "psd:environment"
+        },
+        {
+          "Value": "terraform",
+          "Key": "psd:managed-by"
+        },
+        {
+          "Value": "psd-aws-infra",
+          "Key": "psd:application"
+        },
+        {
+          "Value": "internal",
+          "Key": "psd:data-classification"
+        },
+        {
+          "Value": "CFPSD401DMZSubnet2",
+          "Key": "aws:cloudformation:logical-id"
+        },
+        {
+          "Value": "arn:aws:cloudformation:us-west-2:338414773271:stack/PSD-INFRA-CORE/f7c791d0-5fed-11e9-adb5-063a4d9c7b3c",
+          "Key": "aws:cloudformation:stack-id"
+        }
+      ],
+      "Identifier": "subnet-09d0279728bdb6f5a"
+    },
+    {
+      "AvailabilityZone": "us-west-2b",
+      "Tags": [
+        {
+          "Value": "prod",
+          "Key": "psd:environment"
+        },
+        {
+          "Value": "psd-aws-infra",
+          "Key": "psd:application"
+        },
+        {
+          "Value": "internal",
+          "Key": "psd:data-classification"
+        },
+        {
+          "Value": "tsd-engineering@psd401.net",
+          "Key": "psd:owner"
+        },
+        {
+          "Value": "PSD-INFRA-CORE",
+          "Key": "aws:cloudformation:stack-name"
+        },
+        {
+          "Value": "PSD-INFRA-CORE-Private-Subnet-2",
+          "Key": "Name"
+        },
+        {
+          "Value": "psd401/psd-aws-infra",
+          "Key": "psd:repo"
+        },
+        {
+          "Value": "network",
+          "Key": "psd:shared"
+        },
+        {
+          "Value": "CFPSD401PrivateSubnet2",
+          "Key": "aws:cloudformation:logical-id"
+        },
+        {
+          "Value": "arn:aws:cloudformation:us-west-2:338414773271:stack/PSD-INFRA-CORE/f7c791d0-5fed-11e9-adb5-063a4d9c7b3c",
+          "Key": "aws:cloudformation:stack-id"
+        },
+        {
+          "Value": "terraform",
+          "Key": "psd:managed-by"
+        }
+      ],
+      "Identifier": "subnet-0259527a0d9ec032d"
+    },
+    {
+      "AvailabilityZone": "us-west-2a",
+      "Tags": [
+        {
+          "Value": "PSD-INFRA-CORE",
+          "Key": "aws:cloudformation:stack-name"
+        },
+        {
+          "Value": "internal",
+          "Key": "psd:data-classification"
+        },
+        {
+          "Value": "CFPSD401PrivateSubnet1",
+          "Key": "aws:cloudformation:logical-id"
+        },
+        {
+          "Value": "terraform",
+          "Key": "psd:managed-by"
+        },
+        {
+          "Value": "psd401/psd-aws-infra",
+          "Key": "psd:repo"
+        },
+        {
+          "Value": "arn:aws:cloudformation:us-west-2:338414773271:stack/PSD-INFRA-CORE/f7c791d0-5fed-11e9-adb5-063a4d9c7b3c",
+          "Key": "aws:cloudformation:stack-id"
+        },
+        {
+          "Value": "PSD-INFRA-CORE-Private-Subnet-1",
+          "Key": "Name"
+        },
+        {
+          "Value": "psd-aws-infra",
+          "Key": "psd:application"
+        },
+        {
+          "Value": "network",
+          "Key": "psd:shared"
+        },
+        {
+          "Value": "prod",
+          "Key": "psd:environment"
+        },
+        {
+          "Value": "tsd-engineering@psd401.net",
+          "Key": "psd:owner"
+        }
+      ],
+      "Identifier": "subnet-0111fb07e696cd61f"
+    },
+    {
+      "AvailabilityZone": "us-west-2a",
+      "Tags": [
+        {
+          "Value": "student-pii",
+          "Key": "psd:data-classification"
+        },
+        {
+          "Value": "Subnet53F41B8F",
+          "Key": "aws:cloudformation:logical-id"
+        },
+        {
+          "Value": "psd401-prr-prod",
+          "Key": "Name"
+        },
+        {
+          "Value": "terraform",
+          "Key": "psd:managed-by"
+        },
+        {
+          "Value": "tsd-engineering@psd401.net",
+          "Key": "psd:owner"
+        },
+        {
+          "Value": "psd401-prr-prod",
+          "Key": "aws:cloudformation:stack-name"
+        },
+        {
+          "Value": "psd401/psd-aws-infra",
+          "Key": "psd:repo"
+        },
+        {
+          "Value": "network",
+          "Key": "psd:shared"
+        },
+        {
+          "Value": "psd-aws-infra",
+          "Key": "psd:application"
+        },
+        {
+          "Value": "prod",
+          "Key": "psd:environment"
+        },
+        {
+          "Value": "arn:aws:cloudformation:us-west-2:338414773271:stack/psd401-prr-prod/967bdc90-8acb-11f1-9355-06601ac0364b",
+          "Key": "aws:cloudformation:stack-id"
+        }
+      ],
+      "Identifier": "subnet-02ccab0368061c253"
+    }
+  ]
 }
