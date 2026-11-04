@@ -7,6 +7,8 @@ import { api, unwrap, type Page } from '../api/client'
 import type { StaffRole } from '../api/auth'
 import { isTerminalStatus } from '../caseStatus'
 import { AddToExistingCaseModal } from '../case/AddToExistingCaseModal'
+import { IntakeClassificationCard } from '../case/IntakeClassificationCard'
+import { INTAKE_LABEL_TEXT, intakeAction, type IntakeLabel } from '../case/intakeLabels'
 import { CaseActivityFeed } from '../case/CaseActivityFeed'
 import { CaseNotesPanel } from '../case/CaseNotesPanel'
 import {
@@ -337,6 +339,7 @@ export function RequestDetail({
   const [closeStatus, setCloseStatus] = useState('')
   const [closeReason, setCloseReason] = useState('')
   const [addingToCase, setAddingToCase] = useState(false)
+  const [addToCaseDestination, setAddToCaseDestination] = useState('')
   const [merging, setMerging] = useState(false)
   const [mergeTarget, setMergeTarget] = useState('')
   const [mergeReason, setMergeReason] = useState('')
@@ -691,8 +694,8 @@ export function RequestDetail({
     closeCase.mutate({ to_status: closeStatus, reason })
   }
 
-  function openNonRequestClosure() {
-    setNonRequestReason('')
+  function openNonRequestClosure(reason = '') {
+    setNonRequestReason(reason)
     closeNonRequest.reset()
     setClosingNonRequest(true)
   }
@@ -704,11 +707,28 @@ export function RequestDetail({
     closeNonRequest.mutate({ reason })
   }
 
-  function openMerge() {
-    setMergeTarget('')
-    setMergeReason('')
+  function openMerge(target = '', reason = '') {
+    setMergeTarget(target)
+    setMergeReason(reason)
     merge.reset()
     setMerging(true)
+  }
+
+  // A confirmed intake label opens the ordinary action, prefilled. The
+  // officer still reads it, edits the reason if they like, and submits.
+  function applyIntakeLabel(label: IntakeLabel, target: string | null) {
+    const reason = `Intake classification confirmed: ${INTAKE_LABEL_TEXT[label].toLowerCase()}${
+      target ? ` ${target}` : ''
+    }.`
+    const action = intakeAction(label, target, Boolean(r?.email_intake_auto_created))
+    if (action === 'add_to_case' && target) {
+      setAddToCaseDestination(target)
+      setAddingToCase(true)
+    } else if (action === 'merge' && target) {
+      openMerge(target, reason)
+    } else if (action === 'close_non_request') {
+      openNonRequestClosure(reason)
+    }
   }
 
   function openFerpaVerification() {
@@ -944,6 +964,15 @@ export function RequestDetail({
             sits directly under the request text because that text is what
             justifies the decision, and directly above Deadlines because the
             clock is what makes it urgent. */}
+        {showActionZone && canManageRequest && !terminalRequest && (
+          <div className="lg:col-span-2">
+            <IntakeClassificationCard
+              number={r.number}
+              emailAutoCreated={Boolean(r.email_intake_auto_created)}
+              onConfirm={applyIntakeLabel}
+            />
+          </div>
+        )}
         {showActionZone && (
           <div className="lg:col-span-2">
             {closingClarification && (
@@ -959,20 +988,23 @@ export function RequestDetail({
                 <Button
                   variant="ghost"
                   disabled={!emailIntakeReceiptId}
-                  onClick={() => setAddingToCase(true)}
+                  onClick={() => {
+                    setAddToCaseDestination('')
+                    setAddingToCase(true)
+                  }}
                 >
                   Add to an existing case…
                 </Button>
               )}
               {canManageRequest && r.email_intake_auto_created && (
-                <Button variant="ghost" onClick={openNonRequestClosure}>
+                <Button variant="ghost" onClick={() => openNonRequestClosure()}>
                   Close as non-request
                 </Button>
               )}
               {/* A merge closes this number and moves the requester's
                   correspondence, so it stays with the Records Officer. */}
               {canManageRequest && (
-                <Button variant="ghost" onClick={openMerge}>
+                <Button variant="ghost" onClick={() => openMerge()}>
                   Merge into case…
                 </Button>
               )}
@@ -2011,6 +2043,7 @@ export function RequestDetail({
           open
           sourceNumber={r.number}
           receiptId={emailIntakeReceiptId}
+          initialDestination={addToCaseDestination}
           onClose={() => setAddingToCase(false)}
           onRedirected={async () => {
             setAddingToCase(false)

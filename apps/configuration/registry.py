@@ -292,6 +292,22 @@ SETTINGS: tuple[SettingSpec, ...] = (
         requires=("PRR_AI_ADVISORY_ENABLED",),
     ),
     SettingSpec(
+        key="PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED",
+        type=values.BOOLEAN,
+        default=False,
+        category=CATEGORY_ADVISORY_AI,
+        label="Classify new cases automatically",
+        consequence=(
+            "On, each new case gets a suggested label -- new request, "
+            "follow-up to or duplicate of an earlier case, related to one, "
+            "not a records request, or spam -- for a Records Officer to "
+            "confirm or dismiss. The label merges, closes, and sends nothing; "
+            "the officer applies it through the ordinary action. Off, new "
+            "cases are triaged by hand as before."
+        ),
+        requires=("PRR_AI_ADVISORY_ENABLED",),
+    ),
+    SettingSpec(
         key="PRR_CLOUDWATCH_METRICS_ENABLED",
         type=values.BOOLEAN,
         default=False,
@@ -402,6 +418,24 @@ SETTINGS: tuple[SettingSpec, ...] = (
         label="Record-responsiveness model",
         consequence=(
             "The Bedrock model that suggests whether a record is responsive. Blank uses the advisory model above. Only models the "
+            "production Bedrock grant names can be called; any other "
+            "identifier makes these runs fail closed."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MODEL_INTAKE",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        max_length=255,
+        pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
+        format_message="The advisory model must be a Bedrock model identifier.",
+        category=CATEGORY_ADVISORY_AI,
+        label="Intake-classification model",
+        consequence=(
+            "The Bedrock model that suggests whether a new case is a new "
+            "request, a follow-up, a duplicate, related, a non-request, or "
+            "spam. Blank uses the advisory model above. Only models the "
             "production Bedrock grant names can be called; any other "
             "identifier makes these runs fail closed."
         ),

@@ -1543,4 +1543,43 @@ describe('a first response sent outside this system', () => {
       screen.queryByRole('button', { name: 'Record a response sent outside this system…' }),
     ).not.toBeInTheDocument()
   })
+  it('a confirmed duplicate label opens the merge dialog prefilled', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/advisory-intake/feedback/')) {
+        expect(init?.method).toBe('POST')
+        return fakeResponse({ outcome: 'confirmed' }, 201)
+      }
+      if (url.endsWith('/advisory-intake/')) {
+        return fakeResponse({
+          enabled: true,
+          latest: {
+            id: 'run-1',
+            state: 'complete',
+            model_identifier: 'us.anthropic.claude-opus-5-5',
+            proposal: {
+              label: 'duplicate_of',
+              target_case_number: 'PRR-2026-0048',
+              confidence: 0.9,
+              evidence: 'Same wording.',
+            },
+            failure_detail: '',
+          },
+          feedback: null,
+        })
+      }
+      return fakeResponse(DETAIL)
+    }))
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Correct' }))
+
+    const heading = await screen.findByRole('heading', { name: 'Merge into case' })
+    const dialog = heading.closest('dialog') as HTMLElement
+    expect(within(dialog).getByLabelText(/^Merge into case number/)).toHaveValue('PRR-2026-0048')
+    expect(
+      (within(dialog).getByLabelText(/^Reason/) as HTMLTextAreaElement).value,
+    ).toContain('duplicate of PRR-2026-0048')
+  })
 })

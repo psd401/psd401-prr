@@ -1295,6 +1295,10 @@ class AdvisoryRun(models.Model):
             "Record responsiveness",
         )
         RECORD_REDACTIONS = "record_redactions", "Record redaction candidates"
+        #: Whether a newly created case is a new request, a follow-up to or
+        #: duplicate of an earlier case, related to one, not a records request,
+        #: or spam. A label for a person to confirm; it changes nothing itself.
+        INTAKE_CLASSIFICATION = "intake_classification", "Intake classification"
 
     class State(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -1367,6 +1371,7 @@ class AdvisoryRun(models.Model):
                             "case_title",
                             "record_responsiveness",
                             "record_redactions",
+                            "intake_classification",
                         ],
                     )
                 ),
@@ -1380,6 +1385,10 @@ class AdvisoryRun(models.Model):
                     )
                     | Q(
                         kind="case_title",
+                        record_item__isnull=True,
+                    )
+                    | Q(
+                        kind="intake_classification",
                         record_item__isnull=True,
                     )
                     | Q(
@@ -3083,3 +3092,38 @@ class CollectionSupersession(AppendOnlyModelMixin, models.Model):
 
     def __str__(self):
         return f"{self.collection_task.pk}: {self.record_count} superseded"
+
+
+class AdvisoryFeedback(AppendOnlyModelMixin, models.Model):
+    """What a person did with one advisory proposal.
+
+    One row per run. ``confirmed`` means the person agreed with the proposal;
+    applying it is still the ordinary staff action (merge, close, add to a
+    case), which this row does not record and the proposal never performs. ``dismissed`` means they did not
+    agree. ``final_label`` is what the person judged it to be, so agreement
+    between model and people can be measured and thresholds set from data.
+    """
+
+    class Outcome(models.TextChoices):
+        CONFIRMED = "confirmed", "Confirmed"
+        DISMISSED = "dismissed", "Dismissed"
+
+    advisory_run = models.OneToOneField(
+        AdvisoryRun,
+        on_delete=models.PROTECT,
+        related_name="feedback",
+    )
+    outcome = models.CharField(max_length=20, choices=Outcome.choices)
+    final_label = models.CharField(max_length=40, blank=True)
+    reason = models.TextField(blank=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    def __str__(self):
+        return f"{self.advisory_run.pk}: {self.outcome}"

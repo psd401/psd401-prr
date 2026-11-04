@@ -8,6 +8,7 @@ from apps.audit.models import audit
 
 from .advisory_ai import (
     defer_automatic_case_title_advisory,
+    defer_automatic_intake_classification,
     defer_automatic_request_intent_advisory,
 )
 from .attachments import persist_intake_attachments
@@ -138,6 +139,7 @@ def submit_intake(
     # title proposal reads the request text alone, so there is nothing for it
     # to wait on. It is a label for a staff column and reaches no requester.
     defer_automatic_case_title_advisory(prr.pk)
+    defer_automatic_intake_classification(prr.pk)
     if prepare_intent:
         # Prepares the officer's starting point only. Nothing here drafts,
         # sends, or defers anything the requester sees. It runs after the
