@@ -7,7 +7,7 @@ timestamp: 2026-11-04T00:00:00Z
 openwiki:
   roles: [domain, integration, architecture]
   change_kinds: [advisory-ai, model-provider, redaction-proposal, automatic-run, intake-classification]
-  source_paths: [apps/records/advisory_ai.py, apps/records/redaction_ai.py, apps/records/models.py, apps/records/intake.py, apps/records/tasks.py, apps/records/agreement.py, apps/records/review.py, apps/api/advisory.py, apps/api/resources/requests.py, apps/api/resources/advisory_agreement.py, apps/configuration/registry.py, apps/configuration/prerequisites.py, infra/cdk/lib/advisory-bedrock.ts, frontend/src/case/IntakeClassificationCard.tsx, frontend/src/pages/AiAgreement.tsx, docs/advisory-ai.md]
+  source_paths: [apps/records/advisory_ai.py, apps/records/redaction_ai.py, apps/records/models.py, apps/records/intake.py, apps/records/tasks.py, apps/records/agreement.py, apps/records/review.py, apps/api/advisory.py, apps/api/resources/requests.py, apps/api/resources/advisory_agreement.py, apps/configuration/registry.py, apps/configuration/prerequisites.py, infra/cdk/lib/advisory-bedrock.ts, frontend/src/case/IntakeClassificationCard.tsx, frontend/src/pages/AiAgreement.tsx, apps/records/review_batches.py, docs/advisory-ai.md]
   symbols: [AdvisoryRun, AdvisoryFeedback, RedactionProposal, RedactionProposalDecision, ReviewDecision, request_request_intent_advisory, request_case_title_advisory, request_intake_classification, defer_automatic_intake_classification, request_record_responsiveness_advisory, request_record_redaction_advisory, request_automatic_record_advisory, defer_automatic_record_advisory, execute_advisory_run, invoke_advisory_model, prepare_record_review_advisories, INTAKE_LABELS, advisory_intake, agreement_report, latest_suggestion_runs, annotate_latest_suggestion, confidence_band, AdvisoryAgreementViewSet]
   test_paths: [apps/records/tests/test_advisory_ai.py, apps/records/tests/test_automatic_record_advisory.py, apps/records/tests/test_redaction_ai.py, apps/records/tests/test_case_titles.py, apps/records/tests/test_intake_classification.py, apps/records/tests/test_scope_conversation.py, apps/records/tests/test_verify_advisory_command.py, apps/records/tests/test_review_agreement.py, apps/api/tests/test_advisory_ai.py, apps/api/tests/test_redaction_ai.py]
   invariants:
@@ -65,7 +65,8 @@ closed.
   is `frontend/src/case/IntakeClassificationCard.tsx`, which passes the label to
   the ordinary dialog and does not act on it.
 - **Responsiveness and redaction** remain proposals. A named reviewer must still
-  confirm each responsiveness recommendation. Each redaction candidate needs an
+  confirm each responsiveness recommendation, one record at a time or as a sampled batch under the
+  [trust ladder](trust-ladder.md). Each redaction candidate needs an
   individual accept, edit, or reject decision with an active exemption citation.
   There is no accept-all path. The model never supplies coordinates. The worker
   derives normalized boxes from the retained PDF, and an accepted candidate goes
@@ -144,9 +145,11 @@ The report measures the model's standing answer against the human one. It starts
 changes no status. The **Group by cluster** view in [record review](record-review-and-handling.md#record-clusters)
 reads the same standing suggestion through `annotate_latest_suggestion()` for its AI label grouping.
 
-`docs/advisory-ai.md` says these numbers are meant to set trust-ladder thresholds (#34, #39). No
-trust-ladder code exists under `apps/`, so the report is evidence only. It does not enable or
-gate any automatic action.
+`docs/advisory-ai.md` says these numbers are meant to inform trust-ladder thresholds (#34, #39).
+The trust ladder exists now: a reviewer decides a sampled batch, and the Ready to discard pile
+reads the standing suggestion. See [trust ladder](trust-ladder.md). The agreement report itself
+is still evidence only. It does not enable or gate any automatic action, and it does not set the
+policy values.
 
 Focused tests in `apps/records/tests/test_review_agreement.py`: `test_a_single_review_stores_the_suggestion_that_was_shown`,
 `test_bulk_review_stores_each_decision_and_lists_the_runs_shown`,
@@ -266,7 +269,8 @@ and a matching CDK change, shipped through the
 - The `scope conversation` and case-title copy must describe a count the officer
   typed, not one the system ran. See `test_scope_conversation`.
 - Bulk review is a human decision. Never add a path that accepts a candidate
-  without its own named decision.
+  without its own named decision. Sampled batch approval is covered in
+  [trust ladder](trust-ladder.md), and its sample rule must stay with the reviewer's judgment.
 - Use `test_advisory_ai` and `test_redaction_ai` for the worker and validator.
   `test_intake_classification` covers the intake label: candidate selection and
   its stability while later cases arrive, refusal of an unshown target, the
