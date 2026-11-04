@@ -416,6 +416,7 @@ test('accessibility-audit', async ({ page }) => {
     'Legal record of the request as received',
     automatedChecks,
   )
+  expect(automatedChecks).toHaveLength(4)
 
   await writeFile(
     path.resolve('../.verification/axe-report.json'),
@@ -436,6 +437,8 @@ for (const theme of THEMES.slice(1)) {
     const records: AuditRecord[] = []
     await useTheme(page, theme)
     await auditSurfaces(page, theme, records)
+    // The same walk as the default theme, not a shortened one.
+    expect(records.length).toBeGreaterThanOrEqual(20)
     await writeFile(
       path.resolve(`../.verification/axe-report-${theme}.json`),
       `${JSON.stringify({
