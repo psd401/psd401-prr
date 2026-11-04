@@ -7,9 +7,9 @@ timestamp: 2026-11-04T00:00:00Z
 openwiki:
   roles: [domain, integration, architecture]
   change_kinds: [advisory-ai, model-provider, redaction-proposal, automatic-run, intake-classification]
-  source_paths: [apps/records/advisory_ai.py, apps/records/redaction_ai.py, apps/records/models.py, apps/records/intake.py, apps/records/tasks.py, apps/api/advisory.py, apps/api/resources/requests.py, apps/configuration/registry.py, apps/configuration/prerequisites.py, infra/cdk/lib/advisory-bedrock.ts, frontend/src/case/IntakeClassificationCard.tsx, docs/advisory-ai.md]
-  symbols: [AdvisoryRun, AdvisoryFeedback, RedactionProposal, RedactionProposalDecision, request_request_intent_advisory, request_case_title_advisory, request_intake_classification, defer_automatic_intake_classification, request_record_responsiveness_advisory, request_record_redaction_advisory, request_automatic_record_advisory, defer_automatic_record_advisory, execute_advisory_run, invoke_advisory_model, prepare_record_review_advisories, INTAKE_LABELS, advisory_intake]
-  test_paths: [apps/records/tests/test_advisory_ai.py, apps/records/tests/test_automatic_record_advisory.py, apps/records/tests/test_redaction_ai.py, apps/records/tests/test_case_titles.py, apps/records/tests/test_intake_classification.py, apps/records/tests/test_scope_conversation.py, apps/records/tests/test_verify_advisory_command.py, apps/api/tests/test_advisory_ai.py, apps/api/tests/test_redaction_ai.py]
+  source_paths: [apps/records/advisory_ai.py, apps/records/redaction_ai.py, apps/records/models.py, apps/records/intake.py, apps/records/tasks.py, apps/records/agreement.py, apps/records/review.py, apps/api/advisory.py, apps/api/resources/requests.py, apps/api/resources/advisory_agreement.py, apps/configuration/registry.py, apps/configuration/prerequisites.py, infra/cdk/lib/advisory-bedrock.ts, frontend/src/case/IntakeClassificationCard.tsx, frontend/src/pages/AiAgreement.tsx, docs/advisory-ai.md]
+  symbols: [AdvisoryRun, AdvisoryFeedback, RedactionProposal, RedactionProposalDecision, ReviewDecision, request_request_intent_advisory, request_case_title_advisory, request_intake_classification, defer_automatic_intake_classification, request_record_responsiveness_advisory, request_record_redaction_advisory, request_automatic_record_advisory, defer_automatic_record_advisory, execute_advisory_run, invoke_advisory_model, prepare_record_review_advisories, INTAKE_LABELS, advisory_intake, agreement_report, latest_suggestion_runs, annotate_latest_suggestion, confidence_band, AdvisoryAgreementViewSet]
+  test_paths: [apps/records/tests/test_advisory_ai.py, apps/records/tests/test_automatic_record_advisory.py, apps/records/tests/test_redaction_ai.py, apps/records/tests/test_case_titles.py, apps/records/tests/test_intake_classification.py, apps/records/tests/test_scope_conversation.py, apps/records/tests/test_verify_advisory_command.py, apps/records/tests/test_review_agreement.py, apps/api/tests/test_advisory_ai.py, apps/api/tests/test_redaction_ai.py]
   invariants:
     - "AdvisoryRun.applied is always false by database constraint; no provider output is a legal action."
     - "Each automatic run keeps a named requester only when a staff member initiated it; manual runs require one."
@@ -105,8 +105,51 @@ requester (`records_manual_advisory_requires_requester`). Run state is
 resulting `Redaction` when accepted. `AdvisoryFeedback` is the append-only,
 one-per-run record of what a person did with an intake classification: the
 outcome, the final label they judged, and a reason. It is what lets agreement
-between the model and officers be measured later. It does not record the merge or
+between the intake label and officers be measured later. Responsiveness agreement uses
+`ReviewDecision` instead, described in [AI-human agreement](#ai-human-agreement). It does not record the merge or
 close that followed, which stays in the ordinary request history.
+
+## AI-human agreement
+
+Every human responsiveness decision also stores the suggestion that stood when it was
+made. `_store_decision` in [`apps/records/review.py`](../../apps/records/review.py) writes an
+append-only `ReviewDecision` for each single, selected-bulk, or filter-bulk decision. It holds
+the outcome, the reviewer, the bulk flag, and the record's standing suggestion: the latest
+*complete* `record_responsiveness` run, found by `latest_suggestion_runs()` in
+[`apps/records/agreement.py`](../../apps/records/agreement.py). Its label and confidence are
+copied onto the decision. The rule matches what the review list shows. If a newer run finished
+after the reviewer loaded the page, the stored suggestion is that newer run, because the request
+does not name the run it displayed. Storing the suggestion never changes the decision.
+
+`agreement_report()` turns those rows into agreement by suggested label and confidence band
+(`CONFIDENCE_BANDS`: 90-100%, 70-89%, 50-69%, below 50%), district-wide or for one case:
+
+- Only each record's latest decision counts, so a corrected decision replaces the one it
+  corrected.
+- A withheld-in-full record counts as responsive, because it was responsive and then exempt.
+- `uncertain` hands the call to a person, so it has no agreement rate. It is reported as
+  `uncertain`, not scored.
+- A `duplicate` outcome is not a responsiveness call and is left out.
+- Decisions with no standing suggestion are counted separately as `without_suggestion`.
+
+The read-only endpoint is `AdvisoryAgreementViewSet` (`advisory-agreement`, in
+[`apps/api/resources/advisory_agreement.py`](../../apps/api/resources/advisory_agreement.py)). It
+is limited to Records Officers and takes an optional `?request=<number>`. Officers read it on the
+**Oversight -> AI agreement** screen, `frontend/src/pages/AiAgreement.tsx` at `/oversight/ai-agreement`.
+The report measures the model's standing answer against the human one. It starts no clock and
+changes no status. The **Group by cluster** view in [record review](record-review-and-handling.md#record-clusters)
+reads the same standing suggestion through `annotate_latest_suggestion()` for its AI label grouping.
+
+`docs/advisory-ai.md` says these numbers are meant to set trust-ladder thresholds (#34, #39). No
+trust-ladder code exists under `apps/`, so the report is evidence only. It does not enable or
+gate any automatic action.
+
+Focused tests in `apps/records/tests/test_review_agreement.py`: `test_a_single_review_stores_the_suggestion_that_was_shown`,
+`test_bulk_review_stores_each_decision_and_lists_the_runs_shown`,
+`test_a_filter_decision_stores_each_decision_and_lists_the_runs_shown`, `test_decisions_are_append_only`,
+`test_agreement_is_counted_by_label_and_band`, `test_only_the_latest_decision_on_a_record_counts`,
+`test_a_case_report_counts_only_that_case`, `test_an_officer_reads_agreement_district_wide_and_per_case`,
+and `test_a_reviewer_may_not_read_agreement`.
 
 Input is fingerprinted from the full attachment manifest. A scan verdict or an
 attachment change therefore cannot reuse a stale result. Attachments reach
