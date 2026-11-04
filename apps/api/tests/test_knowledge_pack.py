@@ -210,6 +210,27 @@ class KnowledgeNoiseSenderTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_a_concurrent_duplicate_on_update_is_a_validation_error(self):
+        KnowledgeNoiseSender.objects.create(kind="domain", value="news.example.org")
+        row = KnowledgeNoiseSender.objects.create(kind="domain", value="alerts.example.org")
+        # Simulate the race: the duplicate exists by the time the row saves,
+        # after this request's own duplicate check has passed.
+        with patch(
+            "apps.api.resources.knowledge.KnowledgeNoiseSender.objects.filter",
+            return_value=KnowledgeNoiseSender.objects.none(),
+        ):
+            response = self.client.patch(
+                f"{NOISE_SENDERS}{row.pk}/",
+                {"value": "news.example.org"},
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 400)
+        row.refresh_from_db()
+        self.assertEqual(row.value, "alerts.example.org")
+        self.assertFalse(
+            AuditLog.objects.filter(action="knowledge.noise_sender_updated").exists()
+        )
+
     def test_update_and_delete_are_audited(self):
         row = KnowledgeNoiseSender.objects.create(kind="domain", value="news.example.org")
         response = self.client.patch(

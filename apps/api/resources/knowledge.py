@@ -15,6 +15,7 @@ read it either.
 """
 
 import re
+from contextlib import contextmanager
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
@@ -169,6 +170,18 @@ def _system_note_snapshot(row: KnowledgeSystemNote) -> dict:
     return {"record_system": row.record_system.slug, "notes": row.notes}
 
 
+@contextmanager
+def _unique_race_as_validation():
+    """Run one audited write atomically. A concurrent write that won a unique
+    constraint after this one passed validation is answered as validation
+    would have answered it, and the rollback leaves no audit row."""
+    try:
+        with transaction.atomic():
+            yield
+    except IntegrityError as exc:
+        raise serializers.ValidationError("That entry already exists.") from exc
+
+
 class _AuditedKnowledgeViewSet(viewsets.ModelViewSet):
     """Create, update, and delete each write one audit row in the same
     transaction, named ``knowledge.<entity>_<created|updated|deleted>``."""
@@ -189,17 +202,12 @@ class _AuditedKnowledgeViewSet(viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
-        try:
-            with transaction.atomic():
-                instance = serializer.save()
-                self._audit("created", instance.pk, after=self.snapshot(instance))
-        except IntegrityError as exc:
-            # A concurrent create won the unique constraint after this one
-            # passed validation; answer as validation would have.
-            raise serializers.ValidationError("That entry already exists.") from exc
+        with _unique_race_as_validation():
+            instance = serializer.save()
+            self._audit("created", instance.pk, after=self.snapshot(instance))
 
     def perform_update(self, serializer):
-        with transaction.atomic():
+        with _unique_race_as_validation():
             before = self.snapshot(serializer.instance)
             instance = serializer.save()
             self._audit("updated", instance.pk, before=before, after=self.snapshot(instance))
