@@ -108,6 +108,13 @@ The second server is the Vite dev server on port 4173. The e2e script deletes
   owner, an issue, an expiry no more than four weeks out, and two CI runs on the same commit,
   one red and one green. `apps/api/tests/test_flaky_register.py` fails when a row expires or
   is incomplete, or when a test is tagged without a row.
+- **Regression contracts.** `apps/api/tests/test_feature_inventory_regressions.py` groups
+  cases for defects a feature audit found: the staff API, hosted MCP, the Alta verify
+  command, last-admin mapping deletion, the Vault client and polling, and the OpenAPI
+  schema. Its header says the cases were written before the fixes they describe, so a
+  failure can mean a fix is still outstanding rather than a new regression. Check the
+  file's history and the owning page before you change a case. Focused command:
+  `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_feature_inventory_regressions --settings=config.test_settings`.
 
 ## Test-quality gates
 
