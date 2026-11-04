@@ -44,7 +44,8 @@
     "complete-liaison-handoff",
     "complete-reviewer-journey",
     "accessibility-audit",
-    "officer-supersede-collection"
+    "officer-supersede-collection",
+    "reviewer-bulk-review-by-filter"
   ],
   "e2e_screenshots": {
     "staff-login-open-case": [
@@ -205,6 +206,10 @@
     "officer-supersede-collection": [
       "officer-supersede-collection-confirm.png",
       "officer-supersede-collection-filter.png"
+    ],
+    "reviewer-bulk-review-by-filter": [
+      "reviewer-bulk-review-by-filter-confirm.png",
+      "reviewer-bulk-review-by-filter-result.png"
     ]
   },
   "strictness": "block",

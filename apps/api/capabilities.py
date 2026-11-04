@@ -176,8 +176,10 @@ AGENT_CONSTRAINT_DEFINITIONS = {
         "substantive reason."
     ),
     "bounded_human_selection": (
-        "One confirmation applies to an explicitly selected, capped set the "
-        "reviewer could see, and never to an unbounded query or to a model's "
+        "One confirmation applies to an explicitly selected set of at most 200 "
+        "records, or -- in the staff application only -- to every record a "
+        "filter matches (at most 10,000) after the reviewer confirms the "
+        "server's exact count and digest of that set. Never to a model's "
         "proposals accepted in bulk."
     ),
     "human_legal_judgment": (
@@ -991,9 +993,18 @@ CAPABILITIES = (
         ["/requests/:number/records"],
     ),
     _capability(
+        "record_items.bulk_selection",
+        "Preview exactly which records one filter decision would change, "
+        "with the count and digest a confirmation must send back.",
+        "GET",
+        "/api/staff/record-items/bulk-selection/",
+        ["/requests/:number/records"],
+    ),
+    _capability(
         "record_items.bulk_review",
         "Record one named human responsiveness decision across a selected, "
-        "visible set of records.",
+        "visible set of records, or every record a filter matches after the "
+        "reviewer confirms the exact count.",
         "POST",
         "/api/staff/record-items/bulk-review/",
         ["/requests/:number/records"],
@@ -1002,6 +1013,7 @@ CAPABILITIES = (
         constraints=[
             "human_legal_judgment",
             "bounded_human_selection",
+            "interactive_staff_session",
             "append_only_audit",
         ],
     ),

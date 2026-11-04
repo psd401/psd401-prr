@@ -1,6 +1,6 @@
 {
   "pyright": "1.1.414",
-  "total": 1852,
+  "total": 1826,
   "files": {
     "apps/api/access_tokens.py": 2,
     "apps/api/advisory.py": 1,
@@ -26,7 +26,7 @@
     "apps/api/resources/jlarc.py": 17,
     "apps/api/resources/preservations.py": 2,
     "apps/api/resources/record_systems.py": 2,
-    "apps/api/resources/records_misc.py": 56,
+    "apps/api/resources/records_misc.py": 30,
     "apps/api/resources/requests.py": 24,
     "apps/api/resources/staff_users.py": 1,
     "apps/api/resources/work_items.py": 3,

@@ -99,6 +99,7 @@ class CaseworkVerificationFoundationTests(SimpleTestCase):
                 "complete-reviewer-journey",
                 "accessibility-audit",
                 "officer-supersede-collection",
+                "reviewer-bulk-review-by-filter",
             ],
         )
         self.assertEqual(
