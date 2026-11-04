@@ -491,10 +491,15 @@ class VaultIngestReadsExportMetadataTests(_MetadataExportFixture, TestCase):
 
         live = RecordItem.objects.exclude(pk=broad_record.pk).get(request=self.prr)
         self.assertEqual(
-            sorted(live.custodians.values_list("custodian", flat=True)),
+            sorted(
+                RecordItemCustodian.objects.filter(record_item=live)
+                .values_list("custodian", flat=True)
+            ),
             ["alice@psd401.net", "bob@psd401.net"],
         )
-        self.assertEqual(broad_record.custodians.count(), 0)
+        self.assertFalse(
+            RecordItemCustodian.objects.filter(record_item=broad_record).exists()
+        )
         self.assertEqual(run.export_snapshot["custodian_metadata"]["csv_sets_attached"], 1)
 
     def test_a_delivered_to_the_csv_does_not_corroborate_is_treated_as_absent(self):
