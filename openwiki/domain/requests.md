@@ -90,7 +90,9 @@ first response is delivered, so a case list must not keep showing it afterward.
 | `litigation_discovery` | Always | None |
 | Any kind | Closed or terminal | None |
 
-`next_response_due()` and `annotate_next_response_due()` produce this value.
+`next_response_due()` and `annotate_next_response_due()` produce this value. Only the
+human-set `estimated_completion` feeds the `estimate` basis. The `RecordsEstimate` rows
+from the [estimate engine](estimates.md) are evidence and do not set it.
 The day-5 safety net, the watchdogs, and JLARC still use the statutory fields,
 not this one. The step-by-step state of the first response (drafted, approved,
 queued, delivered) is a separate read model, described in

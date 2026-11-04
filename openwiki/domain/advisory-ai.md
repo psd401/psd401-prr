@@ -121,6 +121,10 @@ copied onto the decision. The rule matches what the review list shows. If a newe
 after the reviewer loaded the page, the stored suggestion is that newer run, because the request
 does not name the run it displayed. Storing the suggestion never changes the decision.
 
+The same stored decisions are the measured rates that the [estimate engine](estimates.md)
+uses to scale unreviewed records into a responsive range. An estimate never changes a
+suggestion or a decision.
+
 `agreement_report()` turns those rows into agreement by suggested label and confidence band
 (`CONFIDENCE_BANDS`: 90-100%, 70-89%, 50-69%, below 50%), district-wide or for one case:
 

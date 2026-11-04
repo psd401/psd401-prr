@@ -84,8 +84,10 @@ refuses to merge two matters of different kinds.
 Letters whose adopted text asserts RCW 42.56 are `public_records`-only. The set
 is `PRA_STATUTORY_CORRESPONDENCE_KINDS` in `apps/correspondence/services.py`:
 acknowledgment, clarification request, scope clarification, estimate revision,
-fee estimate, no-records closure, nonpayment closure, third-party notice, and
-denial. A FERPA matter may still send letters that make no RCW assertion.
+interpretation and estimate, fee estimate, no-records closure, nonpayment closure,
+third-party notice, and denial. The interpretation-and-estimate letter is drafted by
+the system and approved by a Records Officer, as described in [estimates](estimates.md).
+A FERPA matter may still send letters that make no RCW assertion.
 
 ## Enforcement status
 
