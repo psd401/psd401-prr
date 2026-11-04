@@ -98,6 +98,29 @@ describe('collection-task deadline semantics', () => {
         created_at: '2026-07-01T12:00:00Z',
         completed_at: '2026-07-02T12:00:00Z',
       },
+      {
+        id: 3,
+        request: '33333333-3333-4333-8333-333333333333',
+        request_number: 'PRR-2026-0003',
+        system_name: 'Google Workspace',
+        system_slug: 'google-workspace',
+        system_urgent_hold: false,
+        kind: 'manual',
+        state: 'pending',
+        instructions: '',
+        custodian_emails: [],
+        search_terms: '',
+        date_range_start: null,
+        date_range_end: null,
+        assigned_to_id: null,
+        assigned_to_username: null,
+        due_date: '2026-07-29',
+        vault_matter_id: '',
+        vault_hold_id: '',
+        vault_export_id: '',
+        created_at: '2026-07-01T12:00:00Z',
+        completed_at: null,
+      },
     ]))))
 
     renderPage(<Tasks roles={['reviewer']} />)
@@ -105,6 +128,7 @@ describe('collection-task deadline semantics', () => {
     const today = await screen.findByText('2026-07-30')
     expect(today).not.toHaveClass('text-danger-ink')
     expect(screen.getByText('2026-07-01')).not.toHaveClass('text-danger-ink')
+    expect(screen.getByText('2026-07-29')).toHaveClass('text-danger-ink')
   })
 })
 
