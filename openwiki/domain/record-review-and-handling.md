@@ -6,7 +6,7 @@ tags: [domain, record-review, redaction, derivatives, handling, media, opaque-re
 openwiki:
   roles: [domain, workflow]
   change_kinds: [review-workflow, rendering, handling-paths]
-  source_paths: [apps/records/handling.py, apps/records/derivatives.py, apps/records/preview.py, apps/records/review.py, apps/records/opaque_review.py, apps/records/media_review.py, apps/records/clusters.py, apps/api/resources/records_misc.py, frontend/src/case/RecordClusters.tsx]
+  source_paths: [apps/records/handling.py, apps/records/derivatives.py, apps/records/preview.py, apps/records/review.py, apps/records/opaque_review.py, apps/records/media_review.py, apps/records/clusters.py, apps/records/review_batches.py, apps/api/resources/records_misc.py, frontend/src/case/RecordClusters.tsx, frontend/src/case/BatchReview.tsx]
   symbols: [handling_for, handling_for_item, build_derivative, review_record, bulk_review_records, bulk_review_selection, bulk_review_confirmed_selection, approve_second_review, render_redacted_record, record_opaque_disposition, create_media_redaction, render_media_redactions, cluster_records, RecordItemViewSet]
   test_paths: [apps/records/tests/test_handling.py, apps/records/tests/test_derivatives.py, apps/records/tests/test_record_review.py, apps/records/tests/test_media_and_opaque_review.py, apps/records/tests/test_review_agreement.py, apps/api/tests/test_records_misc.py, apps/api/tests/test_bulk_review_by_filter.py]
   invariants:
@@ -182,7 +182,9 @@ Focused tests in `apps/api/tests/test_bulk_review_by_filter.py`, including
 ## Record clusters
 
 The Records tab's **Group by cluster** view helps a reviewer look at related records
-together. It is a way to read the queue, not a decision. `cluster_records(records,
+together. Grouping is a way to read the queue, not a decision. The cluster's **Approve cluster as ...**
+action opens a sampled batch, which applies an outcome only after the reviewer judges a random
+sample. See [trust ladder](trust-ladder.md). `cluster_records(records,
 grouping)` in [`apps/records/clusters.py`](../../apps/records/clusters.py) takes the
 filtered set and one of four groupings:
 
