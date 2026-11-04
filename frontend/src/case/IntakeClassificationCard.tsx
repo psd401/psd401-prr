@@ -115,14 +115,17 @@ export function IntakeClassificationCard({
             </p>
             {proposal?.evidence && <p className="whitespace-pre-wrap">{proposal.evidence}</p>}
             <p className="text-xs text-pacific/70">Model {current?.model_identifier}</p>
-            {latest.data.feedback ? (
+            {latest.data.feedback?.outcome === 'confirmed' ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <p>You agreed with this label.</p>
+                <Button variant="ghost" onClick={() => onConfirm(label, target)}>
+                  Open the action
+                </Button>
+              </div>
+            ) : latest.data.feedback ? (
               <p>
-                You {latest.data.feedback.outcome === 'confirmed' ? 'confirmed' : 'corrected'}{' '}
-                this label
-                {latest.data.feedback.outcome === 'dismissed'
-                  ? ` to "${INTAKE_LABEL_TEXT[latest.data.feedback.final_label]}"`
-                  : ''}
-                .
+                You corrected this label to
+                {` "${INTAKE_LABEL_TEXT[latest.data.feedback.final_label]}"`}.
               </p>
             ) : correcting ? (
               <div className="space-y-2">

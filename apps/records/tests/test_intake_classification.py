@@ -148,6 +148,8 @@ class IntakeClassificationOutputTests(_Fixture):
             {"label": "spam", "target_case_number": None, "confidence": 1.5, "evidence": "x"},
             {"label": "spam", "target_case_number": None, "confidence": 0.5,
              "evidence": "x", "extra": 1},
+            {"label": ["spam"], "target_case_number": None, "confidence": 0.5,
+             "evidence": "x"},
         ):
             with self.subTest(proposal=proposal), self.assertRaises(AdvisoryOutputInvalid):
                 self._validate(proposal)

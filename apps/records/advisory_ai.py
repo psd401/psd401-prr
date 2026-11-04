@@ -1212,7 +1212,7 @@ def _validate_proposal(
                 "The intake classification has unexpected fields."
             )
         label = proposal["label"]
-        if label not in INTAKE_LABELS:
+        if not isinstance(label, str) or label not in INTAKE_LABELS:
             raise AdvisoryOutputInvalid("The intake label is not one of the allowed labels.")
         target = proposal["target_case_number"]
         if label in INTAKE_LABELS_WITH_TARGET:

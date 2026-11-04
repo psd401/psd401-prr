@@ -3097,9 +3097,9 @@ class CollectionSupersession(AppendOnlyModelMixin, models.Model):
 class AdvisoryFeedback(AppendOnlyModelMixin, models.Model):
     """What a person did with one advisory proposal.
 
-    One row per run. ``confirmed`` means the person applied the proposal
-    through the ordinary staff action (merge, close, add to a case); the
-    proposal itself still applied nothing. ``dismissed`` means they did not
+    One row per run. ``confirmed`` means the person agreed with the proposal;
+    applying it is still the ordinary staff action (merge, close, add to a
+    case), which this row does not record and the proposal never performs. ``dismissed`` means they did not
     agree. ``final_label`` is what the person judged it to be, so agreement
     between model and people can be measured and thresholds set from data.
     """

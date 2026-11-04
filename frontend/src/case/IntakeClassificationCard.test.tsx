@@ -91,3 +91,16 @@ it('renders nothing while advisory AI is off', async () => {
   setup({ enabled: false, latest: null, feedback: null })
   await waitFor(() => expect(screen.queryByText('Suggested intake label')).not.toBeInTheDocument())
 })
+
+it('reopens the action after a confirmed label, so a cancelled dialog is not a dead end', async () => {
+  const { posts, onConfirm, user } = setup({
+    ...COMPLETE,
+    feedback: { outcome: 'confirmed', final_label: 'duplicate_of' },
+  })
+
+  expect(await screen.findByText(/You agreed with this label/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Open the action' }))
+
+  expect(onConfirm).toHaveBeenCalledWith('duplicate_of', 'PRR-2026-0001')
+  expect(posts).toEqual([])
+})

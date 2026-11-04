@@ -121,7 +121,9 @@ The model sees the request text, its first email subject, its channel and
 received date, and a bounded list of **earlier** cases of the **same matter
 kind**: the last 180 days (at most 120) plus the same requester's earlier cases
 (at most 20), each with its number, received date, a 300-character description
-excerpt, and whether the requester email matches. Only immutable fields are
+excerpt, and whether the requester email matches. Those excerpts are other
+requesters' request text, which the 2026-11-03 model acceptance in
+`docs/phase-2-production-handoffs.md` covers, student content included. Only immutable fields are
 sent, so the input does not change while the run waits. Kinds never mix
 (AGENTS.md rule 13).
 
@@ -135,7 +137,8 @@ officer's agreement (`AdvisoryFeedback`, append-only, one per run) and opens
 the ordinary action prefilled: merge for a duplicate or follow-up, add to an
 existing case for a follow-up on an automatically opened email case, or close
 as non-request for a non-request or spam email case. The officer still reads
-and submits that action. **Not correct** records the label the officer judged
+and submits that action; agreement is recorded whether or not they do, and
+**Open the action** reopens it after a cancelled dialog. **Not correct** records the label the officer judged
 it to be instead. Web-form cases have no non-request closure, so a
 `non_request` or `spam` label there is shown but has no one-click action.
 Every answer is audited (`advisory.feedback_recorded`) with the proposed and
