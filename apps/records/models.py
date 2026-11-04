@@ -2828,6 +2828,94 @@ class RecordSystem(models.Model):
         return self.name
 
 
+# District knowledge pack (#35). What a Records Officer knows about where
+# records live, kept in the app and edited only from the Knowledge page, so the
+# request-intent advisory scopes a search the way the officer would. Nothing
+# here routes, holds, collects, or reaches a requester; it is advisory input.
+
+
+class KnowledgeRoleAccount(models.Model):
+    """Which district account held a role, and when.
+
+    A request names "the principal" or "the HR director"; the mailbox to search
+    is whoever held that role during the dates the request reaches. Either end
+    of the range may be open.
+    """
+
+    role = models.CharField(max_length=200)
+    account_email = models.EmailField()
+    starts_on = models.DateField(null=True, blank=True)
+    ends_on = models.DateField(null=True, blank=True)
+    note = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["role", "starts_on", "pk"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(starts_on__isnull=True)
+                    | models.Q(ends_on__isnull=True)
+                    | models.Q(ends_on__gte=models.F("starts_on"))
+                ),
+                name="knowledge_role_account_range_ordered",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.role}: {self.account_email}"
+
+
+class KnowledgeNoiseSender(models.Model):
+    """A sender a responsive search almost never wants: district mass mail,
+    newsletters, vendor notifications. The advisory is told to exclude it."""
+
+    class Kind(models.TextChoices):
+        DOMAIN = "domain", "Sender domain"
+        ADDRESS = "address", "Sender address"
+        LIST = "list", "Mailing list"
+
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    value = models.CharField(max_length=254)
+    note = models.CharField(max_length=500, blank=True)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["kind", "value"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["kind", "value"],
+                name="knowledge_noise_sender_unique",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.kind}: {self.value}"
+
+
+class KnowledgeSystemNote(models.Model):
+    """The officer's own search notes for one registry system. Kept apart from
+    RecordSystem so re-seeding the registry never touches them."""
+
+    record_system = models.OneToOneField(
+        RecordSystem,
+        on_delete=models.PROTECT,
+        related_name="knowledge_note",
+    )
+    notes = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["record_system__name"]
+
+    def __str__(self):
+        return f"Search notes: {self.record_system}"
+
+
 class LegacyFileImport(AppendOnlyModelMixin, models.Model):
     """One migrated source file, and what became of it.
 

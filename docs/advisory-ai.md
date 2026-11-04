@@ -192,6 +192,25 @@ is a mandatory `AND` anchor; record-category terms and synonyms are grouped as
 person's name optional. The Records Officer reviews and may edit the complete
 Vault query before requesting a count.
 
+### District knowledge in the intent input
+
+Request-intent input (schema version 6) also carries what the Records Officer
+knows about where records live. Each active registry system is offered with
+its custodian title and email, retention days and note, adequate-search
+checklist, and the officer's own search notes. A `district_knowledge` section
+adds the role-to-account mappings (each with its date range) and the active
+noise senders from **Configuration > Knowledge**, which only a Records Officer
+can read or edit and where every change is audited.
+
+The whole context is cut to fit under `PRR_AI_MAX_INPUT_CHARACTERS` together
+with the request description. Each system's slug, name and keywords are always
+kept, since `record_system_slugs` may use only those; a checklist or search
+note over 2,000 characters is shortened, and the remaining detail, role
+accounts and noise senders are added only while they fit. Anything cut marks
+the run's input as truncated. Because the pack is in the input fingerprint, an
+edit made between queueing a run and executing it fails that run as
+`source_changed` rather than proposing from stale context.
+
 ## Case titles
 
 The staff case list needs one line per case saying what it is about. The

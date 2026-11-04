@@ -56,6 +56,9 @@ vi.mock('./pages/MessageTemplates', () => ({
 vi.mock('./pages/Exemptions', () => ({
   Exemptions: () => <h1>Exemptions child</h1>,
 }))
+vi.mock('./pages/Knowledge', () => ({
+  Knowledge: () => <h1>Knowledge child</h1>,
+}))
 vi.mock('./pages/CounselDomains', () => ({
   CounselDomains: () => <h1>District counsel domains child</h1>,
 }))
@@ -80,6 +83,7 @@ const HEADING_BY_ROUTE: Record<string, string> = {
   '/configuration/registry': 'System registry child',
   '/configuration/message-templates': 'Message templates child',
   '/configuration/exemptions': 'Exemptions child',
+  '/configuration/knowledge': 'Knowledge child',
   '/configuration/counsel-domains': 'District counsel domains child',
   '/configuration/settings': 'District settings child',
   '/configuration/correspondence': 'Message operations child',
