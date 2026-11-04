@@ -142,6 +142,29 @@ class RequestIntentKnowledgeInputTests(TestCase):
             ["google-workspace"],
         )
 
+    def test_a_long_checklist_is_shortened_and_marks_the_input_truncated(self):
+        self.system.search_checklist = "x" * 2_500
+        self.system.save(update_fields=["search_checklist"])
+
+        advisory_input = _build_advisory_input(self.advisory_run)
+
+        self.assertTrue(advisory_input.truncated)
+        row = advisory_input.payload["available_record_systems"][0]
+        self.assertEqual(len(row["search_checklist"]), 2_000)
+
+    @override_settings(PRR_AI_MAX_INPUT_CHARACTERS=1_000)
+    def test_system_detail_that_cannot_fit_is_dropped_but_the_slug_kept(self):
+        self.system.search_checklist = "x" * 1_500
+        self.system.save(update_fields=["search_checklist"])
+
+        advisory_input = _build_advisory_input(self.advisory_run)
+
+        self.assertTrue(advisory_input.truncated)
+        self.assertEqual(
+            advisory_input.payload["available_record_systems"],
+            [{"slug": "google-workspace", "name": "Google Workspace", "triage_keywords": ["email"]}],
+        )
+
     def test_the_instruction_tells_the_model_how_to_use_the_pack(self):
         message = _advisory_system_message(AdvisoryRun.Kind.REQUEST_INTENT)
 
