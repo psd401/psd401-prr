@@ -62,6 +62,15 @@ def supersede_collection(collection_task_id, *, actor, reason):
         .select_related("request")
         .get(pk=collection_task_id)
     )
+    # Only a finished Vault Gmail export: an export still ingesting would keep
+    # adding unreviewed records after this, and other tasks are not exports.
+    if (
+        task.kind != CollectionTask.Kind.VAULT_MAIL
+        or task.state != CollectionTask.State.COMPLETE
+    ):
+        raise ValidationError(
+            "Only a completed Vault Gmail collection can be superseded."
+        )
     items = list(
         RecordItem.objects.select_for_update()
         .filter(
@@ -136,6 +145,11 @@ def restore_superseded_record(item, *, task):
     Called by Vault ingest when a message it would fold into an existing
     record turns out to be one a Records Officer superseded. The new
     collection found it on its own terms, so it needs a fresh human decision.
+
+    The record moves to the new collection: ``collection_task`` is replaced
+    and the old link is kept only in the audit row. Superseding the old
+    collection again therefore no longer reaches this record, which is the
+    intent -- it now belongs to the search that found it.
     """
     if item.review_state != RecordItem.ReviewState.SUPERSEDED:
         return item
