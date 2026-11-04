@@ -165,6 +165,67 @@ and reconciles stale ingest claims. `ingest_vault_export` in
 A completed ingest starts the record-review advisories described in
 [Advisory AI](advisory-ai.md). Those are proposals only.
 
+## Superseding an over-broad collection
+
+A Vault export can bring in far more than the request asked for. The Records Officer
+can take that collection's undecided records out of review without deleting them.
+`supersede_collection()` in
+[`apps/records/collection_supersession.py`](../../apps/records/collection_supersession.py)
+does the work. The staff endpoint is `POST /api/staff/collection-tasks/{id}/supersede/`
+(`CollectionTaskViewSet.supersede` in
+[`apps/api/resources/collection_tasks.py`](../../apps/api/resources/collection_tasks.py)).
+Its capability entry, `collection_tasks.supersede`, is `high` risk and requires human
+confirmation, so an agent can only propose it. See [agent parity](../architecture/agent-parity.md).
+
+```mermaid
+stateDiagram-v2
+    [*] --> unreviewed: ingest creates RecordItem
+    unreviewed --> superseded: supersede_collection (Records Officer)
+    superseded --> responsive: review_record (one record at a time)
+    superseded --> unreviewed: collection finds same message (restore_superseded_record)
+    unreviewed --> responsive: review_record
+```
+
+Caption: `superseded` is a `RecordItem.ReviewState`. Reviewed records do not enter it.
+
+The rules, all enforced in `supersede_collection()`:
+
+- Only a current Records Officer may supersede, and the reason must be at least
+  `MIN_SUPERSESSION_REASON` (20) characters after trimming.
+- Only records of that task still `unreviewed` change. A record a reviewer already decided is
+  left alone. Nothing is deleted, and the records keep their custody chain.
+- Each change writes one `record.reviewed` audit row per record. A
+  `CollectionSupersession` row records the reason, the actor, and the count. The
+  `CollectionSupersession` model is append-only (`AppendOnlyModelMixin`). A
+  `collection.superseded` audit row and a requester-hidden `StatusEvent` follow, and work
+  reconciliation is scheduled for the affected records.
+- A second call on the same task changes nothing and writes no new supersession row.
+
+Superseded records leave the working set in these places:
+
+- The record-item list hides them unless `review_state=superseded` is requested. Detail
+  endpoints still return them (`apps/api/resources/records_misc.py`).
+- `bulk_review_records` refuses them, because each must be reconsidered on purpose.
+  `review_record` can still decide one at a time (`apps/records/review.py`).
+- Installment packaging refuses them (`apps/records/production.py`). See
+  [installments and release](installments-and-release.md).
+
+When a later collection finds the same message, Vault ingest calls
+`restore_superseded_record()` from `_mark_duplicate()` in
+[`apps/records/vault_ingest.py`](../../apps/records/vault_ingest.py). The record returns to
+`unreviewed` under the new task, its reviewer fields are cleared, and the restore is audited
+as `record.restored_by_collection`. A narrower re-collection therefore cannot quietly hide a
+message that it still considers relevant.
+
+Focused test: `apps/records/tests/test_collection_supersession.py`.
+`SupersedeCollectionServiceTests` covers scope, append-only evidence, the no-op retry, the reason
+and role gates, release refusal, and bulk-review refusal. `SupersedeCollectionApiTests`
+covers the endpoint status codes and the list and retrieval behavior. The test
+`test_a_recollected_message_returns_to_review` in `RecollectionRestoresSupersededRecordsTests`
+covers the restore path.
+
+Minimal validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_collection_supersession --settings=config.test_settings`.
+
 ## Automatic count from intake intent
 
 With `PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED` on, a completed intake intent
@@ -184,8 +245,9 @@ district decision and its accepted volume risk. See [Advisory AI](advisory-ai.md
   `ingest_vault_export` idempotent under re-runs.
 - Use `apps.records.tests.test_vault_*` for ingest behavior. Use
   `apps/api/tests/test_vault_counts.py` for the staff API contract.
+- Supersession changes must keep the evidence append-only and keep the restore path in
+  `_mark_duplicate()`. Run `apps.records.tests.test_collection_supersession` with them.
 
 Related: [Requests](requests.md) (the case that owns these tasks),
 [Work queue](work-queue.md) (collection and record-review work items),
 [Compliance](compliance.md) (human-only and count-only rules).
-ce.md) (human-only and count-only rules).
