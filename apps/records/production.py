@@ -148,6 +148,7 @@ def _production_plan(installment: Installment):
             RecordItem.ReviewState.UNREVIEWED,
             RecordItem.ReviewState.NON_RESPONSIVE,
             RecordItem.ReviewState.DUPLICATE,
+            RecordItem.ReviewState.SUPERSEDED,
         }:
             raise ValidationError(
                 f"Record item {item.pk} is not releasable in an installment."

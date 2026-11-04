@@ -173,9 +173,13 @@ const REVIEW_STATES = [
   { value: 'non_responsive', label: 'Non-responsive' },
   { value: 'duplicate', label: 'Duplicate' },
   { value: 'withheld', label: 'Withheld (fully exempt)' },
+  // Set only by superseding a collection; the default list leaves these out.
+  { value: 'superseded', label: 'Superseded' },
 ] as const
 
-const HUMAN_REVIEW_STATES = REVIEW_STATES.filter((state) => state.value !== 'unreviewed')
+const HUMAN_REVIEW_STATES = REVIEW_STATES.filter(
+  (state) => state.value !== 'unreviewed' && state.value !== 'superseded',
+)
 
 const RECORD_PAGE_SIZE = 50
 
@@ -232,9 +236,13 @@ const PRIVILEGE_TAGS = ['counsel_domain', 'privilege_marker']
 // duplicate carries a judgement about which copy is the record. Both are
 // one-at-a-time decisions -- the service refuses a batch that carries either
 // -- so neither is ever staged for a bulk decision here.
-const ONE_AT_A_TIME = 'Withheld and duplicate records are reviewed one at a time'
+const ONE_AT_A_TIME = 'Withheld, duplicate, and superseded records are reviewed one at a time'
 function bulkEligible(row: RecordItem): boolean {
-  return row.review_state !== 'withheld' && row.review_state !== 'duplicate'
+  return (
+    row.review_state !== 'withheld'
+    && row.review_state !== 'duplicate'
+    && row.review_state !== 'superseded'
+  )
 }
 
 const GROUP_OPTIONS = [

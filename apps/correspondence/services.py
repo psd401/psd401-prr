@@ -1386,6 +1386,9 @@ def _task_snapshot(prr) -> tuple[dict, str]:
         not in {
             RecordItem.ReviewState.NON_RESPONSIVE,
             RecordItem.ReviewState.DUPLICATE,
+            # A Records Officer took these out of review with a recorded
+            # reason when the collection was re-scoped (CollectionSupersession).
+            RecordItem.ReviewState.SUPERSEDED,
         }
         or item.reviewed_by_id is None
         or item.reviewed_at is None

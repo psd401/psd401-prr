@@ -1009,6 +1009,10 @@ class RecordItem(models.Model):
         NON_RESPONSIVE = "non_responsive", "Non-responsive"
         DUPLICATE = "duplicate", "Duplicate"
         WITHHELD = "withheld", "Withheld (fully exempt)"
+        #: Left the review set when a Records Officer superseded the
+        #: collection that brought it in (an over-broad export). Never set by
+        #: a single-record review; see collection_supersession.
+        SUPERSEDED = "superseded", "Superseded (collection re-scoped)"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     request = models.ForeignKey(PublicRecordsRequest, on_delete=models.CASCADE, related_name="record_items")
@@ -3050,3 +3054,32 @@ class OpaqueRecordDisposition(AppendOnlyModelMixin, models.Model):
 
     def __str__(self):
         return f"{self.record_item_id}: {self.basis}"
+
+
+class CollectionSupersession(AppendOnlyModelMixin, models.Model):
+    """A Records Officer took one collection's unreviewed records out of review.
+
+    An export can sweep in far more than the request asked for. The records it
+    brought in stay -- they are the evidence of what was searched -- but the
+    ones nobody has decided yet leave the review and release queues, and this
+    row says who did that, why, and how many.
+    """
+
+    collection_task = models.ForeignKey(
+        CollectionTask,
+        on_delete=models.PROTECT,
+        related_name="supersessions",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    reason = models.TextField()
+    record_count = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    def __str__(self):
+        return f"{self.collection_task.pk}: {self.record_count} superseded"

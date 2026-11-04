@@ -7,8 +7,11 @@ from django.db.models import F
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import mixins, serializers, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
 from apps.api.identity import StaffRole, has_staff_role
+from apps.records.collection_supersession import supersede_collection
 from apps.records.fees import assert_deposit_gate_clear
 from apps.records.models import CollectionTask, FeeDepositGate, VaultIngestRun
 
@@ -273,6 +276,10 @@ class CollectionTaskSerializer(serializers.ModelSerializer):
         )
 
 
+class SupersedeCollectionInputSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=2000)
+
+
 class CollectionTaskViewSet(mixins.ListModelMixin,
                              mixins.RetrieveModelMixin,
                              mixins.CreateModelMixin,
@@ -287,6 +294,7 @@ class CollectionTaskViewSet(mixins.ListModelMixin,
         "retrieve": {StaffRole.RECORDS_OFFICER, StaffRole.LIAISON, StaffRole.ADMIN},
         "create": {StaffRole.RECORDS_OFFICER},
         "partial_update": {StaffRole.RECORDS_OFFICER, StaffRole.LIAISON},
+        "supersede": {StaffRole.RECORDS_OFFICER},
     }
 
     def get_queryset(self):
@@ -311,6 +319,31 @@ class CollectionTaskViewSet(mixins.ListModelMixin,
             qs = qs.filter(system__urgent_hold=True)
 
         return qs.order_by(F("due_date").asc(nulls_last=True), "id")
+
+    @action(detail=True, methods=["post"], url_path="supersede")
+    def supersede(self, request, pk=None):
+        """Take this collection's unreviewed records out of review.
+
+        Nothing is deleted. Records a reviewer already decided are untouched;
+        the rest leave the review and release queues with a recorded reason.
+        """
+        payload = SupersedeCollectionInputSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        task = self.get_object()
+        try:
+            result = supersede_collection(
+                task.pk,
+                actor=request.user,
+                reason=payload.validated_data["reason"],
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                getattr(exc, "message_dict", None) or exc.messages
+            ) from exc
+        return Response({
+            "collection_task_id": result.collection_task_id,
+            "record_count": result.record_count,
+        })
 
 
 def register(router):
