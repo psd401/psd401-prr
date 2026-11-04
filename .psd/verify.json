@@ -46,6 +46,7 @@
     "accessibility-audit",
     "officer-supersede-collection",
     "reviewer-bulk-review-by-filter",
+    "officer-ai-evaluation-report",
     "officer-knowledge-pack-edit"
   ],
   "e2e_screenshots": {
@@ -211,6 +212,9 @@
     "reviewer-bulk-review-by-filter": [
       "reviewer-bulk-review-by-filter-confirm.png",
       "reviewer-bulk-review-by-filter-result.png"
+    ],
+    "officer-ai-evaluation-report": [
+      "officer-ai-evaluation-report.png"
     ],
     "officer-knowledge-pack-edit": [
       "officer-knowledge-pack-edit.png",

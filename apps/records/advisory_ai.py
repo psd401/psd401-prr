@@ -1566,11 +1566,14 @@ def invoke_advisory_model(
     *,
     attachment_blocks: list[dict[str, Any]] | None = None,
     model_identifier: str,
+    usage: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Call the district's keyless Amazon Bedrock runtime identity.
 
     A run passes the model it recorded, so the call is made with exactly the
-    model the run says it used even if the setting changed in between.
+    model the run says it used even if the setting changed in between. A
+    caller that passes ``usage`` gets the provider's token counts written
+    into it (model evaluation prices runs from them).
     """
     _feature_enabled()
     system_message = _advisory_system_message(kind)
@@ -1625,6 +1628,11 @@ def invoke_advisory_model(
         raise AdvisoryProviderError(safe_code) from exc
     except BotoCoreError as exc:
         raise AdvisoryProviderError("provider_unavailable") from exc
+    if usage is not None:
+        reported = response.get("usage") or {}
+        for key in ("inputTokens", "outputTokens"):
+            if isinstance(reported.get(key), int):
+                usage[key] = reported[key]
     try:
         content_blocks = response["output"]["message"]["content"]
         if (
