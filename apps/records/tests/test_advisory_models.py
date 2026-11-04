@@ -1,0 +1,163 @@
+"""Each advisory kind can run on its own model, and every call is made with
+the model its run recorded -- never whatever the setting says by then."""
+
+import hashlib
+import json
+import re
+from io import StringIO
+from pathlib import Path
+from unittest.mock import patch
+
+from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.test import TestCase, override_settings
+
+from apps.api.identity import apply_staff_roles
+from apps.api.models import StaffRole
+from apps.records.advisory_ai import (
+    MAX_OUTPUT_TOKENS,
+    execute_advisory_run,
+    invoke_advisory_model,
+    model_for_kind,
+    request_record_responsiveness_advisory,
+    request_request_intent_advisory,
+)
+from apps.records.models import (
+    AdvisoryRun,
+    PublicRecordsRequest,
+    RecordItem,
+    Requester,
+)
+
+INTENT = {
+    "summary": "Board minutes.",
+    "required_search_terms": [],
+    "search_terms": ["board minutes"],
+    "record_system_slugs": [],
+    "clarification_questions": [],
+    "complexity_flags": [],
+    "date_range": {"start": None, "end": None},
+    "narrowing_options": [],
+}
+
+
+def _converse_reply(payload):
+    return {"output": {"message": {"content": [{"text": json.dumps(payload)}]}}}
+
+
+@override_settings(
+    PRR_AI_ADVISORY_ENABLED=True,
+    PRR_AI_AWS_REGION="us-west-2",
+    PRR_AI_MODEL="us.amazon.nova-2-lite-v1:0",
+    PRR_AI_MAX_INPUT_CHARACTERS=50_000,
+)
+class PerKindModelTests(TestCase):
+    def setUp(self):
+        # Runs stay queued: no test here may reach a real provider.
+        queue = patch("apps.records.tasks.execute_advisory_analysis.delay")
+        queue.start()
+        self.addCleanup(queue.stop)
+        self.officer = get_user_model().objects.create(
+            username="model-officer", email="model-officer@psd401.net", is_staff=True,
+        )
+        apply_staff_roles(self.officer, {StaffRole.RECORDS_OFFICER})
+        self.prr = PublicRecordsRequest.objects.create(
+            requester=Requester.objects.create(email="requester@example.org"),
+            description="Board minutes from March.",
+        )
+
+    def test_a_blank_kind_setting_falls_back_to_the_shared_model(self):
+        self.assertEqual(
+            model_for_kind(AdvisoryRun.Kind.REQUEST_INTENT),
+            "us.amazon.nova-2-lite-v1:0",
+        )
+
+    @override_settings(PRR_AI_MODEL_INTENT="us.anthropic.claude-opus-5-5")
+    def test_an_intent_run_records_the_intent_model(self):
+        run = request_request_intent_advisory(self.prr.pk, actor=self.officer)
+        self.assertEqual(run.model_identifier, "us.anthropic.claude-opus-5-5")
+
+    @override_settings(PRR_AI_MODEL_RESPONSIVENESS="us.anthropic.claude-haiku-5-5")
+    def test_a_responsiveness_run_records_the_review_model(self):
+        item = RecordItem.objects.create(
+            request=self.prr,
+            original_filename="minutes.pdf",
+            storage_key=f"records/{self.prr.pk}/minutes.pdf",
+            content_length=10,
+            content_type="application/pdf",
+            sha256=hashlib.sha256(b"minutes").hexdigest(),
+            ocr_text="Board minutes for March.",
+        )
+        run = request_record_responsiveness_advisory(item.pk, actor=self.officer)
+        self.assertEqual(run.model_identifier, "us.anthropic.claude-haiku-5-5")
+
+    def test_the_call_uses_the_model_the_run_recorded(self):
+        # The run waits in the queue while the setting changes.
+        with override_settings(PRR_AI_MODEL_INTENT="us.anthropic.claude-opus-5-5"):
+            run = request_request_intent_advisory(self.prr.pk, actor=self.officer)
+        run.refresh_from_db()
+        self.assertEqual(run.state, AdvisoryRun.State.PENDING)
+        # The setting changes after the run was recorded; the call must not.
+        with override_settings(PRR_AI_MODEL_INTENT="us.openai.gpt-6.1-sol"), patch(
+            "apps.records.advisory_ai.boto3.client",
+        ) as client_factory:
+            client_factory.return_value.converse.return_value = _converse_reply(INTENT)
+            execute_advisory_run(run.pk)
+
+        run.refresh_from_db()
+        call = client_factory.return_value.converse.call_args.kwargs
+        self.assertEqual(call["modelId"], "us.anthropic.claude-opus-5-5")
+        self.assertEqual(
+            call["inferenceConfig"]["maxTokens"],
+            MAX_OUTPUT_TOKENS[AdvisoryRun.Kind.REQUEST_INTENT],
+        )
+        run.refresh_from_db()
+        self.assertEqual(run.state, AdvisoryRun.State.COMPLETE)
+
+    def test_every_kind_has_an_output_budget(self):
+        self.assertEqual(set(MAX_OUTPUT_TOKENS), set(AdvisoryRun.Kind.values))
+
+    def test_an_explicit_model_overrides_the_kind_setting(self):
+        with patch("apps.records.advisory_ai.boto3.client") as client_factory:
+            client_factory.return_value.converse.return_value = _converse_reply(INTENT)
+            invoke_advisory_model(
+                AdvisoryRun.Kind.REQUEST_INTENT,
+                {"request_description": "Synthetic"},
+                model_identifier="us.openai.gpt-6.1-terra",
+            )
+        self.assertEqual(
+            client_factory.return_value.converse.call_args.kwargs["modelId"],
+            "us.openai.gpt-6.1-terra",
+        )
+
+    def test_the_verify_command_can_name_a_model(self):
+        out = StringIO()
+        with patch("apps.records.advisory_ai.boto3.client") as client_factory:
+            client_factory.return_value.converse.return_value = _converse_reply(INTENT)
+            call_command(
+                "verify_advisory_ai", "--model", "us.anthropic.claude-haiku-5-5",
+                stdout=out,
+            )
+        self.assertEqual(
+            client_factory.return_value.converse.call_args.kwargs["modelId"],
+            "us.anthropic.claude-haiku-5-5",
+        )
+        self.assertIn("us.anthropic.claude-haiku-5-5", out.getvalue())
+
+
+class BedrockGrantMatchesDocumentedModelsTests(TestCase):
+    """The CDK grant is the real allow-list: a model it does not name is an
+    AccessDenied in production. The approved list in the docs must match it."""
+
+    def test_docs_and_grant_name_the_same_inference_profiles(self):
+        root = Path(settings.BASE_DIR)
+        grant = (root / "infra/cdk/lib/advisory-bedrock.ts").read_text()
+        granted = set(re.findall(r'profileId: "([^"]+)"', grant))
+        self.assertIn("us.amazon.nova-2-lite-v1:0", granted)
+        self.assertIn("us.anthropic.claude-opus-5-5", granted)
+        self.assertIn("us.openai.gpt-6.1-terra", granted)
+        docs = (root / "docs/advisory-ai.md").read_text()
+        for profile in granted:
+            with self.subTest(profile=profile):
+                self.assertIn(f"`{profile}`", docs)

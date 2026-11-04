@@ -631,7 +631,7 @@ class AdvisoryAITests(TestCase):
         self.assertEqual(client_factory.call_args.kwargs["region_name"], "us-west-2")
         call = client_factory.return_value.converse.call_args.kwargs
         self.assertEqual(call["modelId"], "us.amazon.nova-2-lite-v1:0")
-        self.assertEqual(call["inferenceConfig"], {"maxTokens": 1000, "temperature": 0})
+        self.assertEqual(call["inferenceConfig"], {"maxTokens": 2000, "temperature": 0})
         self.assertEqual(
             call["messages"][0]["content"][1]["document"]["name"],
             "attachment 1",

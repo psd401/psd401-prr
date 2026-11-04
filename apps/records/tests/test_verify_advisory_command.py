@@ -17,7 +17,7 @@ from apps.records.models import AdvisoryRun
     PRR_AI_MODEL="us.amazon.nova-2-lite-v1:0",
 )
 class VerifyAdvisoryCommandTests(TestCase):
-    @patch("apps.records.advisory_ai.invoke_advisory_model")
+    @patch("apps.records.management.commands.verify_advisory_ai.invoke_advisory_model")
     def test_verifies_synthetic_proposal_without_persisting_a_run(self, invoke):
         invoke.return_value = {
             "summary": "A synthetic request for meeting minutes.",

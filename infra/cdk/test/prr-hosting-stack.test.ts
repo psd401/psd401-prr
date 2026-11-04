@@ -1034,30 +1034,44 @@ describe.each(environments)("psd401-prr-%s identity", (envName, config) => {
     expect(stsStatements.flatMap(actionsFor)).not.toContain("sts:AssumeRole");
   });
 
-  test("invokes only the US Nova 2 Lite advisory inference profile", () => {
+  test("invokes only the allow-listed US advisory inference profiles", () => {
     const statements = runtimePolicyStatements(template).filter((statement) =>
       actionsFor(statement).some((action) => action.startsWith("bedrock:")),
     );
-    const profileArn =
-      `arn:aws:bedrock:us-west-2:${config.account}:inference-profile/` +
-      "us.amazon.nova-2-lite-v1:0";
+    const allowed: Array<[string, string]> = [
+      ["us.amazon.nova-2-lite-v1:0", "amazon.nova-2-lite-v1:0"],
+      ["us.anthropic.claude-opus-5-5", "anthropic.claude-opus-5-5"],
+      ["us.anthropic.claude-fable-5-1", "anthropic.claude-fable-5-1"],
+      ["us.anthropic.claude-sonnet-5-5", "anthropic.claude-sonnet-5-5"],
+      ["us.anthropic.claude-haiku-5-5", "anthropic.claude-haiku-5-5"],
+      ["us.openai.gpt-6.1-sol", "openai.gpt-6.1-sol"],
+      ["us.openai.gpt-6.1-terra", "openai.gpt-6.1-terra"],
+    ];
 
-    expect(statements).toHaveLength(2);
-    expect(statements.flatMap(actionsFor)).toEqual([
-      "bedrock:InvokeModel",
-      "bedrock:InvokeModel",
-    ]);
-    expect(resourcesFor(statements[0])).toEqual([profileArn]);
-    expect(statements[0].Condition).toBeUndefined();
-    expect(resourcesFor(statements[1])).toEqual([
-      "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-2-lite-v1:0",
-      "arn:aws:bedrock:us-east-2::foundation-model/amazon.nova-2-lite-v1:0",
-      "arn:aws:bedrock:us-west-2::foundation-model/amazon.nova-2-lite-v1:0",
-    ]);
-    expect(statements[1].Condition).toEqual({
-      StringLike: { "bedrock:InferenceProfileArn": profileArn },
+    expect(statements).toHaveLength(allowed.length * 2);
+    expect(new Set(statements.flatMap(actionsFor))).toEqual(
+      new Set(["bedrock:InvokeModel"]),
+    );
+    allowed.forEach(([profileId, foundationModelId], index) => {
+      const profileArn =
+        `arn:aws:bedrock:us-west-2:${config.account}:inference-profile/` +
+        profileId;
+      const profile = statements[index * 2];
+      const foundation = statements[index * 2 + 1];
+      expect(resourcesFor(profile)).toEqual([profileArn]);
+      expect(profile.Condition).toBeUndefined();
+      expect(resourcesFor(foundation)).toEqual(
+        ["us-east-1", "us-east-2", "us-west-2"].map(
+          (region) =>
+            `arn:aws:bedrock:${region}::foundation-model/${foundationModelId}`,
+        ),
+      );
+      expect(foundation.Condition).toEqual({
+        StringLike: { "bedrock:InferenceProfileArn": profileArn },
+      });
     });
     expect(json).not.toContain("bedrock:*");
+    expect(json).not.toContain("foundation-model/*");
   });
 
   test("grants exactly the private object operations the application uses", () => {

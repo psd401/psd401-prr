@@ -359,6 +359,70 @@ SETTINGS: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key="PRR_AI_MODEL_INTENT",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        max_length=255,
+        pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
+        format_message="The advisory model must be a Bedrock model identifier.",
+        category=CATEGORY_ADVISORY_AI,
+        label="Request-intent model",
+        consequence=(
+            "The Bedrock model that reads a request and proposes its scope. Blank uses the advisory model above. Only models the "
+            "production Bedrock grant names can be called; any other "
+            "identifier makes these runs fail closed."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MODEL_CASE_TITLE",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        max_length=255,
+        pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
+        format_message="The advisory model must be a Bedrock model identifier.",
+        category=CATEGORY_ADVISORY_AI,
+        label="Case-title model",
+        consequence=(
+            "The Bedrock model that proposes a case's one-line title. Blank uses the advisory model above. Only models the "
+            "production Bedrock grant names can be called; any other "
+            "identifier makes these runs fail closed."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MODEL_RESPONSIVENESS",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        max_length=255,
+        pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
+        format_message="The advisory model must be a Bedrock model identifier.",
+        category=CATEGORY_ADVISORY_AI,
+        label="Record-responsiveness model",
+        consequence=(
+            "The Bedrock model that suggests whether a record is responsive. Blank uses the advisory model above. Only models the "
+            "production Bedrock grant names can be called; any other "
+            "identifier makes these runs fail closed."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MODEL_REDACTION",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        max_length=255,
+        pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
+        format_message="The advisory model must be a Bedrock model identifier.",
+        category=CATEGORY_ADVISORY_AI,
+        label="Redaction-candidate model",
+        consequence=(
+            "The Bedrock model that proposes redaction candidates. Blank uses the advisory model above. Only models the "
+            "production Bedrock grant names can be called; any other "
+            "identifier makes these runs fail closed."
+        ),
+    ),
+    SettingSpec(
         key="PRR_AI_TIMEOUT_SECONDS",
         type=values.INTEGER,
         default=30,
