@@ -15,6 +15,10 @@ or ``auto``.
   ``PRR_TRUST_NON_RESPONSIVE_AUTO_MIN_CONFIDENCE`` are staged, and a random
   elusion sample of ``PRR_TRUST_ELUSION_SAMPLE_SIZE`` is drawn from them.
 
+Opening the same set again (same case, kind, outcome, and records) returns
+the batch already open, with its sample, so a cancelled review leaves nothing
+behind.
+
 ``decide_batch`` takes the reviewer's judgment of every sampled record. Each
 judgment is recorded as an ordinary single review. Only if every judgment
 matches the proposed outcome is that outcome applied to the rest, through the
@@ -22,6 +26,10 @@ same review service, in the reviewer's name; one disagreement (for a discard
 batch, one responsive record found) blocks the batch and the rest stay
 unreviewed. A record someone reviewed after the batch opened is skipped, not
 overturned. The AI applies nothing; ``AdvisoryRun.applied`` stays false.
+
+A decision runs in one transaction over at most ``MAX_BATCH_RECORDS``
+records, one review-service call each, like the existing bulk review; if
+batches need to grow past that, split the apply rather than raise the cap.
 """
 
 import random
@@ -77,6 +85,14 @@ def _open_batch(*, request, kind, label, state, ids, sample_size, actor, min_con
         raise ValidationError(
             f"One batch covers at most {MAX_BATCH_RECORDS} records. Narrow the cluster."
         )
+    # Reopening the same set (a reviewer cancelled and came back) continues
+    # the open batch and its sample rather than leaving one behind each time.
+    # ``ids`` is in primary-key order, so equal sets compare equal.
+    for open_batch in ReviewBatch.objects.select_for_update().filter(
+        request=request, kind=kind, proposed_state=state, outcome=ReviewBatch.Outcome.OPEN,
+    ):
+        if open_batch.record_item_ids == ids:
+            return open_batch
     batch = ReviewBatch.objects.create(
         request=request,
         kind=kind,

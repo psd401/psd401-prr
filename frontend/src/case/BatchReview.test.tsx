@@ -1,7 +1,7 @@
 // ABOUTME: Sampled batch review: every sampled record must be judged before
 // ABOUTME: the batch can be decided, and the outcome is stated plainly.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import { BatchReviewPanel, DiscardBatchCard } from './BatchReview'
@@ -91,5 +91,12 @@ it('shows nothing when non-responsive is not automatic', async () => {
     },
   })
   wrap(<DiscardBatchCard request="PRR-2026-0001" onOpen={() => {}} />)
-  await waitFor(() => expect(screen.queryByText('Ready to discard')).not.toBeInTheDocument())
+  // Wait for the policy to load before asserting absence, so the card is
+  // proven hidden by the policy and not merely by a pending query.
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+    '/api/staff/review-batches/policy/?request=PRR-2026-0001', expect.anything(),
+  ))
+  await act(async () => {})
+  expect(screen.queryByText('Ready to discard')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Start elusion check' })).not.toBeInTheDocument()
 })
