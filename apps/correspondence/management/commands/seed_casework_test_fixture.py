@@ -103,6 +103,11 @@ FIXTURE_SUPERSEDE_DESCRIPTION = (
     "2026."
 )
 FIXTURE_SUPERSEDE_RECORD_COUNT = 3
+#: Uploaded (not Vault-collected) mail on the same isolated case, from one
+#: sender domain, so the bulk-review-by-filter flow has a set to decide that
+#: superseding the Vault collection never touches.
+FIXTURE_BULK_FILTER_DOMAIN = "bulk.example.org"
+FIXTURE_BULK_FILTER_RECORD_COUNT = 3
 FIXTURE_FORWARDED_DESCRIPTION = (
     "Copies of the traffic-safety study for the Harborview crossing, and any "
     "district correspondence about it from February 2026."
@@ -928,6 +933,22 @@ def _seed_supersede_case(officer):
                 "content_type": "application/octet-stream",
                 "sha256": hashlib.sha256(label.encode("utf-8")).hexdigest(),
                 "email_sender_domain": "example.org",
+            },
+        )
+    for index in range(FIXTURE_BULK_FILTER_RECORD_COUNT):
+        label = f"bulk-filter-{index}"
+        filename = f"synthetic-{label}.eml"
+        RecordItem.objects.get_or_create(
+            pk=_fixture_uuid(label),
+            defaults={
+                "request": request,
+                "source_system": "upload",
+                "original_filename": filename,
+                "storage_key": f"fixtures/{filename}",
+                "content_length": 128,
+                "content_type": "application/octet-stream",
+                "sha256": hashlib.sha256(label.encode("utf-8")).hexdigest(),
+                "email_sender_domain": FIXTURE_BULK_FILTER_DOMAIN,
             },
         )
     return request

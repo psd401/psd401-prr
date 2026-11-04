@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import math
+from dataclasses import dataclass
 
 import pymupdf as fitz
 from django.core.exceptions import ValidationError
@@ -13,7 +14,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.api.identity import StaffRole, has_staff_role
-from apps.audit.models import audit
+from apps.audit.models import AuditLog, audit
 from apps.configuration import runtime
 
 from .models import (
@@ -81,6 +82,193 @@ BULK_REVIEW_STATES = (
     RecordItem.ReviewState.RESPONSIVE,
     RecordItem.ReviewState.NON_RESPONSIVE,
 )
+
+#: How many records one filter-mode decision may cover. The reviewer sees the
+#: exact count and confirms it; this ceiling only bounds one write.
+BULK_REVIEW_FILTER_MAX_ITEMS = 10_000
+
+#: States a bulk decision never overturns: each was a reviewer's own judgement
+#: (an exemption citation, a duplicate call) or an officer's re-scoping.
+_ONE_AT_A_TIME_STATES = {
+    RecordItem.ReviewState.WITHHELD: "withheld",
+    RecordItem.ReviewState.DUPLICATE: "duplicate",
+    RecordItem.ReviewState.SUPERSEDED: "superseded",
+}
+
+
+class BulkSelectionChanged(ValidationError):
+    """The filtered set is no longer the one the reviewer confirmed."""
+
+
+@dataclass(frozen=True)
+class BulkSelection:
+    matching: int
+    eligible_ids: tuple
+    excluded: dict
+    selection_sha256: str
+
+
+def _selection_sha256(ids) -> str:
+    return hashlib.sha256(
+        "\n".join(sorted(str(pk) for pk in ids)).encode()
+    ).hexdigest()
+
+
+def bulk_review_selection(record_item_ids, *, state) -> BulkSelection:
+    """Split a filtered set into the records one decision may change.
+
+    Records already in ``state`` and records whose state needs its own
+    judgement are counted, not changed. A non-responsive decision also skips a
+    record with an active redaction, which has to be voided deliberately.
+    """
+    if state not in BULK_REVIEW_STATES:
+        raise ValidationError(
+            "Bulk review records only responsive or non-responsive outcomes."
+        )
+    ids = list(dict.fromkeys(record_item_ids))
+    excluded = {"withheld": 0, "duplicate": 0, "superseded": 0, "already": 0, "redacted": 0}
+    redacted = set()
+    if state != RecordItem.ReviewState.RESPONSIVE:
+        redacted = set(
+            Redaction.objects.filter(
+                record_item_id__in=ids, voided_at__isnull=True,
+            ).values_list("record_item_id", flat=True)
+        )
+    eligible = []
+    for pk, current in RecordItem.objects.filter(pk__in=ids).values_list(
+        "pk", "review_state",
+    ):
+        if current in _ONE_AT_A_TIME_STATES:
+            excluded[_ONE_AT_A_TIME_STATES[current]] += 1
+        elif current == state:
+            excluded["already"] += 1
+        elif pk in redacted:
+            excluded["redacted"] += 1
+        else:
+            eligible.append(pk)
+    eligible.sort(key=str)
+    return BulkSelection(
+        matching=len(ids),
+        eligible_ids=tuple(eligible),
+        excluded=excluded,
+        selection_sha256=_selection_sha256(eligible),
+    )
+
+
+@transaction.atomic
+def bulk_review_confirmed_selection(
+    record_item_ids,
+    *,
+    state,
+    actor,
+    expected_count,
+    selection_sha256,
+    filter_detail,
+):
+    """Apply one human decision to the exact set the reviewer confirmed.
+
+    ``record_item_ids`` is the filter's current match; it is re-split here,
+    under row locks, and refused unless it is still the set the reviewer saw.
+    Each record's write and audit row match a single-record review.
+    """
+    _require_reviewer(actor)
+    ids = list(dict.fromkeys(record_item_ids))
+    locked = list(
+        RecordItem.objects.select_for_update()
+        .filter(pk__in=ids)
+        .order_by("pk")
+        .values_list("pk", flat=True)
+    )
+    selection = bulk_review_selection(locked, state=state)
+    if (
+        len(selection.eligible_ids) != expected_count
+        or selection.selection_sha256 != selection_sha256
+    ):
+        raise BulkSelectionChanged(
+            "The records matching this filter changed after you reviewed the "
+            "count. Look at the count again and confirm."
+        )
+    if not selection.eligible_ids:
+        raise ValidationError("No record in this selection can take that outcome.")
+    if len(selection.eligible_ids) > BULK_REVIEW_FILTER_MAX_ITEMS:
+        raise ValidationError(
+            f"One filter decision covers at most {BULK_REVIEW_FILTER_MAX_ITEMS} "
+            "records. Narrow the filter."
+        )
+    items = list(
+        RecordItem.objects.select_related("request", "reviewed_by")
+        .filter(pk__in=selection.eligible_ids)
+        .order_by("created_at", "pk")
+    )
+    request_ids = {item.request.pk for item in items}
+    if len(request_ids) != 1:
+        raise ValidationError(
+            "Bulk review applies to the records of one request at a time."
+        )
+    request = items[0].request
+    now = timezone.now()
+    # The same fields review_record writes for a plain responsiveness
+    # outcome; no record here is withheld, so no citation is dropped.
+    RecordItemWithholdingExemption.objects.filter(record_item__in=items).delete()
+    RecordItem.objects.filter(pk__in=[item.pk for item in items]).update(
+        review_state=state,
+        reviewed_by=actor,
+        reviewed_at=now,
+        withholding_exemption=None,
+        second_reviewed_by=None,
+        second_reviewed_at=None,
+        redacted_storage_key="",
+        redacted_sha256="",
+        redacted_content_length=None,
+        redacted_content_type="",
+        redacted_manifest_sha256="",
+    )
+    AuditLog.objects.bulk_create([
+        AuditLog(
+            action="record.reviewed",
+            target=str(item.pk),
+            actor=actor,
+            detail={
+                "request_number": request.number,
+                "before": {
+                    "state": item.review_state,
+                    "reviewed_by_id": (
+                        item.reviewed_by.pk if item.reviewed_by else None
+                    ),
+                    "withholding_exemption_ids": [],
+                },
+                "review_state": state,
+                "withholding_exemption_ids": [],
+            },
+        )
+        for item in items
+    ])
+    audit(
+        "record.bulk_reviewed",
+        target=request.number,
+        actor=actor,
+        request_number=request.number,
+        review_state=state,
+        selection="filter",
+        filter=filter_detail,
+        record_item_ids=[str(item.pk) for item in items],
+        record_item_count=len(items),
+        excluded=selection.excluded,
+    )
+    from apps.work_queue.integration import schedule_source_work_item_reconciliation
+
+    for item in items:
+        if state == RecordItem.ReviewState.RESPONSIVE:
+            from .advisory_ai import defer_automatic_record_advisory
+            from .models import AdvisoryRun
+
+            defer_automatic_record_advisory(
+                item.pk,
+                kind=AdvisoryRun.Kind.RECORD_REDACTIONS,
+                actor=actor,
+            )
+        schedule_source_work_item_reconciliation("records", item.pk)
+    return len(items)
 
 
 @transaction.atomic

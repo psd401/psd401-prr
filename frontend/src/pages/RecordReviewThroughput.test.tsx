@@ -646,3 +646,66 @@ describe('district counsel domains', () => {
     expect(at(posts, 0).body).toMatchObject({ domain: 'lawfirm.example', active: true })
   })
 })
+
+describe('bulk review of every record a filter matches', () => {
+  const PREVIEW = {
+    matching: 3,
+    eligible_count: 2,
+    excluded: { withheld: 0, duplicate: 1, superseded: 0, already: 0, redacted: 0 },
+    selection_sha256: 'a'.repeat(64),
+    privilege_count: 0,
+    max_items: 10000,
+  }
+
+  function renderFiltered() {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
+    })
+    return render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={['/?request=PRR-2026-0042&tag=auto_reply']}>
+            <RecordItems roles={['reviewer']} requestNumber="PRR-2026-0042" />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    )
+  }
+
+  it('confirms the server count and sends the filter with its digest', async () => {
+    const { posts, fetchMock } = stubApi((url) => (
+      url.startsWith('/api/staff/record-items/bulk-selection/') ? response(PREVIEW) : null
+    ))
+    const user = userEvent.setup()
+    renderFiltered()
+
+    await user.click(await screen.findByRole('button', { name: 'Select all 3 matching' }))
+    expect(screen.getByText('All 3 records matching this filter')).toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Bulk review outcome'), 'non_responsive')
+    await user.click(screen.getByRole('button', { name: 'Review all matching' }))
+
+    expect(await screen.findByText(/1 record is marked a duplicate and will not change/)).toBeInTheDocument()
+    const previewUrl = String(
+      fetchMock.mock.calls.find(([url]) => String(url).includes('bulk-selection'))?.[0],
+    )
+    expect(previewUrl).toContain('tag=auto_reply')
+    expect(previewUrl).toContain('state=non_responsive')
+
+    await user.click(screen.getByRole('button', { name: 'Record 2 outcomes' }))
+
+    await waitFor(() => expect(posts).toHaveLength(1))
+    expect(at(posts, 0).body).toEqual({
+      filter: { request: 'PRR-2026-0042', tag: 'auto_reply' },
+      state: 'non_responsive',
+      expected_count: 2,
+      selection_sha256: 'a'.repeat(64),
+    })
+  })
+
+  it('offers no select-all-matching control without a filter', async () => {
+    stubApi()
+    renderList()
+    await screen.findAllByText(/Out of Office reply/)
+    expect(screen.queryByRole('button', { name: /matching/ })).not.toBeInTheDocument()
+  })
+})

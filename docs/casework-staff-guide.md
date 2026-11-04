@@ -203,6 +203,16 @@ Each added record is written to the audit log under your name with the file
 name, size, and SHA-256 digest; the record's custodian stays blank because it
 names where a record was found, not who uploaded it.
 
+### Deciding every record a filter matches
+
+On the **Records** tab, filter to the set you mean (for example one sender
+domain, or the **Unreviewed** state) and choose **Select all N matching**,
+then an outcome and **Review all matching**. The confirmation shows how many
+records the outcome will change and lists any it will skip (withheld,
+duplicate, superseded, already decided, or carrying active redactions). If
+the matching records change before you confirm, the decision is refused and
+the count is shown again. Each record is audited in your name.
+
 ### Superseding an over-broad Vault collection
 
 A Vault export can bring in far more mail than the request asked for. When

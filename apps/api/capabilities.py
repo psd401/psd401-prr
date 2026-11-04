@@ -991,9 +991,18 @@ CAPABILITIES = (
         ["/requests/:number/records"],
     ),
     _capability(
+        "record_items.bulk_selection",
+        "Preview exactly which records one filter decision would change, "
+        "with the count and digest a confirmation must send back.",
+        "GET",
+        "/api/staff/record-items/bulk-selection/",
+        ["/requests/:number/records"],
+    ),
+    _capability(
         "record_items.bulk_review",
         "Record one named human responsiveness decision across a selected, "
-        "visible set of records.",
+        "visible set of records, or every record a filter matches after the "
+        "reviewer confirms the exact count.",
         "POST",
         "/api/staff/record-items/bulk-review/",
         ["/requests/:number/records"],

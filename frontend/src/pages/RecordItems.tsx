@@ -274,6 +274,27 @@ interface FacetRow {
   count: number
 }
 
+interface BulkSelectionPreview {
+  matching: number
+  eligible_count: number
+  excluded: Record<'withheld' | 'duplicate' | 'superseded' | 'already' | 'redacted', number>
+  selection_sha256: string
+  privilege_count: number
+  max_items: number
+}
+
+// [one, many]: what each skipped group is, said as a sentence.
+const EXCLUDED_LABELS: Record<keyof BulkSelectionPreview['excluded'], [string, string]> = {
+  already: ['record already has this outcome', 'records already have this outcome'],
+  withheld: ['record is withheld in full', 'records are withheld in full'],
+  duplicate: ['record is marked a duplicate', 'records are marked duplicates'],
+  superseded: [
+    'record was superseded with its collection',
+    'records were superseded with their collection',
+  ],
+  redacted: ['record carries active redactions', 'records carry active redactions'],
+}
+
 interface RecordFacets {
   total: number
   privilege: number
@@ -438,6 +459,8 @@ export function RecordItems({
   const [bulkSelection, setBulkSelection] = useState<string[]>([])
   const [bulkState, setBulkState] = useState('')
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false)
+  // "Every record this filter matches" rather than rows ticked on this page.
+  const [matchingMode, setMatchingMode] = useState(false)
   const [selected, setSelected] = useState<RecordItem | null>(null)
   // Distinct from `listPage`: this is the page *inside* the selected PDF.
   const [pageNumber, setPageNumber] = useState(1)
@@ -640,6 +663,55 @@ export function RecordItems({
   // A human decision about records this reviewer selected and could see, not
   // an accept-all of AI output: the request carries only the chosen ids and
   // the chosen outcome, and no advisory proposal takes part in it.
+  const hasFilter = Boolean(
+    activeReviewState || activeHandling || activeSearch || activeTag
+    || activeSenderDomain || activeCustodian || activeConfidence,
+  )
+  const selectionPreview = useQuery({
+    queryKey: ['record-bulk-selection', ...filterKey, bulkState],
+    enabled: bulkConfirmOpen && matchingMode && bulkState !== '',
+    queryFn: () => {
+      const params = filterParams()
+      params.set('state', bulkState)
+      return api<BulkSelectionPreview>(
+        `/api/staff/record-items/bulk-selection/?${params.toString()}`,
+      )
+    },
+    // The count is what the reviewer confirms; never show a stale one.
+    staleTime: 0,
+    gcTime: 0,
+  })
+  // A decision over the exact set the preview counted. The server re-counts
+  // under lock and refuses if anything changed in between.
+  const bulkFilterMutation = useMutation({
+    mutationFn: (preview: BulkSelectionPreview) => api<{ reviewed_count: number }>(
+      '/api/staff/record-items/bulk-review/',
+      {
+        method: 'POST',
+        body: {
+          filter: Object.fromEntries(filterParams()),
+          state: bulkState,
+          expected_count: preview.eligible_count,
+          selection_sha256: preview.selection_sha256,
+        },
+      },
+    ),
+    onSuccess: (result) => {
+      setMatchingMode(false)
+      setBulkState('')
+      setBulkConfirmOpen(false)
+      qc.invalidateQueries({ queryKey: ['record-items'] })
+      qc.invalidateQueries({ queryKey: ['record-item-facets'] })
+      if (request) {
+        qc.invalidateQueries({ queryKey: ['case-workspace-summary', request] })
+        qc.invalidateQueries({ queryKey: ['case-closure-readiness', request] })
+      }
+      toast('success', `Recorded ${result.reviewed_count} review outcomes.`)
+    },
+    onError: () => {
+      qc.invalidateQueries({ queryKey: ['record-bulk-selection'] })
+    },
+  })
   const bulkReviewMutation = useMutation({
     mutationFn: (payload: { ids: string[]; state: string }) => api<{
       reviewed_count: number
@@ -883,6 +955,7 @@ export function RecordItems({
   function changeFilter(changes: Record<string, string>) {
     setBulkSelection([])
     setBulkState('')
+    setMatchingMode(false)
     updateListParams(changes)
   }
 
@@ -1332,13 +1405,30 @@ export function RecordItems({
           without anything moving focus, so a screen-reader user would
           otherwise get no feedback that a click changed what a confirmation
           covers. */}
-      {canReview && bulkSelection.length > 0 && (
+      {canReview && hasFilter && !matchingMode && (facets.data?.total ?? 0) > 0 && (
+        <div className="mb-2 flex justify-end">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setBulkSelection([])
+              setMatchingMode(true)
+            }}
+          >
+            Select all {facets.data?.total} matching
+          </Button>
+        </div>
+      )}
+
+      {canReview && (bulkSelection.length > 0 || matchingMode) && (
         <div
           aria-live="polite"
           className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-driftwood/60 bg-skylight px-3 py-2"
         >
           <span className="text-sm text-pacific">
-            {bulkSelection.length} selected
+            {matchingMode
+              ? `All ${facets.data?.total ?? 0} records matching this filter`
+              : `${bulkSelection.length} selected`}
           </span>
           <Select
             aria-label="Bulk review outcome"
@@ -1356,13 +1446,14 @@ export function RecordItems({
             disabled={
               bulkState === ''
               || bulkReviewMutation.isPending
+              || bulkFilterMutation.isPending
               // The confirmation refuses an over-cap selection anyway, so
               // opening it would only be a dead end.
-              || bulkSelection.length > BULK_REVIEW_MAX
+              || (!matchingMode && bulkSelection.length > BULK_REVIEW_MAX)
             }
             onClick={() => setBulkConfirmOpen(true)}
           >
-            Review selected
+            {matchingMode ? 'Review all matching' : 'Review selected'}
           </Button>
           <Button
             variant="secondary"
@@ -1370,11 +1461,12 @@ export function RecordItems({
             onClick={() => {
               setBulkSelection([])
               setBulkState('')
+              setMatchingMode(false)
             }}
           >
             Clear selection
           </Button>
-          {bulkSelection.length > BULK_REVIEW_MAX && (
+          {!matchingMode && bulkSelection.length > BULK_REVIEW_MAX && (
             <span className="text-sm text-red-700">
               Select at most {BULK_REVIEW_MAX} records for one decision.
             </span>
@@ -1952,6 +2044,78 @@ export function RecordItems({
         title="Record this review outcome"
         onClose={() => setBulkConfirmOpen(false)}
       >
+        {matchingMode ? (
+          <div className="space-y-4">
+            {selectionPreview.isPending && <Spinner />}
+            {selectionPreview.isError && <ErrorNote error={selectionPreview.error} />}
+            {selectionPreview.data && (
+              <>
+                <p className="text-sm text-pacific">
+                  You are recording{' '}
+                  <strong>
+                    {BULK_REVIEW_STATES.find((option) => option.value === bulkState)?.label
+                      ?? bulkState}
+                  </strong>{' '}
+                  for <strong>{selectionPreview.data.eligible_count}</strong> of the{' '}
+                  {selectionPreview.data.matching} records matching this filter. This is
+                  your decision, not an acceptance of any AI suggestion. Each record is
+                  audited separately in your name.
+                </p>
+                {Object.entries(selectionPreview.data.excluded)
+                  .filter(([, count]) => count > 0)
+                  .map(([key, count]) => (
+                    <p key={key} className="text-sm text-pacific/80">
+                      {count}{' '}
+                      {EXCLUDED_LABELS[key as keyof BulkSelectionPreview['excluded']][
+                        count === 1 ? 0 : 1
+                      ]}{' '}
+                      and will not change.
+                    </p>
+                  ))}
+                {selectionPreview.data.privilege_count > 0 && (
+                  <p className="text-sm font-semibold text-red-700">
+                    {selectionPreview.data.privilege_count}{' '}
+                    {selectionPreview.data.privilege_count === 1
+                      ? 'record carries'
+                      : 'records carry'}{' '}
+                    a district-counsel or privilege marker. Filter to the privilege queue
+                    and read them before deciding.
+                  </p>
+                )}
+                {selectionPreview.data.eligible_count > selectionPreview.data.max_items && (
+                  <p className="text-sm text-red-700">
+                    One decision covers at most {selectionPreview.data.max_items} records.
+                    Narrow the filter.
+                  </p>
+                )}
+              </>
+            )}
+            <ErrorNote error={bulkFilterMutation.error} />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                disabled={
+                  !selectionPreview.data
+                  || bulkFilterMutation.isPending
+                  || selectionPreview.data.eligible_count === 0
+                  || selectionPreview.data.eligible_count > selectionPreview.data.max_items
+                }
+                onClick={() => {
+                  if (selectionPreview.data) bulkFilterMutation.mutate(selectionPreview.data)
+                }}
+              >
+                Record {selectionPreview.data?.eligible_count ?? 0} outcomes
+              </Button>
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={() => setBulkConfirmOpen(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
         <div className="space-y-4">
           <p className="text-sm text-pacific">
             You are recording{' '}
@@ -2014,6 +2178,7 @@ export function RecordItems({
             </Button>
           </div>
         </div>
+        )}
       </Modal>
     </>
   )
