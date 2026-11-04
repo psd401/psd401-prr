@@ -238,7 +238,8 @@ Legal language changes add a new version, and historical versions remain
 available to reproduce approved snapshots. Current identifiers are
 `acknowledgment` (v2), `clarification_request` (v1), `completion_closure` (v1),
 `estimate_revision` (v2), `fee_estimate` (v1), `installment_notice` (v3),
-`no_records_closure` (v2), `nonpayment_closure` (v1), `scope_clarification` (v1),
+`interpretation_estimate` (v1, the system-prepared letter described in
+[estimates](estimates.md)), `no_records_closure` (v2), `nonpayment_closure` (v1), `scope_clarification` (v1),
 `submission_receipt` (v1), and `third_party_notice` (v1). Template wording is
 also governed by counsel review and by `apps/correspondence/guardrails.py`,
 which warns on a template before it is saved with the consequence of the wording

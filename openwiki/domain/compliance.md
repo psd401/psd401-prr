@@ -119,6 +119,7 @@ this by parsing the source of the letter and task modules for calls.
 | `services.record_external_initial_response()` | AST-guarded in `test_compliance` | Records a first response sent outside this system; sends nothing |
 | `scope_clarification` letter | `scope-ast-guard`; its clarification form tolls the clock | Choosing the form is a judgment with an accountable name on it |
 | Submission receipt | `receipt-ast-guard`; non-statutory; cannot set `initial_response_delivered` | Keeps the receipt from acting as a statutory response |
+| Interpretation-and-estimate letter | `test_a_system_prepared_letter_is_drafted_never_sent` (`estimate-letter-ast-guard`); the system drafts it with no actor and never approves or queues it | A Records Officer approves and sends it. See [estimates](estimates.md) |
 
 The main enforcement test is `test_no_automated_path_exists` in
 [`apps/records/tests/test_compliance.py`](../../apps/records/tests/test_compliance.py).
@@ -140,7 +141,9 @@ acknowledgment is strict liability under RCW 42.56.520.
 
 Late acknowledgment is strict liability, so it may be automated. Automated
 estimate-kicking is a penalty aggravator, so it may not be. Never invert this.
-Estimate revisions always require a human.
+Estimate revisions always require a human. The one system-drafted letter, the
+interpretation-and-estimate letter, is drafted but never approved or sent by the system.
+See [estimates](estimates.md#the-interpretation-letter).
 
 The safety net is the backstop. The officer-facing plan that sets out the
 four-step acknowledgment ladder, and the states that decide when the net is
