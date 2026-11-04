@@ -53,7 +53,7 @@ call, so a caller cannot mutate policy.
 |---|---|---|
 | `anonymous` | 1 | The public intake submission only (`requests.submit_public`). It is write-only, CSRF-protected, rate-limited, and idempotent. |
 | `direct` | 1 | An agent may execute with its attributed token through the REST API. |
-| `human_confirmation` | 61 | An agent may prepare the action, but a human must approve it explicitly before it runs. |
+| `human_confirmation` | 64 | An agent may prepare the action, but a human must approve it explicitly before it runs. |
 | `human_only` | 29 | The agent must hand off. The accountable human executes the action in the staff UI. |
 
 The `human_only` and `human_confirmation` rows cover legal and statutory actions
@@ -117,6 +117,10 @@ Related: [Compliance](../domain/compliance.md) (the statutory boundary this
 catalog enforces), [Work queue](../domain/work-queue.md) (work actions and
 their human-only decisions), [Advisory AI](../domain/advisory-ai.md) (proposal
 actions are human confirmation).
-es), [Work queue](../domain/work-queue.md) (work actions and
-their human-only decisions), [Advisory AI](../domain/advisory-ai.md) (proposal
-actions are human confirmation).
+
+The intake-label operations are registered as advisory-only rows.
+`requests.advisory_intake.read` and `requests.advisory_intake.request` carry the
+`advisory_only` constraint. The request row keeps the default `direct` policy and
+is registered at risk `high`. The officer's answer,
+`requests.advisory_intake.feedback`, is `human_confirmation`. The behavior behind
+these rows is in [advisory AI](../domain/advisory-ai.md#boundary).
