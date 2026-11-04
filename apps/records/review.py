@@ -126,6 +126,11 @@ def bulk_review_selection(record_item_ids, *, state) -> BulkSelection:
             "Bulk review records only responsive or non-responsive outcomes."
         )
     ids = list(dict.fromkeys(record_item_ids))
+    if len(ids) > BULK_REVIEW_FILTER_MAX_ITEMS:
+        raise ValidationError(
+            f"One filter decision covers at most {BULK_REVIEW_FILTER_MAX_ITEMS} "
+            "matching records. Narrow the filter."
+        )
     excluded = {"withheld": 0, "duplicate": 0, "superseded": 0, "already": 0, "redacted": 0}
     redacted = set()
     if state != RecordItem.ReviewState.RESPONSIVE:
@@ -167,12 +172,19 @@ def bulk_review_confirmed_selection(
 ):
     """Apply one human decision to the exact set the reviewer confirmed.
 
-    ``record_item_ids`` is the filter's current match; it is re-split here,
-    under row locks, and refused unless it is still the set the reviewer saw.
-    Each record's write and audit row match a single-record review.
+    ``record_item_ids`` is the filter's current match, resolved by the
+    caller just before this runs. Those rows are locked here and re-split, and
+    the decision is refused unless the result is still exactly the set the
+    reviewer confirmed (same count, same digest). Each record's write and
+    audit row match a single-record review.
     """
     _require_reviewer(actor)
     ids = list(dict.fromkeys(record_item_ids))
+    if len(ids) > BULK_REVIEW_FILTER_MAX_ITEMS:
+        raise ValidationError(
+            f"One filter decision covers at most {BULK_REVIEW_FILTER_MAX_ITEMS} "
+            "matching records. Narrow the filter."
+        )
     locked = list(
         RecordItem.objects.select_for_update()
         .filter(pk__in=ids)
@@ -190,11 +202,6 @@ def bulk_review_confirmed_selection(
         )
     if not selection.eligible_ids:
         raise ValidationError("No record in this selection can take that outcome.")
-    if len(selection.eligible_ids) > BULK_REVIEW_FILTER_MAX_ITEMS:
-        raise ValidationError(
-            f"One filter decision covers at most {BULK_REVIEW_FILTER_MAX_ITEMS} "
-            "records. Narrow the filter."
-        )
     items = list(
         RecordItem.objects.select_related("request", "reviewed_by")
         .filter(pk__in=selection.eligible_ids)
@@ -208,7 +215,14 @@ def bulk_review_confirmed_selection(
     request = items[0].request
     now = timezone.now()
     # The same fields review_record writes for a plain responsiveness
-    # outcome; no record here is withheld, so no citation is dropped.
+    # outcome, including the prior citations it records before clearing them.
+    prior_exemptions = {}
+    for record_id, exemption_id in (
+        RecordItemWithholdingExemption.objects.filter(record_item__in=items)
+        .order_by("pk")
+        .values_list("record_item_id", "exemption_id")
+    ):
+        prior_exemptions.setdefault(record_id, []).append(exemption_id)
     RecordItemWithholdingExemption.objects.filter(record_item__in=items).delete()
     RecordItem.objects.filter(pk__in=[item.pk for item in items]).update(
         review_state=state,
@@ -235,7 +249,7 @@ def bulk_review_confirmed_selection(
                     "reviewed_by_id": (
                         item.reviewed_by.pk if item.reviewed_by else None
                     ),
-                    "withholding_exemption_ids": [],
+                    "withholding_exemption_ids": prior_exemptions.get(item.pk, []),
                 },
                 "review_state": state,
                 "withholding_exemption_ids": [],

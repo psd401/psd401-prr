@@ -10,6 +10,7 @@ import hashlib
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
+from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
 from apps.api.identity import apply_staff_roles
@@ -213,7 +214,15 @@ class BulkReviewByFilterTests(TestCase):
         self.assertEqual(self._confirm(preview).status_code, 403)
 
     def test_a_responsive_decision_is_allowed_on_redacted_records(self):
+        exemption = ExemptionCitation.objects.create(
+            citation="RCW 42.56.998", short_name="Test exemption",
+        )
         record = self._item(1, review_state=RecordItem.ReviewState.NON_RESPONSIVE)
+        Redaction.objects.create(
+            record_item=record, page_number=1,
+            x0=0.1, y0=0.1, x1=0.2, y1=0.2,
+            exemption=exemption, created_by=self.reviewer,
+        )
 
         preview = self._preview(state="responsive")
         self.assertEqual(preview.json()["eligible_count"], 1)
@@ -229,3 +238,42 @@ class BulkReviewByFilterTests(TestCase):
         }, format="json")
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["reviewed_count"], 1)
+
+    def test_a_token_caller_is_handed_off_for_a_filter_decision(self):
+        self._item(1)
+        preview = self._preview()
+        token = Token.objects.create(user=self.reviewer)
+        self.api.force_authenticate(None)
+        self.api.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+        response = self._confirm(preview)
+
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(response.json()["code"], "human_approval_required")
+        self.assertEqual(
+            RecordItem.objects.get(request=self.prr).review_state,
+            RecordItem.ReviewState.UNREVIEWED,
+        )
+
+    def test_search_text_never_reaches_the_audit_log(self):
+        self._item(1, ocr_text="Mentions a named student")
+        typed = "named student"
+
+        self._confirm(self._preview(search=typed), search=typed)
+
+        bulk = AuditLog.objects.get(action="record.bulk_reviewed")
+        self.assertNotIn("search", bulk.detail["filter"])
+        self.assertEqual(
+            bulk.detail["filter"]["search_sha256"],
+            hashlib.sha256(typed.encode()).hexdigest(),
+        )
+        self.assertNotIn(typed, str(bulk.detail))
+
+    def test_too_many_matching_records_are_refused_before_any_lock(self):
+        from unittest.mock import patch
+
+        for index in range(3):
+            self._item(index)
+        with patch("apps.records.review.BULK_REVIEW_FILTER_MAX_ITEMS", 2):
+            preview = self._preview()
+            self.assertEqual(preview.status_code, 400, preview.content)

@@ -1,5 +1,6 @@
 # ABOUTME: Staff resources for requesters, record items, installments, and
 # ABOUTME: PRA time entries — four small verticals grouped in one module.
+import hashlib
 from decimal import Decimal
 from typing import NoReturn
 
@@ -320,6 +321,19 @@ class BulkRecordReviewInputSerializer(serializers.Serializer):
                 )
             attrs["filter"] = _bulk_filter(attrs["filter"])
         return attrs
+
+
+def _auditable_filter(filters):
+    """The filter as the append-only audit log may keep it.
+
+    Free text a reviewer typed can name a student; the log keeps its digest,
+    which still proves which search was decided, never the words.
+    """
+    detail = dict(filters)
+    search = detail.pop("search", "")
+    if search:
+        detail["search_sha256"] = hashlib.sha256(search.encode()).hexdigest()
+    return detail
 
 
 def _bulk_filter(values):
@@ -715,6 +729,21 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         return list(queryset.order_by().values_list("pk", flat=True).distinct())
 
     def _bulk_review_by_filter(self, request, data):
+        # A decision over everything a query matches is the accountable
+        # reviewer's own, made in the staff application. Tokens may preview
+        # the count (bulk-selection) but are handed off here, so the
+        # capability's human_confirmation is enforced, not just declared.
+        handoff = human_only_handoff(
+            request,
+            capability_id="record_items.bulk_review",
+            action=(
+                "Confirm a review outcome for every record a filter matches "
+                "in the staff application."
+            ),
+            required_role="reviewer",
+        )
+        if handoff is not None:
+            return handoff
         filters = data["filter"]
         try:
             reviewed_count = bulk_review_confirmed_selection(
@@ -723,7 +752,7 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                 actor=request.user,
                 expected_count=data["expected_count"],
                 selection_sha256=data["selection_sha256"],
-                filter_detail=filters,
+                filter_detail=_auditable_filter(filters),
             )
         except BulkSelectionChanged as exc:
             return Response(

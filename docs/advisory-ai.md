@@ -137,10 +137,14 @@ than a matter of wording:
   records the outcome would change, and which records it skips and why; the
   decision sends that count and a SHA-256 digest of the record ids back, and
   the server refuses it (`409 selection_changed`) if the set changed in
-  between. A filter may name only one request and covers at most 10,000
-  records. Each record still gets its own audit row; withheld, duplicate,
-  superseded, already-decided, and (for non-responsive) redacted records are
-  skipped and counted rather than overturned.
+  between. A filter may name only one request and match at most 10,000
+  records. A filter decision is made only in the staff application: a token
+  caller may preview the count but receives the `human_approval_required`
+  handoff for the decision itself. Each record still gets its own audit row;
+  withheld, duplicate, superseded, already-decided, and (for non-responsive)
+  redacted records are skipped and counted rather than overturned. The bulk
+  audit row keeps the filter but stores a SHA-256 of any free-text search,
+  never the typed words.
 * Only `responsive` and `non_responsive` are available. Withholding a record
   in full needs its own ExemptionCitation and second review, and a duplicate
   finding needs its own judgement, so neither can be expressed by one
