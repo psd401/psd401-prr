@@ -90,9 +90,10 @@ def annotate_latest_suggestion(queryset):
     )
 
 
-def agreement_report(*, request=None) -> dict[str, Any]:
-    """Agreement by suggested label and confidence band, district-wide or for
-    one case."""
+def latest_decisions(*, request=None) -> list[dict[str, Any]]:
+    """The latest stored decision on each record, as value rows, with
+    ``human_label`` added: ``responsive``, ``non_responsive``, or ``None``
+    for an outcome that is not a responsiveness call."""
     decisions = ReviewDecision.objects.order_by("created_at", "pk")
     if request is not None:
         decisions = decisions.filter(request=request)
@@ -101,12 +102,19 @@ def agreement_report(*, request=None) -> dict[str, Any]:
         "record_item_id", "review_state", "advisory_run_id",
         "advisory_label", "advisory_confidence",
     ):
-        latest[row["record_item_id"]] = row
+        latest[row["record_item_id"]] = {
+            **row, "human_label": _HUMAN_LABEL.get(row["review_state"]),
+        }
+    return list(latest.values())
 
+
+def agreement_report(*, request=None) -> dict[str, Any]:
+    """Agreement by suggested label and confidence band, district-wide or for
+    one case."""
     counts: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])
     without_suggestion = 0
-    for row in latest.values():
-        human = _HUMAN_LABEL.get(row["review_state"])
+    for row in latest_decisions(request=request):
+        human = row["human_label"]
         if human is None:
             continue
         if row["advisory_run_id"] is None:

@@ -3266,6 +3266,43 @@ class ReviewDecision(AppendOnlyModelMixin, models.Model):
         return f"{self.pk}: {self.review_state}"
 
 
+class RecordsEstimate(AppendOnlyModelMixin, models.Model):
+    """One computed estimate for a request (#41): responsive range, fee, and
+    completion date, with every input it was computed from.
+
+    Evidence only. Nothing here changes ``estimated_completion`` or reaches
+    the requester; a person revises the estimate (``letters.revise_estimate``)
+    and approves any letter. ``inputs`` holds the counts, rates, adopted
+    schedule, throughput window, and backlog the numbers came from, so a later
+    revision can show exactly why the estimate said what it did.
+    """
+
+    request = models.ForeignKey(
+        PublicRecordsRequest,
+        on_delete=models.PROTECT,
+        related_name="records_estimates",
+    )
+    as_of = models.DateField()
+    inputs = models.JSONField()
+    result = models.JSONField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.pk}: estimate as of {self.as_of}"
+
+
 class EvaluationSet(models.Model):
     """Labelled examples for comparing advisory models, taken from decisions
     people already made (a merge, a non-request closure, a reviewed record).
