@@ -85,6 +85,7 @@ class RegistryTests(TestCase):
             "PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED",
             "PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED",
             "PRR_AI_AUTOMATIC_CASE_TITLES_ENABLED",
+            "PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED",
         ):
             self.assertIn("PRR_AI_ADVISORY_ENABLED", SETTINGS_BY_KEY[key].requires)
         self.assertEqual(
@@ -96,6 +97,8 @@ class RegistryTests(TestCase):
                 # is the kind whose completed proposal can start an unattended
                 # Vault count, and a title starts nothing.
                 "PRR_AI_AUTOMATIC_CASE_TITLES_ENABLED",
+                # Likewise its own switch: a label starts nothing either.
+                "PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED",
             },
         )
 

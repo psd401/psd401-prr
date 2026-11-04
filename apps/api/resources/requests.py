@@ -58,6 +58,7 @@ from apps.api.vault_counts import (
     VaultCountRequestSerializer,
     VaultCountRunSerializer,
 )
+from apps.audit.models import audit
 from apps.configuration import runtime
 from apps.correspondence.models import (
     Correspondence,
@@ -66,7 +67,11 @@ from apps.correspondence.models import (
     InboundCorrespondenceReceipt,
 )
 from apps.records import services
-from apps.records.advisory_ai import request_request_intent_advisory
+from apps.records.advisory_ai import (
+    INTAKE_LABELS,
+    request_intake_classification,
+    request_request_intent_advisory,
+)
 from apps.records.attachments import (
     AttachmentValidationError,
     attachment_digest_descriptors,
@@ -80,6 +85,7 @@ from apps.records.legacy_timeline import (
 )
 from apps.records.models import (
     CASE_NOTE_MAX_LENGTH,
+    AdvisoryFeedback,
     AdvisoryRun,
     CaseNote,
     Channel,
@@ -991,6 +997,12 @@ class CaseClosureSerializer(serializers.Serializer):
     )
 
 
+class IntakeFeedbackSerializer(serializers.Serializer):
+    outcome = serializers.ChoiceField(choices=AdvisoryFeedback.Outcome.choices)
+    final_label = serializers.ChoiceField(choices=sorted(INTAKE_LABELS))
+    reason = serializers.CharField(max_length=2000, required=False, allow_blank=True)
+
+
 class MergeRequestSerializer(serializers.Serializer):
     """A merge names the case of record and says why, in writing."""
 
@@ -1395,6 +1407,8 @@ class RequestsViewSet(
         "ferpa_identity_verification": {StaffRole.RECORDS_OFFICER},
         "jlarc_classification": {StaffRole.RECORDS_OFFICER},
         "advisory_intent": {StaffRole.RECORDS_OFFICER},
+        "advisory_intake": {StaffRole.RECORDS_OFFICER},
+        "advisory_intake_feedback": {StaffRole.RECORDS_OFFICER},
         "vault_counts": {StaffRole.RECORDS_OFFICER},
         "vault_collection": {StaffRole.RECORDS_OFFICER},
         # Adding candidate records to a case is collection, which is the
@@ -2754,6 +2768,106 @@ class RequestsViewSet(
             AdvisoryRunSerializer(run).data,
             status=status.HTTP_202_ACCEPTED,
         )
+
+    def _latest_intake_classification(self, prr):
+        return (
+            AdvisoryRun.objects.filter(
+                request=prr,
+                kind=AdvisoryRun.Kind.INTAKE_CLASSIFICATION,
+                record_item__isnull=True,
+            )
+            .select_related("requested_by")
+            .first()
+        )
+
+    @extend_schema(
+        request=None,
+        responses={200: AdvisoryLatestSerializer, 202: AdvisoryRunSerializer},
+    )
+    @action(
+        detail=True,
+        methods=["get", "post"],
+        url_path="advisory-intake",
+    )
+    def advisory_intake(self, request, number=None):
+        """The suggested intake label for this case, for a person to confirm.
+
+        Advisory only: nothing here merges, closes, or sends. The officer
+        applies a label through the ordinary merge, close, or add-to-case
+        action and then records what they decided (``feedback``).
+        """
+        prr = self.get_object()
+        if request.method == "GET":
+            latest = self._latest_intake_classification(prr)
+            feedback = (
+                AdvisoryFeedback.objects.filter(advisory_run=latest).first()
+                if latest is not None
+                else None
+            )
+            return Response({
+                "enabled": runtime.get("PRR_AI_ADVISORY_ENABLED"),
+                "latest": (
+                    AdvisoryRunSerializer(latest).data if latest is not None else None
+                ),
+                "feedback": (
+                    {
+                        "outcome": feedback.outcome,
+                        "final_label": feedback.final_label,
+                        "created_at": feedback.created_at,
+                    }
+                    if feedback is not None
+                    else None
+                ),
+            })
+        try:
+            run = request_intake_classification(prr.pk, actor=request.user)
+        except DjangoValidationError as exc:
+            detail = getattr(exc, "message_dict", None) or exc.messages
+            raise serializers.ValidationError(detail) from exc
+        return Response(
+            AdvisoryRunSerializer(run).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @extend_schema(request=IntakeFeedbackSerializer, responses={201: None})
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="advisory-intake/feedback",
+    )
+    def advisory_intake_feedback(self, request, number=None):
+        """Record whether the officer agreed with the latest classification."""
+        prr = self.get_object()
+        payload = IntakeFeedbackSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        latest = self._latest_intake_classification(prr)
+        if latest is None or latest.state != AdvisoryRun.State.COMPLETE:
+            raise serializers.ValidationError(
+                {"detail": ["There is no completed classification to answer."]}
+            )
+        with transaction.atomic():
+            if AdvisoryFeedback.objects.filter(advisory_run=latest).exists():
+                return Response(
+                    {"code": "feedback_recorded",
+                     "detail": "This classification already has an answer."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            feedback = AdvisoryFeedback.objects.create(
+                advisory_run=latest,
+                actor=request.user,
+                **payload.validated_data,
+            )
+            audit(
+                "advisory.feedback_recorded",
+                target=str(latest.pk),
+                actor=request.user,
+                request_number=prr.number,
+                kind=latest.kind,
+                outcome=feedback.outcome,
+                final_label=feedback.final_label,
+                proposed_label=(latest.proposal or {}).get("label", ""),
+            )
+        return Response({"outcome": feedback.outcome}, status=status.HTTP_201_CREATED)
 
     @extend_schema(
         request=VaultCountRequestSerializer,
