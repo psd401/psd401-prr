@@ -50,6 +50,17 @@ def execute_advisory_analysis(run_id: str):
 
 
 @shared_task
+def prepare_estimate_letters(*, limit: int = 10) -> int:
+    """Draft interpretation-and-estimate letters for ready cases (#42).
+
+    Drafts only: a Records Officer approves and sends each letter.
+    """
+    from .estimate_letters import prepare_estimate_letters as prepare
+
+    return prepare(limit=limit)
+
+
+@shared_task
 def prepare_record_review_advisories(*, limit: int = 25) -> int:
     """Recover missed automatic record analysis in small bounded batches."""
     if not (

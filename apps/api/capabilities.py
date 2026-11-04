@@ -484,6 +484,16 @@ CAPABILITIES = (
         ],
     ),
     _capability(
+        "requests.estimate_letter.read",
+        "Read the system-prepared interpretation-and-estimate letter awaiting "
+        "approval, with the computed estimate it states. Sending it is "
+        "correspondence.approve_and_send, by a Records Officer.",
+        "GET",
+        "/api/staff/requests/{number}/estimate-letter/",
+        ["/requests/:number/overview"],
+        constraints=["records_officer_authority"],
+    ),
+    _capability(
         "requests.advisory_intake.read",
         "Read the latest suggested intake label (new, follow-up, duplicate, "
         "related, non-request, spam) and whether an officer answered it.",
@@ -2345,7 +2355,7 @@ CAPABILITIES = (
         "Approve a draft and hand it to delivery in one accountable action.",
         "POST",
         "/api/staff/correspondence/{id}/approve-and-send/",
-        ["/requests/:number/messages"],
+        ["/requests/:number/messages", "/requests/:number/overview"],
         execution="human_only",
         risk="high",
         constraints=[

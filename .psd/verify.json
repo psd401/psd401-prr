@@ -47,7 +47,8 @@
     "officer-supersede-collection",
     "reviewer-bulk-review-by-filter",
     "officer-ai-evaluation-report",
-    "officer-knowledge-pack-edit"
+    "officer-knowledge-pack-edit",
+    "officer-approve-estimate-letter"
   ],
   "e2e_screenshots": {
     "staff-login-open-case": [
@@ -221,6 +222,10 @@
     "officer-knowledge-pack-edit": [
       "officer-knowledge-pack-edit.png",
       "officer-knowledge-pack-saved.png"
+    ],
+    "officer-approve-estimate-letter": [
+      "officer-approve-estimate-letter.png",
+      "officer-approve-estimate-letter-sent.png"
     ]
   },
   "strictness": "block",

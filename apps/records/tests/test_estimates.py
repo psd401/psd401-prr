@@ -223,6 +223,19 @@ class FeeTests(_Fixture):
         for name in ("low", "expected", "high"):
             self.assertEqual(result["fee"][name]["files"], result["responsive"][name])
 
+    def test_withheld_records_count_as_responsive_but_are_not_billed(self):
+        self._schedule()
+        self._item(self.prr, RecordItem.ReviewState.WITHHELD)
+        self._history("responsive", RecordItem.ReviewState.RESPONSIVE, 3)
+        self._history("responsive", RecordItem.ReviewState.NON_RESPONSIVE, 3)
+        for _ in range(5):
+            self._item(self.prr, ai="responsive")
+
+        result = estimate_request(self.prr, actor=self.officer, as_of=AS_OF).result
+
+        for name in ("low", "expected", "high"):
+            self.assertEqual(result["fee"][name]["files"], result["responsive"][name] - 1)
+
     def test_flat_fee_and_waiver_floor_are_flagged(self):
         self._schedule()
         activate_fee_waiver_floor(

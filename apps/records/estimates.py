@@ -136,8 +136,9 @@ def _responsive_range(counts, rates) -> tuple[dict[str, Any], dict[str, dict[str
             scenarios[name] += group["records"] * fraction
             released[name]["records"] += group["records"] * fraction
             released[name]["bytes"] += group["records"] * fraction * mean_bytes
-    # Whole records, rounded once per scenario; the fee bills exactly these
-    # files, so the letter's count and its fee can never disagree.
+    # The unreviewed portion is rounded to whole records once per scenario and
+    # shared: the range adds it to every certain record, and the fee adds it
+    # to the released ones (withheld records are responsive but not billed).
     whole = {
         "low": math.floor(scenarios["low"] + 1e-9),
         "expected": int(Decimal(scenarios["expected"]).quantize(0, ROUND_HALF_UP)),

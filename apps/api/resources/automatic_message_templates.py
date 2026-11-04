@@ -226,6 +226,17 @@ def _sample_context():
             ]
         ),
         "fee_paragraph": fee_paragraph(),
+        "interpretation": (
+            "Emails about the capital project's bid, January through June 2026."
+        ),
+        "record_estimate": (
+            "The District expects about 40 responsive records (between 31 and 52)."
+        ),
+        "charge_paragraph": (
+            "The estimated copying charge is about $1.25, calculated under "
+            "RCW 42.56.120 from the District's adopted fee schedule."
+        ),
+        "completion_date": dt.date(2026, 10, 8),
         "scope_response_paragraph": SCOPE_RESPONSE_PARAGRAPHS["clarification"],
         "determination": "outside_retention",
         "retention_schedule_reference": "WA Local Government CORE, GS50-01A-11",

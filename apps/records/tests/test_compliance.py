@@ -825,6 +825,65 @@ class EstimateRevisionTests(TestCase):
             )
         )
 
+    def test_a_system_prepared_letter_is_drafted_never_sent(self):
+        """estimate-letter-ast-guard (#42).
+
+        The interpretation-and-estimate letter is the one requester letter the
+        system may draft without an author. Rule 6 holds only because the
+        drafting path can do nothing else: it calls no approval, queue, send,
+        state-change, or deposit function directly (the shared helpers it
+        reaches, _create_draft and _render_template_draft, are covered by the
+        system_prepared checks and the database constraint). A Records Officer's approve_and_send is
+        the only way it reaches a requester.
+        """
+        import ast
+        import inspect
+
+        from apps.records import estimate_letters
+
+        tree = ast.parse(
+            inspect.getsource(estimate_letters)
+            + inspect.getsource(tasks.prepare_estimate_letters)
+            + inspect.getsource(
+                correspondence_services.create_interpretation_estimate_draft
+            )
+        )
+        calls = {
+            (
+                node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else getattr(node.func, "id", "")
+            )
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+        }
+        self.assertTrue(
+            calls.isdisjoint(
+                {
+                    "approve_draft",
+                    "approve_and_send",
+                    "batch_approve_and_send",
+                    "queue_approved",
+                    "queue_automated_acknowledgment",
+                    "transition",
+                    "record_acknowledgment",
+                    "revise_estimate",
+                    "apply_deposit_gate",
+                    "create_fee_estimate_draft",
+                }
+            ),
+            calls,
+        )
+        self.assertEqual(
+            correspondence_services.SYSTEM_PREPARED_DRAFT_KINDS,
+            frozenset({Correspondence.Kind.INTERPRETATION_ESTIMATE}),
+        )
+        self.assertTrue(
+            correspondence_services.SYSTEM_PREPARED_DRAFT_KINDS.isdisjoint(
+                correspondence_services.AUTOMATED_CORRESPONDENCE_KINDS
+            )
+        )
+
     def test_a_case_title_cannot_reach_a_requester_a_status_or_vault(self):
         """case-title-ast-guard.
 

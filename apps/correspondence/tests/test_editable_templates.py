@@ -754,6 +754,16 @@ class ManagedTemplateFidelityTests(TestCase):
                 }
                 for deposit in ("$36.72", "")
             ]
+        if kind == Correspondence.Kind.INTERPRETATION_ESTIMATE:
+            return [
+                base
+                | {
+                    "interpretation": "Route 12 bus video, March 3, 3-4 p.m.",
+                    "record_estimate": "The District expects about 12 responsive records.",
+                    "charge_paragraph": "There is no copying charge for these records.",
+                    "completion_date": dt.date(2026, 11, 17),
+                }
+            ]
         if kind == Correspondence.Kind.THIRD_PARTY_NOTICE:
             return [
                 base

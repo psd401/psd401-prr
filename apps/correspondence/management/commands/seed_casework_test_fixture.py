@@ -45,6 +45,7 @@ from apps.records.models import (
     PublicRecordsRequest,
     RecordItem,
     RecordItemCustodian,
+    RecordsEstimate,
     RecordSystem,
     Requester,
     RequestStatus,
@@ -107,6 +108,12 @@ FIXTURE_SUPERSEDE_DESCRIPTION = (
     "2026."
 )
 FIXTURE_SUPERSEDE_RECORD_COUNT = 3
+#: A case whose interpretation-and-estimate letter the system has drafted
+#: (#42). Isolated so sending it changes no count another flow reads.
+FIXTURE_ESTIMATE_LETTER_REQUEST_NUMBER = "PRR-E2E-0010"
+FIXTURE_ESTIMATE_LETTER_INTENT = (
+    "Route 12 bus video from March 3, 2026, between 3 and 4 p.m."
+)
 #: Uploaded (not Vault-collected) mail on the same isolated case, from one
 #: sender domain, so the bulk-review-by-filter flow has a set to decide that
 #: superseding the Vault collection never touches.
@@ -959,6 +966,63 @@ def _seed_supersede_case(officer):
                 "email_sender_domain": FIXTURE_BULK_FILTER_DOMAIN,
             },
         )
+    return request
+
+
+def _seed_estimate_letter_case(officer):
+    """Seed a case with a system-prepared interpretation-and-estimate draft.
+
+    AI is off in acceptance runs, so the intent summary and the estimate are
+    written rather than computed; the draft itself goes through the real
+    drafting service, exactly as the hourly task would call it.
+    """
+    from apps.correspondence.services import create_interpretation_estimate_draft
+
+    requester, _ = Requester.objects.get_or_create(
+        email="bus-video@example.org",
+        defaults={"id": _fixture_uuid("estimate-letter-requester"), "name": "Bus Video Requester"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_ESTIMATE_LETTER_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("estimate-letter-request"),
+            "requester": requester,
+            "description": "Any bus video from route 12 on March 3, 2026.",
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    if not created:
+        return request
+    AdvisoryRun.objects.create(
+        kind=AdvisoryRun.Kind.REQUEST_INTENT,
+        request=request,
+        model_identifier="synthetic-intent-model",
+        input_sha256=hashlib.sha256(b"estimate-letter-intent").hexdigest(),
+        state=AdvisoryRun.State.COMPLETE,
+        requested_by=officer,
+        proposal={"summary": FIXTURE_ESTIMATE_LETTER_INTENT},
+    )
+
+    def fee(total, files):
+        return {"files": files, "lines": [], "total": total, "deposit": "0.00",
+                "flat_fee_available": False, "below_waiver_floor": False}
+
+    estimate = RecordsEstimate.objects.create(
+        request=request,
+        as_of=_BASE_TIME.date(),
+        inputs={"synthetic": True},
+        result={
+            "responsive": {"low": 2, "expected": 3, "high": 5,
+                           "reviewed_responsive": 1, "unreviewed": 4},
+            "fee": {"low": fee("0.10", 2), "expected": fee("0.15", 3), "high": fee("0.25", 5)},
+            "completion_date": (_BASE_TIME + timedelta(days=21)).date().isoformat(),
+            "notes": [],
+        },
+    )
+    create_interpretation_estimate_draft(request, estimate=estimate)
     return request
 
 
@@ -2529,6 +2593,7 @@ class Command(BaseCommand):
             supersede_request = _seed_supersede_case(officer)
             _seed_evaluation_run(officer, supersede_request)
             _seed_knowledge_pack()
+            _seed_estimate_letter_case(officer)
             _seed_email_intake_redirect_cases(officer, inbound_transport)
             _reconcile_fixture_inbound_work(request)
             _seed_role_work(

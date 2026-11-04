@@ -22,6 +22,11 @@ app.conf.beat_schedule = {
         "schedule": crontab(minute="*/5"),
         "kwargs": {"limit": 25},
     },
+    "prepare-estimate-letters": {
+        "task": "apps.records.tasks.prepare_estimate_letters",
+        "schedule": crontab(minute=15),  # hourly; drafts only, never sends
+        "kwargs": {"limit": 10},
+    },
     "build-pending-record-derivatives": {
         "task": "apps.records.tasks.build_pending_record_derivatives",
         "schedule": crontab(minute="*/10"),

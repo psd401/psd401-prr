@@ -40,9 +40,11 @@ and cited from code, tests, and ADRs; never renumber them.
    acknowledgment (`tasks.auto_acknowledge_safety_net`, in-app
    `AUTO_ACK_SAFETY_NET` switch) and the explicitly non-statutory submission
    receipt. Estimate revisions, `scope_clarification`, and external-response
-   attestations are human-only. Guards:
+   attestations are human-only. The interpretation-and-estimate letter may be
+   *drafted* by the system (`SYSTEM_PREPARED_DRAFT_KINDS`, never automated)
+   but only a Records Officer approves and sends it. Guards:
    `test_compliance.test_no_automated_path_exists`, `receipt-ast-guard`,
-   `scope-ast-guard`.
+   `scope-ast-guard`, `estimate-letter-ast-guard`.
 7. **Footage: auto-hold always, auto-deny never** — `apps/records/triage.py` holds
    every camera inside retention via `apps/integrations/avigilon/client.py`;
    outside retention a human completes the search and chooses the response. There
