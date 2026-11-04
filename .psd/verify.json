@@ -163,7 +163,9 @@
       "review-throughput-auto-reply-filter.png",
       "review-throughput-bulk-selection.png",
       "review-throughput-bulk-confirm.png",
-      "review-throughput-bulk-reviewed.png"
+      "review-throughput-bulk-reviewed.png",
+      "review-throughput-clusters.png",
+      "review-throughput-ai-agreement.png"
     ],
     "admin-district-settings": [
       "admin-district-settings.png",

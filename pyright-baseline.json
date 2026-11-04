@@ -1,6 +1,6 @@
 {
   "pyright": "1.1.414",
-  "total": 1826,
+  "total": 1829,
   "files": {
     "apps/api/access_tokens.py": 2,
     "apps/api/advisory.py": 1,
@@ -12,6 +12,7 @@
     "apps/api/oidc.py": 1,
     "apps/api/pagination.py": 11,
     "apps/api/permissions.py": 1,
+    "apps/api/resources/advisory_agreement.py": 1,
     "apps/api/resources/app_settings.py": 2,
     "apps/api/resources/audit.py": 1,
     "apps/api/resources/automatic_message_templates.py": 7,
@@ -26,7 +27,7 @@
     "apps/api/resources/jlarc.py": 17,
     "apps/api/resources/preservations.py": 2,
     "apps/api/resources/record_systems.py": 2,
-    "apps/api/resources/records_misc.py": 30,
+    "apps/api/resources/records_misc.py": 32,
     "apps/api/resources/requests.py": 24,
     "apps/api/resources/staff_users.py": 1,
     "apps/api/resources/work_items.py": 3,

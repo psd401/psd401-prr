@@ -10,6 +10,7 @@ import {
 import { useSearchParams } from 'react-router'
 import { api, unwrap, type Page } from '../api/client'
 import type { StaffRole } from '../api/auth'
+import { RecordClusters } from '../case/RecordClusters'
 import { RecordHandlingPanel } from '../case/RecordHandlingPanel'
 import {
   Badge,
@@ -251,6 +252,7 @@ const GROUP_OPTIONS = [
   { value: 'sender_domain', label: 'Group by sender domain' },
   { value: 'custodian', label: 'Group by custodian' },
   { value: 'confidence', label: 'Group by AI confidence' },
+  { value: 'cluster', label: 'Group by cluster' },
 ]
 
 const CONFIDENCE_OPTIONS = [
@@ -1477,7 +1479,16 @@ export function RecordItems({
       {list.isPending && <Spinner />}
       {list.isError && <ErrorNote error={list.error} />}
       {targetedItem.isError && <ErrorNote error={targetedItem.error} />}
-      {list.isSuccess && (
+      {activeGroup === 'cluster' && request !== '' && (
+        <RecordClusters
+          filters={filterParams()}
+          filterKey={filterKey}
+          clusterBy={searchParams.get('cluster_by') ?? 'thread'}
+          onClusterBy={(value) => updateListParams({ cluster_by: value })}
+          onOpen={(id) => updateListParams({ item: id })}
+        />
+      )}
+      {list.isSuccess && activeGroup !== 'cluster' && (
         <Card>
           {listRows.length === 0 ? (
             <EmptyState>No record items match these filters.</EmptyState>

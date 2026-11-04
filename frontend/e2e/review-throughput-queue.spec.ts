@@ -36,6 +36,21 @@ test('review-throughput-queue', async ({ page }) => {
     fullPage: false,
   })
 
+  // The same filtered set, grouped into clusters across every page (#38).
+  await page.getByLabel('Group by').selectOption('cluster')
+  await page.getByLabel('Cluster by').selectOption('sender')
+  const clusters = page.getByRole('list', { name: 'Record clusters' })
+  await expect(clusters.getByRole('heading', { name: 'psd401.net' })).toBeVisible()
+  await expect(clusters.getByText('3 records')).toBeVisible()
+  await expect(
+    clusters.getByRole('list', { name: 'Sample records in psd401.net' }).getByRole('button'),
+  ).toHaveCount(3)
+  await page.screenshot({
+    path: path.resolve('../.verification/review-throughput-clusters.png'),
+    fullPage: false,
+  })
+  await page.getByLabel('Group by').selectOption('')
+
   // One confirmation over the visible, explicitly selected set.
   await page.getByLabel('Select every record on this page').check()
   await expect(page.getByText('3 selected')).toBeVisible()
@@ -66,6 +81,16 @@ test('review-throughput-queue', async ({ page }) => {
 
   await page.screenshot({
     path: path.resolve('../.verification/review-throughput-bulk-reviewed.png'),
+    fullPage: false,
+  })
+
+  // Every decision is stored with the suggestion it was shown -- here none --
+  // so the case's agreement report counts them.
+  await page.goto(`/oversight/ai-agreement?case=${fixtureRequestNumber}`)
+  await expect(page.getByText(`Case ${fixtureRequestNumber}`)).toBeVisible()
+  await expect(page.getByText(/decided with no suggestion shown/)).toBeVisible()
+  await page.screenshot({
+    path: path.resolve('../.verification/review-throughput-ai-agreement.png'),
     fullPage: false,
   })
 })

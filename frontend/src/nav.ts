@@ -142,6 +142,11 @@ export const OVERSIGHT_NAV: NavItem[] = [
     path: '/oversight/ai-evaluation',
     roles: ['records_officer'],
   },
+  {
+    label: 'AI agreement',
+    path: '/oversight/ai-agreement',
+    roles: ['records_officer'],
+  },
 ]
 
 const ROUTE_ROLES = new Map<string, StaffRole[]>([

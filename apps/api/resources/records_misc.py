@@ -6,8 +6,6 @@ from typing import NoReturn
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
-from django.db.models.fields.json import KeyTextTransform
-from django.db.models.functions import Cast
 from django.http import HttpResponse, QueryDict
 from drf_spectacular.utils import extend_schema, extend_schema_field
 from rest_framework import filters, mixins, serializers, status, viewsets
@@ -23,6 +21,8 @@ from apps.records.advisory_ai import (
     request_record_redaction_advisory,
     request_record_responsiveness_advisory,
 )
+from apps.records.agreement import annotate_latest_suggestion
+from apps.records.clusters import cluster_records
 from apps.records.exemption_logs import generate_exemption_log
 from apps.records.fees import (
     activate_fee_schedule,
@@ -411,6 +411,38 @@ def _truthy_flag(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+#: Clusters returned at once; the rest are counted in ``cluster_count``.
+CLUSTER_LIMIT = 200
+
+
+class ClusterSampleSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    original_filename = serializers.CharField()
+    review_state = serializers.CharField()
+    advisory_suggested_state = serializers.CharField(allow_null=True)
+    advisory_confidence = serializers.FloatField(allow_null=True)
+
+
+class ClusterMajoritySerializer(serializers.Serializer):
+    label = serializers.CharField()
+    count = serializers.IntegerField()
+
+
+class RecordClusterSerializer(serializers.Serializer):
+    key = serializers.CharField(allow_blank=True)
+    label = serializers.CharField()
+    size = serializers.IntegerField()
+    ai_majority = ClusterMajoritySerializer(allow_null=True)
+    samples = ClusterSampleSerializer(many=True)
+    record_item_ids = serializers.ListField(child=serializers.UUIDField())
+
+
+class RecordClustersSerializer(serializers.Serializer):
+    group_by = serializers.CharField()
+    cluster_count = serializers.IntegerField()
+    clusters = RecordClusterSerializer(many=True)
+
+
 class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                          viewsets.GenericViewSet):
     serializer_class = RecordItemSerializer
@@ -425,6 +457,9 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         "bulk_review": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
         "bulk_selection": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
         "facets": {
+            StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER, StaffRole.ADMIN,
+        },
+        "clusters": {
             StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER, StaffRole.ADMIN,
         },
         "second_review": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
@@ -466,7 +501,9 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
 
     #: Actions that read the review filters rather than a primary key. Bulk
     #: review by filter resolves exactly the set the list shows.
-    FILTERED_ACTIONS = frozenset({"list", "facets", "bulk_selection", "bulk_review"})
+    FILTERED_ACTIONS = frozenset({
+        "list", "facets", "clusters", "bulk_selection", "bulk_review",
+    })
 
     def _filter_params(self):
         # A filter-mode bulk review carries the filters in its JSON body, so
@@ -481,37 +518,7 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         return context
 
     def _advisory_annotations(self, qs):
-        """Expose the latest completed responsiveness proposal for sorting.
-
-        Advisory only: this is the model's suggestion and its confidence, shown
-        so a reviewer can choose what to look at first. Nothing here changes
-        review state, and no filter on it applies a decision.
-        """
-        latest = AdvisoryRun.objects.filter(
-            record_item=models.OuterRef("pk"),
-            kind=AdvisoryRun.Kind.RECORD_RESPONSIVENESS,
-            state=AdvisoryRun.State.COMPLETE,
-        ).order_by("-created_at")
-        # advisory_ai._validate_proposal refuses to complete a responsiveness
-        # run whose confidence is not a finite number in [0, 1], which is what
-        # makes this cast safe: Postgres raises on a non-numeric cast, while
-        # SQLite would quietly return 0.0.
-        return qs.annotate(
-            advisory_suggested_state=models.Subquery(
-                latest.annotate(
-                    _value=KeyTextTransform("suggested_state", "proposal"),
-                ).values("_value")[:1],
-                output_field=models.CharField(),
-            ),
-            advisory_confidence=Cast(
-                models.Subquery(
-                    latest.annotate(
-                        _value=KeyTextTransform("confidence", "proposal"),
-                    ).values("_value")[:1],
-                ),
-                output_field=models.FloatField(),
-            ),
-        )
+        return annotate_latest_suggestion(qs)
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
@@ -691,13 +698,37 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             ),
         })
 
+    @extend_schema(responses=RecordClustersSerializer)
+    @action(detail=False, methods=["get"], url_path="clusters")
+    def clusters(self, request):
+        """Group the currently filtered records into clusters (#38).
+
+        A way to look at records, not a decision: each cluster reports its
+        size, a few samples, and the majority AI suggestion inside it.
+        """
+        grouping = request.query_params.get("group_by", "thread")
+        queryset = self.get_queryset()
+        try:
+            clusters = cluster_records(
+                queryset if isinstance(queryset, list) else queryset.order_by(),
+                grouping,
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"group_by": exc.messages}) from exc
+        return Response({
+            "group_by": grouping,
+            "cluster_count": len(clusters),
+            "clusters": clusters[:CLUSTER_LIMIT],
+        })
+
     @action(detail=False, methods=["post"], url_path="bulk-review")
     def bulk_review(self, request):
         """Record one human responsiveness decision over a selected set.
 
         A human decision about records the reviewer chose and could see. This
-        is not an accept-all of AI output: no advisory proposal is read, and
-        the model's recommendation changes nothing about what is written.
+        is not an accept-all of AI output: the model's recommendation changes
+        nothing about what is written. The suggestion each record showed is
+        only stored beside the decision so agreement can be measured (#38).
         Withholding and duplicate outcomes are deliberately unavailable here
         because each needs its own citation or judgement.
         """
