@@ -68,10 +68,9 @@ class PerKindModelTests(TestCase):
         )
 
     def test_a_blank_kind_setting_falls_back_to_the_shared_model(self):
-        self.assertEqual(
-            model_for_kind(AdvisoryRun.Kind.REQUEST_INTENT),
-            "us.amazon.nova-2-lite-v1:0",
-        )
+        for kind in AdvisoryRun.Kind.values:
+            with self.subTest(kind=kind):
+                self.assertEqual(model_for_kind(kind), "us.amazon.nova-2-lite-v1:0")
 
     @override_settings(PRR_AI_MODEL_INTENT="us.anthropic.claude-opus-5-5")
     def test_an_intent_run_records_the_intent_model(self):
@@ -161,3 +160,6 @@ class BedrockGrantMatchesDocumentedModelsTests(TestCase):
         for profile in granted:
             with self.subTest(profile=profile):
                 self.assertIn(f"`{profile}`", docs)
+        # And the reverse: the docs' allow-list names nothing the grant lacks.
+        documented = set(re.findall(r"^- `(us\.[^`]+)`$", docs, flags=re.MULTILINE))
+        self.assertEqual(documented, granted)

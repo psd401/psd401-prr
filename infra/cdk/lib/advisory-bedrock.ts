@@ -4,7 +4,6 @@
 import * as iam from "aws-cdk-lib/aws-iam";
 
 export const ADVISORY_BEDROCK_REGION = "us-west-2";
-export const ADVISORY_BEDROCK_MODEL_ID = "us.amazon.nova-2-lite-v1:0";
 
 /**
  * Every model the advisory settings may name. A model not listed here is an

@@ -583,6 +583,7 @@ class AdvisoryAITests(TestCase):
                 invoke_advisory_model(
                     AdvisoryRun.Kind.REQUEST_INTENT,
                     {"request_description": "Test request"},
+                    model_identifier="us.amazon.nova-2-lite-v1:0",
                 )
         self.assertEqual(raised.exception.code, "invalid_provider_response")
 
@@ -613,6 +614,7 @@ class AdvisoryAITests(TestCase):
             result = invoke_advisory_model(
                 AdvisoryRun.Kind.REQUEST_INTENT,
                 {"request_description": "Test request"},
+                model_identifier="us.amazon.nova-2-lite-v1:0",
                 attachment_blocks=[
                     {
                         "document": {
@@ -684,6 +686,7 @@ class AdvisoryAITests(TestCase):
             result = invoke_advisory_model(
                 AdvisoryRun.Kind.REQUEST_INTENT,
                 {"request_description": "Synthetic request"},
+                model_identifier="us.amazon.nova-2-lite-v1:0",
             )
 
         self.assertEqual(result, proposal)
@@ -705,6 +708,7 @@ class AdvisoryAITests(TestCase):
                 invoke_advisory_model(
                     AdvisoryRun.Kind.REQUEST_INTENT,
                     {"request_description": "Synthetic request"},
+                    model_identifier="us.amazon.nova-2-lite-v1:0",
                 )
 
         self.assertEqual(raised.exception.code, "invalid_provider_response")

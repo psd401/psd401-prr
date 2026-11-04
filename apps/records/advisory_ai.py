@@ -1245,7 +1245,7 @@ def invoke_advisory_model(
     payload: dict[str, Any],
     *,
     attachment_blocks: list[dict[str, Any]] | None = None,
-    model_identifier: str | None = None,
+    model_identifier: str,
 ) -> dict[str, Any]:
     """Call the district's keyless Amazon Bedrock runtime identity.
 
@@ -1265,7 +1265,7 @@ def invoke_advisory_model(
             ),
         )
         response = client.converse(
-            modelId=model_identifier or model_for_kind(kind),
+            modelId=model_identifier,
             system=[{"text": system_message}],
             messages=[
                 {
