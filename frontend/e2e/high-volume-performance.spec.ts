@@ -110,7 +110,7 @@ test('high-volume-performance', async ({ page }) => {
   summaryPayloads.push(firstTransportSummaryPage.bytes)
   const transportRows = page.getByRole('table').getByRole('row')
   await expect(transportRows).toHaveCount(51)
-  await expect(page.getByText('Showing 1–50 of 1998 messages')).toBeVisible()
+  await expect(page.getByText('Showing 1–50 of 1999 messages')).toBeVisible()
   const firstTransportPage = firstTransportSummaryPage.ids
   const secondTransportResponse = page.waitForResponse((response) => (
     new URL(response.url()).pathname === '/api/staff/correspondence/'
@@ -118,7 +118,7 @@ test('high-volume-performance', async ({ page }) => {
   await page.getByRole('button', { name: 'Load more messages' }).click()
   const secondTransportSummaryPage = await boundedPageEvidence(await secondTransportResponse)
   summaryPayloads.push(secondTransportSummaryPage.bytes)
-  await expect(page.getByText('Showing 51–100 of 1998 messages')).toBeVisible()
+  await expect(page.getByText('Showing 51–100 of 1999 messages')).toBeVisible()
   await expect(transportRows).toHaveCount(51)
   const secondTransportPage = secondTransportSummaryPage.ids
   expect(new Set([...firstTransportPage, ...secondTransportPage]).size).toBe(100)

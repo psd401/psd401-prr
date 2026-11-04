@@ -276,6 +276,22 @@ SETTINGS: tuple[SettingSpec, ...] = (
         requires=("PRR_AI_ADVISORY_ENABLED",),
     ),
     SettingSpec(
+        key="PRR_AI_AUTOMATIC_ESTIMATE_LETTER_ENABLED",
+        type=values.BOOLEAN,
+        default=False,
+        category=CATEGORY_ADVISORY_AI,
+        label="Draft interpretation-and-estimate letters automatically",
+        consequence=(
+            "On, once a public records case has a completed intent proposal "
+            "and every unreviewed record has an AI suggestion, the system "
+            "computes an estimate and drafts the interpretation-and-estimate "
+            "letter for a Records Officer. The draft is never approved or "
+            "sent by the system; an officer approves and sends it. Off, no "
+            "letter is drafted automatically."
+        ),
+        requires=("PRR_AI_ADVISORY_ENABLED",),
+    ),
+    SettingSpec(
         key="PRR_AI_AUTOMATIC_CASE_TITLES_ENABLED",
         type=values.BOOLEAN,
         default=False,

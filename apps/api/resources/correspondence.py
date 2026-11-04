@@ -787,6 +787,12 @@ class EstimateRevisionEditSerializer(StructuredEditSerializer):
     reason = serializers.CharField()
 
 
+class InterpretationEstimateEditSerializer(StructuredEditSerializer):
+    # Only the interpretation is editable; the count, charge, and date are
+    # the stored estimate's.
+    interpretation = serializers.CharField()
+
+
 class InstallmentEditSerializer(StructuredEditSerializer):
     is_final = serializers.BooleanField()
 
@@ -813,6 +819,10 @@ STRUCTURED_EDIT_CONTRACTS = {
     Correspondence.Kind.ESTIMATE_REVISION: (
         EstimateRevisionEditSerializer,
         ("new_date", "reason"),
+    ),
+    Correspondence.Kind.INTERPRETATION_ESTIMATE: (
+        InterpretationEstimateEditSerializer,
+        ("interpretation",),
     ),
     Correspondence.Kind.INSTALLMENT_NOTICE: (
         InstallmentEditSerializer,

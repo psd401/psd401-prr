@@ -484,11 +484,12 @@ class InboundWorkItemReconciliationTests(TestCase):
 class CaseworkFixtureWorkItemContractTests(TestCase):
     def test_every_eligible_receipt_in_two_thousand_message_fixture_has_one_item(self):
         call_command("seed_casework_test_fixture", stdout=StringIO())
-        # The 2000 on the primary case, plus the single retained email that
-        # opened PRR-E2E-0006 automatically.
+        # The 2000 on the primary case, the single retained email that
+        # opened PRR-E2E-0006 automatically, and the system-prepared
+        # interpretation-and-estimate draft on PRR-E2E-0010.
         self.assertEqual(
             Correspondence.objects.count(),
-            FIXTURE_MESSAGE_COUNT + 1,
+            FIXTURE_MESSAGE_COUNT + 2,
         )
         self.assertEqual(
             WorkItem.objects.filter(

@@ -258,6 +258,29 @@ nothing: a person revises the statutory estimate and approves any letter.
   case's own, on the WA business-day calendar. It covers review only. No
   measured throughput means no date, stated.
 
+## The interpretation-and-estimate letter
+
+With `PRR_AI_AUTOMATIC_ESTIMATE_LETTER_ENABLED` on (it requires advisory AI),
+an hourly task (`apps/records/estimate_letters.py`) finds open public records
+cases with a completed intent proposal, at least one record, and an AI
+suggestion on every unreviewed record. For each it computes an estimate and,
+if the estimate has a completion date, drafts the `interpretation_estimate`
+letter (template `interpretation_estimate/v1`, counsel review required): the
+intent summary as the District's interpretation, the expected responsive count
+and range, the copying charge from the adopted schedule (or a neutral sentence
+when none is adopted), and the completion date as the RCW 42.56.520 estimate.
+A case with a letter in any state but cancelled, or with an undated estimate
+computed today, is skipped.
+
+The draft is *system-prepared* and is never sent by the system. A Records
+Officer sees it on the case header (`requests.estimate_letter.read`) and
+sends it with **Approve and send** (`correspondence.approve_and_send`), or
+rewords the interpretation first under Messages; the count, charge, and date
+are the estimate's and are not edited there. Delivery records the date as an
+`EstimateRevision` revised by that officer and names the estimate. A deposit is
+still the existing officer action (`fee_deposit_gates.apply`); the requester's
+reply arrives as ordinary inbound mail.
+
 ## Bulk review is a human decision, not an accept-all
 
 The review queue lets a reviewer mark a whole filtered selection responsive or

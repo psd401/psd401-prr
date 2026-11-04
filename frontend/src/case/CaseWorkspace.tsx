@@ -21,6 +21,7 @@ import { TimeEntries } from '../pages/TimeEntries'
 import { Badge, Card, EmptyState, ErrorNote, Spinner } from '../ui'
 import { statusLabel, statusTone, TERMINAL_STATUSES } from '../caseStatus'
 import { CaseActivityFeed } from './CaseActivityFeed'
+import { EstimateLetterCard } from './EstimateLetterCard'
 import { RecordUploadPanel } from './RecordUploadPanel'
 
 
@@ -336,6 +337,7 @@ export function CaseWorkspace({ roles }: { roles: StaffRole[] }) {
   return (
     <>
       <CaseHeader summary={summary.data} roles={roles} />
+      {roles.includes('records_officer') && <EstimateLetterCard number={number} />}
       <nav aria-label="Case tabs" className="mb-5 overflow-x-auto border-b border-line">
         <div className="flex min-w-max gap-1">
           {visibleTabs.map((candidate) => (

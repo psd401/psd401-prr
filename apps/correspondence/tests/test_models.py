@@ -89,6 +89,7 @@ class CorrespondenceInvariantTests(CorrespondenceModelTestCase):
                 "clarification_response",
                 "delivery_status_notification",
                 "estimate_revision",
+                "interpretation_estimate",
                 "fee_estimate",
                 "installment_notice",
                 "no_records_closure",

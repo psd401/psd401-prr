@@ -29,7 +29,7 @@ from django.db.models import (
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast, Coalesce, Lower, NullIf
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema, extend_schema_field
+from drf_spectacular.utils import extend_schema, extend_schema_field, inline_serializer
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -101,6 +101,7 @@ from apps.records.models import (
     MatterKind,
     PublicRecordsRequest,
     RecordItem,
+    RecordsEstimate,
     Requester,
     RequestStatus,
     StaffIntakeSubmission,
@@ -1409,6 +1410,8 @@ class RequestsViewSet(
         "advisory_intent": {StaffRole.RECORDS_OFFICER},
         "advisory_intake": {StaffRole.RECORDS_OFFICER},
         "advisory_intake_feedback": {StaffRole.RECORDS_OFFICER},
+        # Sending it is approve_and_send, which is the officer's too.
+        "estimate_letter": {StaffRole.RECORDS_OFFICER},
         "vault_counts": {StaffRole.RECORDS_OFFICER},
         "vault_collection": {StaffRole.RECORDS_OFFICER},
         # Adding candidate records to a case is collection, which is the
@@ -2828,6 +2831,64 @@ class RequestsViewSet(
             AdvisoryRunSerializer(run).data,
             status=status.HTTP_202_ACCEPTED,
         )
+
+    @extend_schema(
+        responses={
+            200: inline_serializer(
+                "EstimateLetter",
+                fields={
+                    "correspondence": inline_serializer(
+                        "EstimateLetterDraft",
+                        allow_null=True,
+                        fields={
+                            "id": serializers.UUIDField(),
+                            "version": serializers.IntegerField(),
+                            "status": serializers.CharField(),
+                            "system_prepared": serializers.BooleanField(),
+                            "subject": serializers.CharField(),
+                            "body": serializers.CharField(),
+                        },
+                    ),
+                    "estimate": serializers.JSONField(allow_null=True),
+                },
+            )
+        }
+    )
+    @action(detail=True, methods=["get"], url_path="estimate-letter")
+    def estimate_letter(self, request, number=None):
+        """The interpretation-and-estimate letter awaiting approval (#42).
+
+        Read only. The case header shows it with an Approve and send button,
+        which calls the ordinary correspondence approve-and-send primitive.
+        """
+        prr = self.get_object()
+        draft = (
+            Correspondence.objects.filter(
+                request=prr,
+                kind=Correspondence.Kind.INTERPRETATION_ESTIMATE,
+                status=Correspondence.Status.DRAFT,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        estimate = None
+        if draft is not None:
+            row = RecordsEstimate.objects.filter(
+                pk=draft.draft_metadata.get("estimate_id"), request=prr,
+            ).first()
+            if row is not None:
+                estimate = {"id": str(row.pk), "as_of": row.as_of, **row.result}
+        return Response({
+            "correspondence": None if draft is None else {
+                "id": draft.pk,
+                "version": draft.version,
+                "status": draft.status,
+                "system_prepared": draft.system_prepared,
+                "subject": draft.draft_subject,
+                "body": draft.draft_body,
+            },
+            "estimate": estimate,
+        })
 
     @extend_schema(request=IntakeFeedbackSerializer, responses={201: None})
     @action(

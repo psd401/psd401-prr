@@ -55,9 +55,11 @@ import {
   type StatutoryResponse,
 } from '../statutory'
 
+// The interpretation-and-estimate letter is drafted by the system from a
+// computed estimate (#42), never composed here.
 type ComposeKind = Exclude<
   CorrespondenceKind,
-  'clarification_response' | 'delivery_status_notification'
+  'clarification_response' | 'delivery_status_notification' | 'interpretation_estimate'
 >
 
 interface ComposeOption {
@@ -1027,6 +1029,7 @@ interface EditState {
   clarificationDue: string
   newDate: string
   reason: string
+  interpretation: string
   isFinal: boolean
   scopeForm: ScopeClarificationForm
   matchCount: string
@@ -1073,6 +1076,9 @@ function editPayload(state: EditState) {
       new_date: state.newDate,
       reason: state.reason,
     }
+  }
+  if (state.item.kind === 'interpretation_estimate') {
+    return { ...base, interpretation: state.interpretation }
   }
   return {
     ...base,
@@ -1758,6 +1764,7 @@ export function CorrespondencePanel({
       clarificationDue: String(metadata.clarification_due ?? ''),
       newDate: String(metadata.new_date ?? ''),
       reason: String(metadata.reason ?? ''),
+      interpretation: String(metadata.interpretation ?? ''),
       isFinal: metadata.is_final === true,
       scopeForm: metadata.form === 'clarification'
         ? 'clarification'
@@ -2780,6 +2787,23 @@ export function CorrespondencePanel({
                   />
                 </Field>
               </>
+            )}
+            {edit.item.kind === 'interpretation_estimate' && (
+              <Field
+                label="How the District understands the request"
+                hint="The record count, charge, and date come from the computed estimate and are not edited here."
+              >
+                <Textarea
+                  rows={5}
+                  value={edit.interpretation}
+                  onChange={(event) =>
+                    setEdit((state) =>
+                      state ? { ...state, interpretation: event.target.value } : state,
+                    )
+                  }
+                  required
+                />
+              </Field>
             )}
             {edit.item.kind === 'installment_notice' && (
               <>

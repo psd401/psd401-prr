@@ -280,6 +280,7 @@ class CorrespondenceQuerySet(models.QuerySet):
                 RequestStatus.CLARIFICATION,
             },
             Correspondence.Kind.ESTIMATE_REVISION: {""},
+            Correspondence.Kind.INTERPRETATION_ESTIMATE: {""},
             Correspondence.Kind.DENIAL: {RequestStatus.DENIED},
             Correspondence.Kind.NO_RECORDS_CLOSURE: {
                 RequestStatus.CLOSED_NO_RECORDS
@@ -304,6 +305,9 @@ class CorrespondenceQuerySet(models.QuerySet):
             Correspondence.Kind.ESTIMATE_REVISION: (
                 StatusEvent.CorrespondenceEffect.ESTIMATE_REVISION_DELIVERY
             ),
+            Correspondence.Kind.INTERPRETATION_ESTIMATE: (
+                StatusEvent.CorrespondenceEffect.ESTIMATE_REVISION_DELIVERY
+            ),
             Correspondence.Kind.DENIAL: (
                 StatusEvent.CorrespondenceEffect.DENIAL_DELIVERY
             ),
@@ -321,6 +325,7 @@ class CorrespondenceQuerySet(models.QuerySet):
                 in {
                     Correspondence.Kind.ACKNOWLEDGMENT,
                     Correspondence.Kind.ESTIMATE_REVISION,
+                    Correspondence.Kind.INTERPRETATION_ESTIMATE,
                 }
             )
         )
@@ -563,6 +568,14 @@ class Correspondence(models.Model):
             "Delivery-status notification",
         )
         ESTIMATE_REVISION = "estimate_revision", "Estimate revision"
+        #: The interpretation-and-estimate letter (#42): what the District
+        #: understands the request to ask for, about how many records, the
+        #: copying charge, and when. The only kind a system-prepared draft
+        #: may have; a Records Officer still approves and sends it.
+        INTERPRETATION_ESTIMATE = (
+            "interpretation_estimate",
+            "Interpretation and estimate",
+        )
         #: RCW 42.56.120 copying-charge estimate, optionally carrying the
         #: deposit the District asks for before it does the gated work.
         FEE_ESTIMATE = "fee_estimate", "Fee estimate"
@@ -679,6 +692,10 @@ class Correspondence(models.Model):
     template_identifier = models.CharField(max_length=200, blank=True)
     template_version = models.CharField(max_length=100, blank=True)
     automated = models.BooleanField(default=False)
+    #: Drafted by the system with no author (``created_by`` is empty), for a
+    #: Records Officer to approve. Never sent by the system. See #42 and
+    #: ``services.create_interpretation_estimate_draft``.
+    system_prepared = models.BooleanField(default=False)
 
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -805,6 +822,21 @@ class Correspondence(models.Model):
                     )
                 ),
                 name="correspondence_automation_kind_allowed",
+            ),
+            # A system-prepared draft is written by the estimate engine, never
+            # sent by it: it is never ``automated`` and only one kind may be
+            # prepared this way. Approval still needs a named Records Officer
+            # (correspondence_approved_snapshot_complete).
+            models.CheckConstraint(
+                condition=(
+                    Q(system_prepared=False)
+                    | Q(
+                        automated=False,
+                        direction="outbound",
+                        kind="interpretation_estimate",
+                    )
+                ),
+                name="correspondence_system_prepared_kind_allowed",
             ),
             models.CheckConstraint(
                 condition=(
@@ -1040,6 +1072,10 @@ class AutomaticMessageTemplate(models.Model):
         SUBMISSION_RECEIPT = "submission_receipt", "Submission receipt"
         CLARIFICATION_REQUEST = "clarification_request", "Clarification request"
         ESTIMATE_REVISION = "estimate_revision", "Estimate revision"
+        INTERPRETATION_ESTIMATE = (
+            "interpretation_estimate",
+            "Interpretation and estimate",
+        )
         FEE_ESTIMATE = "fee_estimate", "Fee estimate"
         INSTALLMENT_NOTICE = "installment_notice", "Installment notice"
         NO_RECORDS_CLOSURE = (
