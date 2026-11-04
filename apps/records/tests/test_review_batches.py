@@ -152,6 +152,19 @@ class ClusterBatchTests(_Fixture):
             with self.subTest(judgments=judgments), self.assertRaises(ValidationError):
                 decide_batch(batch.pk, actor=self.reviewer, judgments=judgments)
 
+    def test_reopening_the_same_cluster_reuses_its_open_batch(self):
+        ids = [i.pk for i in self._items(5)]
+        first = create_cluster_batch(ids, state=R.NON_RESPONSIVE, actor=self.reviewer)
+        again = create_cluster_batch(list(reversed(ids)), state=R.NON_RESPONSIVE, actor=self.reviewer)
+        self.assertEqual(again.pk, first.pk)
+        self.assertEqual(again.sample_ids, first.sample_ids)
+        self.assertEqual(
+            AuditLog.objects.get(action="review.batch_reopened").detail["batch_id"], first.pk,
+        )
+        other_outcome = create_cluster_batch(ids, state=R.RESPONSIVE, actor=self.reviewer)
+        self.assertNotEqual(other_outcome.pk, first.pk)
+        self.assertEqual(ReviewBatch.objects.filter(outcome=ReviewBatch.Outcome.OPEN).count(), 2)
+
     def test_a_batch_is_decided_once(self):
         batch = create_cluster_batch([i.pk for i in self._items(3)], state=R.RESPONSIVE, actor=self.reviewer)
         judgments = dict.fromkeys(batch.sample_ids, R.RESPONSIVE)
@@ -179,7 +192,7 @@ class ClusterBatchTests(_Fixture):
             requester=self.prr.requester, description="Another synthetic request.",
         )
         stranger = self._item(prr=other_case)
-        with self.assertRaises(Exception):
+        with self.assertRaises(ValidationError):
             create_cluster_batch([i.pk for i in items], state=R.RESPONSIVE, actor=self.clerk)
         with self.assertRaises(ValidationError):
             create_cluster_batch([items[0].pk, stranger.pk], state=R.RESPONSIVE, actor=self.reviewer)
@@ -233,6 +246,14 @@ class DiscardBatchTests(_Fixture):
         self.assertEqual(
             AuditLog.objects.get(action="review.batch_decided").detail["elusion_responsive_found"], 0,
         )
+
+    def test_reopening_the_same_pile_reuses_its_open_batch(self):
+        self._pile()
+        first = create_discard_batch(self.prr, actor=self.reviewer)
+        self.assertEqual(create_discard_batch(self.prr, actor=self.reviewer).pk, first.pk)
+        # A pile that changed is a different batch.
+        self._item(ai="non_responsive", confidence=0.99)
+        self.assertNotEqual(create_discard_batch(self.prr, actor=self.reviewer).pk, first.pk)
 
     def test_one_responsive_find_in_the_elusion_sample_blocks_the_discard(self):
         self._pile()
@@ -293,6 +314,48 @@ class ApiTests(_Fixture):
         )
         self.assertEqual(decided.status_code, 200, decided.content)
         self.assertEqual(decided.json()["outcome"], "applied")
+
+    @override_settings(PRR_TRUST_NON_RESPONSIVE_MODE="auto")
+    def test_a_reviewer_opens_and_signs_off_the_discard_pile(self):
+        api = APIClient()
+        api.force_authenticate(self.reviewer)
+        self._items(5, ai="non_responsive", confidence=0.97)
+
+        opened = api.post(
+            "/api/staff/review-batches/discard/", {"request": self.prr.number}, format="json",
+        )
+        self.assertEqual(opened.status_code, 201, opened.content)
+        body = opened.json()
+        self.assertEqual(body["kind"], "discard")
+        self.assertEqual(len(body["samples"]), 4)
+
+        decided = api.post(
+            f"/api/staff/review-batches/{body['id']}/decide/",
+            {"judgments": {s["id"]: "non_responsive" for s in body["samples"]}},
+            format="json",
+        )
+        self.assertEqual(decided.status_code, 200, decided.content)
+        self.assertEqual(decided.json()["applied_count"], 5)
+
+    def test_a_token_caller_is_handed_off_and_decides_nothing(self):
+        from rest_framework.authtoken.models import Token
+
+        batch = create_cluster_batch(
+            [i.pk for i in self._items(3)], state=R.RESPONSIVE, actor=self.reviewer,
+        )
+        token = Token.objects.create(user=self.reviewer)
+        response = APIClient().post(
+            f"/api/staff/review-batches/{batch.pk}/decide/",
+            {"judgments": dict.fromkeys(batch.sample_ids, "responsive")},
+            format="json",
+            HTTP_AUTHORIZATION=f"Token {token.key}",
+        )
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(response.json()["code"], "human_approval_required")
+        self.assertEqual(response.json()["handoff"]["capability_id"], "review_batches.decide")
+        batch.refresh_from_db()
+        self.assertEqual(batch.outcome, ReviewBatch.Outcome.OPEN)
+        self.assertFalse(ReviewDecision.objects.exists())
 
     def test_an_intake_clerk_may_not(self):
         api = APIClient()
