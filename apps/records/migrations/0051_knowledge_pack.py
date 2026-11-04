@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('records', '0049_collection_supersession'),
+        ('records', '0050_intake_classification'),
     ]
 
     operations = [

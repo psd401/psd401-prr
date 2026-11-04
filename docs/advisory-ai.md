@@ -112,6 +112,40 @@ a completed `responsive` or `non_responsive` recommendation to reduce clerical
 work, but it never submits it. A named reviewer must still press the confirmation
 control; changing the selection always wins over a later model result.
 
+## Intake classification suggests; an officer decides
+
+When `PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED` is on, every new case
+(web form, email, or staff intake) gets an `intake_classification` run after
+its intake commits (`apps/records/advisory_ai.defer_automatic_intake_classification`).
+The model sees the request text, its first email subject, its channel and
+received date, and a bounded list of **earlier** cases of the **same matter
+kind**: the last 180 days (at most 120) plus the same requester's earlier cases
+(at most 20), each with its number, received date, a 300-character description
+excerpt, and whether the requester email matches. Those excerpts are other
+requesters' request text, which the 2026-11-03 model acceptance in
+`docs/phase-2-production-handoffs.md` covers, student content included. Only immutable fields are
+sent, so the input does not change while the run waits. Kinds never mix
+(AGENTS.md rule 13).
+
+It returns one label -- `new_request`, `follow_up`, `duplicate_of`,
+`related_to`, `non_request`, or `spam` -- with a confidence and the evidence it
+relied on. The three labels that point at a case must name one of the cases it
+was shown; an invented number fails the run. The proposal is never applied.
+
+The case Overview shows the label to Records Officers. **Correct** records the
+officer's agreement (`AdvisoryFeedback`, append-only, one per run) and opens
+the ordinary action prefilled: merge for a duplicate or follow-up, add to an
+existing case for a follow-up on an automatically opened email case, or close
+as non-request for a non-request or spam email case. The officer still reads
+and submits that action; agreement is recorded whether or not they do, and
+**Open the action** reopens it after a cancelled dialog. A label with no
+action (a new or related request, or a non-request label on a web-form case)
+shows no such button. **Not correct** records the label the officer judged
+it to be instead. Web-form cases have no non-request closure, so a
+`non_request` or `spam` label there is shown but has no one-click action.
+Every answer is audited (`advisory.feedback_recorded`) with the proposed and
+final label, which is the agreement data the evaluation work (#32) reads.
+
 ## Bulk review is a human decision, not an accept-all
 
 The review queue lets a reviewer mark a whole filtered selection responsive or

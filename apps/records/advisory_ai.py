@@ -129,6 +129,16 @@ _REQUEST_INTENT_OPTIONAL = frozenset({"short_title"})
 CASE_TITLE_MAX_LENGTH = 80
 
 _CASE_TITLE_SCHEMA_VERSION = 1
+_INTAKE_SCHEMA_VERSION = 1
+#: What an intake classification may say. The three that point at an earlier
+#: case must name one the model was shown; the rest must name none.
+INTAKE_LABELS_WITH_TARGET = frozenset({"follow_up", "duplicate_of", "related_to"})
+INTAKE_LABELS = INTAKE_LABELS_WITH_TARGET | {"new_request", "non_request", "spam"}
+#: How far back, and how many, earlier cases the classifier is shown.
+_INTAKE_LOOKBACK_DAYS = 180
+_INTAKE_MAX_CANDIDATES = 120
+_INTAKE_MAX_SAME_SENDER = 20
+_INTAKE_CANDIDATE_TEXT = 300
 
 #: How much of an inbound email's subject line the title proposal may read.
 #: Enough to carry what the message was about, short enough that a forwarded
@@ -196,6 +206,8 @@ def _automatic_kind_enabled(kind: str) -> bool:
         return runtime.get("PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED")
     if kind == AdvisoryRun.Kind.CASE_TITLE:
         return runtime.get("PRR_AI_AUTOMATIC_CASE_TITLES_ENABLED")
+    if kind == AdvisoryRun.Kind.INTAKE_CLASSIFICATION:
+        return runtime.get("PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED")
     return runtime.get("PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED")
 
 
@@ -206,6 +218,7 @@ _MODEL_SETTING_FOR_KIND: dict[str, str] = {
     AdvisoryRun.Kind.CASE_TITLE: "PRR_AI_MODEL_CASE_TITLE",
     AdvisoryRun.Kind.RECORD_RESPONSIVENESS: "PRR_AI_MODEL_RESPONSIVENESS",
     AdvisoryRun.Kind.RECORD_REDACTIONS: "PRR_AI_MODEL_REDACTION",
+    AdvisoryRun.Kind.INTAKE_CLASSIFICATION: "PRR_AI_MODEL_INTAKE",
 }
 
 #: The most output tokens one call of each kind may produce. Every reply is
@@ -216,6 +229,7 @@ MAX_OUTPUT_TOKENS: dict[str, int] = {
     AdvisoryRun.Kind.CASE_TITLE: 1000,
     AdvisoryRun.Kind.RECORD_RESPONSIVENESS: 1000,
     AdvisoryRun.Kind.RECORD_REDACTIONS: 4000,
+    AdvisoryRun.Kind.INTAKE_CLASSIFICATION: 1000,
 }
 
 
@@ -357,7 +371,6 @@ def _case_title_subject(request) -> str:
     return (subject or "").strip()[:_CASE_TITLE_SUBJECT_LIMIT]
 
 
-
 def _json_length(value: Any) -> int:
     return len(json.dumps(value))
 
@@ -442,8 +455,72 @@ def _request_intent_context(budget: int) -> tuple[list[dict[str, Any]], dict[str
     return systems, knowledge, truncated
 
 
+def _intake_candidates(request) -> list[dict[str, Any]]:
+    """Earlier cases of the same matter kind the new one might belong to.
+
+    Only cases received before this one, and only fields that do not change
+    after intake, so the input -- and its fingerprint -- stays the same while
+    the run waits in the queue and later cases arrive. Kinds never mix
+    (AGENTS.md rule 13): a litigation pull is never offered as the case a
+    public records request duplicates.
+    """
+    email = (request.requester.email or "").strip().lower()
+    earlier = PublicRecordsRequest.objects.filter(
+        matter_kind=request.matter_kind,
+        received_at__lt=request.received_at,
+    ).exclude(pk=request.pk)
+    recent = list(
+        earlier.filter(
+            received_at__gte=request.received_at
+            - dt.timedelta(days=_INTAKE_LOOKBACK_DAYS),
+        )
+        .select_related("requester")
+        .order_by("-received_at", "pk")[:_INTAKE_MAX_CANDIDATES]
+    )
+    same_sender = list(
+        earlier.filter(requester__email__iexact=email)
+        .select_related("requester")
+        .order_by("-received_at", "pk")[:_INTAKE_MAX_SAME_SENDER]
+    ) if email else []
+    seen = set()
+    rows = []
+    for case in sorted(
+        [*recent, *same_sender], key=lambda c: (c.received_at, c.number),
+        reverse=True,
+    ):
+        if case.pk in seen:
+            continue
+        seen.add(case.pk)
+        rows.append({
+            "number": case.number,
+            "received_date": _received_date(case).isoformat(),
+            "same_requester_email": bool(email)
+            and (case.requester.email or "").strip().lower() == email,
+            "description": case.description[:_INTAKE_CANDIDATE_TEXT],
+        })
+    return rows
+
+
 def _build_advisory_input(run: AdvisoryRun) -> _AdvisoryInput:
     limit = runtime.get("PRR_AI_MAX_INPUT_CHARACTERS")
+    if run.kind == AdvisoryRun.Kind.INTAKE_CLASSIFICATION:
+        request = run.request
+        description = request.description
+        payload = {
+            "kind": run.kind,
+            "advisory_schema_version": _INTAKE_SCHEMA_VERSION,
+            "request_description": description[:limit],
+            "request_email_subject": _case_title_subject(request),
+            "request_channel": request.channel,
+            "request_received_date": _received_date(request).isoformat(),
+            "candidate_cases": _intake_candidates(request),
+        }
+        return _AdvisoryInput(
+            payload=payload,
+            attachments=(),
+            fingerprint=payload,
+            truncated=len(description) > limit,
+        )
     if run.kind == AdvisoryRun.Kind.CASE_TITLE:
         # Text only, and only the request's own text. No attachments are read,
         # no record systems are offered, and nothing here can become a search
@@ -864,6 +941,90 @@ def _request_case_title_advisory(request_id, *, actor, trigger) -> AdvisoryRun:
     return _queue(provisional)
 
 
+def request_intake_classification(request_id, *, actor) -> AdvisoryRun:
+    _feature_enabled()
+    _require_actor(actor, records_officer_only=True)
+    return _request_intake_classification(
+        request_id, actor=actor, trigger=AdvisoryRun.Trigger.MANUAL
+    )
+
+
+def request_automatic_intake_classification(request_id) -> AdvisoryRun:
+    _feature_enabled()
+    if not runtime.get("PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED"):
+        raise ValidationError("Automatic intake classification is not enabled.")
+    return _request_intake_classification(
+        request_id, actor=None, trigger=AdvisoryRun.Trigger.AUTOMATIC
+    )
+
+
+def defer_automatic_intake_classification(request_id) -> bool:
+    """Classify a new case once its intake write has committed.
+
+    Like case titles, this reads only the request's text and earlier cases'
+    immutable fields, starts nothing, and changes nothing, so it does not wait
+    on attachment scanning. A failure is logged and the case simply has no
+    classification.
+    """
+    if not (
+        runtime.get("PRR_AI_ADVISORY_ENABLED")
+        and runtime.get("PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED")
+    ):
+        return False
+
+    def request_after_commit():
+        try:
+            request_automatic_intake_classification(request_id)
+        except Exception:
+            # Never log request or model content.
+            logger.exception(
+                "Automatic intake classification could not be queued",
+                extra={"request": str(request_id)},
+            )
+
+    transaction.on_commit(request_after_commit)
+    return True
+
+
+def _request_intake_classification(request_id, *, actor, trigger) -> AdvisoryRun:
+    with transaction.atomic():
+        request = (
+            PublicRecordsRequest.objects.select_for_update()
+            .select_related("requester")
+            .get(pk=request_id)
+        )
+        provisional = AdvisoryRun(
+            kind=AdvisoryRun.Kind.INTAKE_CLASSIFICATION,
+            request=request,
+            trigger=trigger,
+            requested_by=actor,
+            model_identifier=model_for_kind(AdvisoryRun.Kind.INTAKE_CLASSIFICATION),
+            input_sha256="",
+        )
+        advisory_input = _build_advisory_input(provisional)
+        provisional.input_sha256 = hashlib.sha256(
+            _canonical_json(advisory_input.fingerprint)
+        ).hexdigest()
+        provisional.input_truncated = advisory_input.truncated
+        existing = AdvisoryRun.objects.filter(
+            kind=provisional.kind,
+            request=request,
+            record_item__isnull=True,
+            model_identifier=provisional.model_identifier,
+            input_sha256=provisional.input_sha256,
+            state__in=[
+                AdvisoryRun.State.PENDING,
+                AdvisoryRun.State.RUNNING,
+                AdvisoryRun.State.COMPLETE,
+            ],
+        ).first()
+        if existing is not None:
+            return existing
+        provisional.full_clean()
+        provisional.save()
+    return _queue(provisional)
+
+
 def _request_record_advisory(
     record_item_id,
     *,
@@ -1131,9 +1292,44 @@ def _validate_proposal(
     proposal: Any,
     *,
     received_date: dt.date | None = None,
+    candidate_numbers: frozenset[str] | set[str] = frozenset(),
 ) -> dict[str, Any]:
     if not isinstance(proposal, dict):
         raise AdvisoryOutputInvalid("The model output must be an object.")
+    if kind == AdvisoryRun.Kind.INTAKE_CLASSIFICATION:
+        if set(proposal) != {"label", "target_case_number", "confidence", "evidence"}:
+            raise AdvisoryOutputInvalid(
+                "The intake classification has unexpected fields."
+            )
+        label = proposal["label"]
+        if not isinstance(label, str) or label not in INTAKE_LABELS:
+            raise AdvisoryOutputInvalid("The intake label is not one of the allowed labels.")
+        target = proposal["target_case_number"]
+        if label in INTAKE_LABELS_WITH_TARGET:
+            # Only a case the model was actually shown: an invented number
+            # must never reach an officer as a merge target.
+            if not isinstance(target, str) or target not in candidate_numbers:
+                raise AdvisoryOutputInvalid(
+                    "The intake label must name one of the cases supplied."
+                )
+        elif target is not None:
+            raise AdvisoryOutputInvalid("This intake label names no case.")
+        confidence = proposal["confidence"]
+        if (
+            isinstance(confidence, bool)
+            or not isinstance(confidence, (int, float))
+            or not math.isfinite(float(confidence))
+            or not 0 <= float(confidence) <= 1
+        ):
+            raise AdvisoryOutputInvalid("Confidence must be between zero and one.")
+        return {
+            "label": label,
+            "target_case_number": target,
+            "confidence": round(float(confidence), 4),
+            "evidence": _bounded_string(
+                proposal["evidence"], field="evidence", maximum=1000
+            ),
+        }
     if kind == AdvisoryRun.Kind.CASE_TITLE:
         # One key, one string, one bound. A title proposal has no room to
         # carry anything else, which is the point: there is nothing in it for
@@ -1255,7 +1451,29 @@ def _advisory_system_message(kind: str) -> str:
     Separate from the provider call so the instruction text is assertable
     without a Bedrock round trip.
     """
-    if kind == AdvisoryRun.Kind.CASE_TITLE:
+    if kind == AdvisoryRun.Kind.INTAKE_CLASSIFICATION:
+        output_contract = (
+            "Classify the new case for a person to confirm. Return exactly: "
+            f"label (one of {sorted(INTAKE_LABELS)}), target_case_number "
+            "(string or null), confidence (number from 0 to 1), and evidence "
+            "(string, at most 1000 characters, naming the facts you relied "
+            "on). new_request: a records request not already being handled. "
+            "follow_up: the requester writing again about one of the "
+            "candidate_cases (a question, an addition, a status check). "
+            "duplicate_of: substantially the same request as a candidate "
+            "case, usually from the same requester. related_to: a separate "
+            "request about the same subject as a candidate case, often from a "
+            "different requester. non_request: correspondence that asks for "
+            "no records (a complaint, a general question, a notice, a "
+            "vendor pitch). spam: unsolicited bulk or automated mail. "
+            "For follow_up, duplicate_of, and related_to, target_case_number "
+            "must be the number of one of the supplied candidate_cases; for "
+            "every other label it must be null. Never invent a case number. "
+            "Do not judge the merits of the request, its requester, or any "
+            "legal outcome; a request that is broad, hostile, or repeated is "
+            "still a request."
+        )
+    elif kind == AdvisoryRun.Kind.CASE_TITLE:
         output_contract = (
             "Return exactly: title (string). "
             f"title is at most {CASE_TITLE_MAX_LENGTH} characters: a neutral "
@@ -1548,6 +1766,10 @@ def execute_advisory_run(run_id) -> None:
                 run.kind,
                 raw_proposal,
                 received_date=_received_date(run.request),
+                candidate_numbers={
+                    row["number"]
+                    for row in advisory_input.payload.get("candidate_cases", ())
+                },
             )
     except AdvisorySourceChanged:
         _fail_run(run.pk, code="source_changed")

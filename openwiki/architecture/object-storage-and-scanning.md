@@ -108,7 +108,10 @@ released ([installments and release](../domain/installments-and-release.md)).
 Focused tests: `apps/records/tests/test_record_storage.py` (generated keys and verified
 reads), `apps/records/tests/test_storage_prefix_grants.py` (prefix grants),
 `apps/records/tests/test_intake_attachments.py` (file signatures, archive limits, and
-scan outcomes), and `apps/api/tests/test_record_uploads.py` (upload scanning and refusal).
+scan outcomes), `apps/correspondence/tests/test_secure_file_pipeline.py` (the generic
+secure-file classes, the intake-attachment compatibility layer, and the correspondence
+attachment scan task, including a simulated worker loss before the promotion barrier), and
+`apps/api/tests/test_record_uploads.py` (upload scanning and refusal).
 
 Minimal validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_record_storage apps.records.tests.test_intake_attachments --settings=config.test_settings`.
 Run the MinIO-backed suites only when a change touches the object-store contract itself,

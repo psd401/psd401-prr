@@ -484,6 +484,43 @@ CAPABILITIES = (
         ],
     ),
     _capability(
+        "requests.advisory_intake.read",
+        "Read the latest suggested intake label (new, follow-up, duplicate, "
+        "related, non-request, spam) and whether an officer answered it.",
+        "GET",
+        "/api/staff/requests/{number}/advisory-intake/",
+        ["/requests/:number/overview"],
+        constraints=["advisory_only"],
+    ),
+    _capability(
+        "requests.advisory_intake.request",
+        "Queue a model's suggested intake label for this case; it merges, "
+        "closes, and sends nothing.",
+        "POST",
+        "/api/staff/requests/{number}/advisory-intake/",
+        ["/requests/:number/overview"],
+        risk="high",
+        constraints=[
+            "accountable_human_actor",
+            "approved_ai_provider",
+            "prompt_injection_resistant",
+            "advisory_only",
+            "external_side_effects",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
+        "requests.advisory_intake.feedback",
+        "Record whether the officer confirmed or dismissed the suggested "
+        "intake label, and what they judged it to be.",
+        "POST",
+        "/api/staff/requests/{number}/advisory-intake/feedback/",
+        ["/requests/:number/overview"],
+        execution="human_confirmation",
+        risk="moderate",
+        constraints=["accountable_human_actor", "append_only_audit"],
+    ),
+    _capability(
         "requests.vault_counts.read",
         "Read the latest human-scoped Google Vault Gmail count and its provenance.",
         "GET",
