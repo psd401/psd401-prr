@@ -194,6 +194,32 @@ def _automatic_kind_enabled(kind: str) -> bool:
     return runtime.get("PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED")
 
 
+#: Each advisory kind's in-app model setting. A blank one falls back to the
+#: shared PRR_AI_MODEL, so the district can move one kind at a time.
+_MODEL_SETTING_FOR_KIND: dict[str, str] = {
+    AdvisoryRun.Kind.REQUEST_INTENT: "PRR_AI_MODEL_INTENT",
+    AdvisoryRun.Kind.CASE_TITLE: "PRR_AI_MODEL_CASE_TITLE",
+    AdvisoryRun.Kind.RECORD_RESPONSIVENESS: "PRR_AI_MODEL_RESPONSIVENESS",
+    AdvisoryRun.Kind.RECORD_REDACTIONS: "PRR_AI_MODEL_REDACTION",
+}
+
+#: The most output tokens one call of each kind may produce. Every reply is
+#: still bounded by PRR_AI_MAX_RESPONSE_BYTES and validated against its
+#: schema; this only gives room for the answer the schema asks for.
+MAX_OUTPUT_TOKENS: dict[str, int] = {
+    AdvisoryRun.Kind.REQUEST_INTENT: 2000,
+    AdvisoryRun.Kind.CASE_TITLE: 1000,
+    AdvisoryRun.Kind.RECORD_RESPONSIVENESS: 1000,
+    AdvisoryRun.Kind.RECORD_REDACTIONS: 4000,
+}
+
+
+def model_for_kind(kind: str) -> str:
+    """The Bedrock model a new run of ``kind`` is asked of and recorded with."""
+    setting = _MODEL_SETTING_FOR_KIND.get(kind)
+    return (runtime.get(setting) if setting else "") or runtime.get("PRR_AI_MODEL")
+
+
 def _feature_enabled() -> None:
     """Enabled *and* pointed at an approved model.
 
@@ -624,7 +650,7 @@ def _request_request_intent_advisory(request_id, *, actor, trigger) -> AdvisoryR
             request=request,
             trigger=trigger,
             requested_by=actor,
-            model_identifier=runtime.get("PRR_AI_MODEL"),
+            model_identifier=model_for_kind(AdvisoryRun.Kind.REQUEST_INTENT),
             input_sha256="",
         )
         advisory_input = _build_advisory_input(provisional)
@@ -717,7 +743,7 @@ def _request_case_title_advisory(request_id, *, actor, trigger) -> AdvisoryRun:
             request=request,
             trigger=trigger,
             requested_by=actor,
-            model_identifier=runtime.get("PRR_AI_MODEL"),
+            model_identifier=model_for_kind(AdvisoryRun.Kind.CASE_TITLE),
             input_sha256="",
         )
         advisory_input = _build_advisory_input(provisional)
@@ -767,7 +793,7 @@ def _request_record_advisory(
             record_item=item,
             trigger=trigger,
             requested_by=actor,
-            model_identifier=runtime.get("PRR_AI_MODEL"),
+            model_identifier=model_for_kind(kind),
             input_sha256="",
         )
         advisory_input = _build_advisory_input(provisional)
@@ -1219,8 +1245,13 @@ def invoke_advisory_model(
     payload: dict[str, Any],
     *,
     attachment_blocks: list[dict[str, Any]] | None = None,
+    model_identifier: str,
 ) -> dict[str, Any]:
-    """Call the district's keyless Amazon Bedrock runtime identity."""
+    """Call the district's keyless Amazon Bedrock runtime identity.
+
+    A run passes the model it recorded, so the call is made with exactly the
+    model the run says it used even if the setting changed in between.
+    """
     _feature_enabled()
     system_message = _advisory_system_message(kind)
     try:
@@ -1234,7 +1265,7 @@ def invoke_advisory_model(
             ),
         )
         response = client.converse(
-            modelId=runtime.get("PRR_AI_MODEL"),
+            modelId=model_identifier,
             system=[{"text": system_message}],
             messages=[
                 {
@@ -1246,11 +1277,7 @@ def invoke_advisory_model(
                 },
             ],
             inferenceConfig={
-                "maxTokens": (
-                    4000
-                    if kind == AdvisoryRun.Kind.RECORD_REDACTIONS
-                    else 1000
-                ),
+                "maxTokens": MAX_OUTPUT_TOKENS.get(kind, 1000),
                 "temperature": 0,
             },
             requestMetadata={
@@ -1413,6 +1440,7 @@ def execute_advisory_run(run_id) -> None:
                 run.kind,
                 advisory_input.payload,
                 attachment_blocks=attachment_blocks,
+                model_identifier=run.model_identifier,
             )
             proposal = _validate_proposal(
                 run.kind,

@@ -246,6 +246,7 @@ def generate_redaction_proposals(
                             {"id": span.id, "text": span.text} for span in chunk
                         ],
                     },
+                    model_identifier=run.model_identifier,
                 )
                 grounded.extend(
                     _validate_candidates(
