@@ -70,7 +70,7 @@ jobs:
           overwrite: true
           path: |
             .verification/*.png
-            .verification/axe-report.json
+            .verification/axe-report*.json
             .verification/playwright-results.json
             .verification/playwright-results
             .verification/playwright-report

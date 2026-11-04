@@ -197,18 +197,18 @@ export function Correspondence({ roles }: { roles: StaffRole[] }) {
                 {Object.entries(operations.data.counts).map(([label, count]) => (
                   <div
                     key={label}
-                    className="rounded-md border border-driftwood/60 bg-skylight p-3"
+                    className="rounded-md border border-line bg-surface-sunken p-3"
                   >
-                    <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+                    <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                       {operationCountLabel(label)}
                     </p>
-                    <p className="mt-1 font-heading text-2xl font-bold text-pacific">
+                    <p className="mt-1 font-heading text-2xl font-bold text-ink">
                       {count}
                     </p>
                   </div>
                 ))}
               </div>
-              <div className="flex flex-wrap gap-4 font-heading text-sm font-bold text-pacific">
+              <div className="flex flex-wrap gap-4 font-heading text-sm font-bold text-ink">
                 <span>
                   Oldest delivery: {
                     durationLabel(operations.data.ages_seconds.oldest_delivery)
@@ -226,11 +226,11 @@ export function Correspondence({ roles }: { roles: StaffRole[] }) {
                 </span>
               </div>
               <div>
-                <p className="mb-2 font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+                <p className="mb-2 font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                   Sanitized failure categories
                 </p>
                 {Object.keys(operations.data.failure_categories).length === 0
-                  ? <p className="text-sm text-pacific/80">No current failures.</p>
+                  ? <p className="text-sm text-ink-muted">No current failures.</p>
                   : (
                       <div className="flex flex-wrap gap-2">
                         {Object.entries(operations.data.failure_categories).map(
@@ -246,9 +246,9 @@ export function Correspondence({ roles }: { roles: StaffRole[] }) {
             </div>
           )}
           {readiness.data && (
-            <div className="mt-4 border-t border-driftwood/40 pt-4">
+            <div className="mt-4 border-t border-line pt-4">
               <div className="mb-3 flex items-center gap-2">
-                <span className="font-heading text-sm font-bold text-pacific">
+                <span className="font-heading text-sm font-bold text-ink">
                   Delivery readiness
                 </span>
                 <Badge tone={readiness.data.ready ? 'green' : 'red'}>
@@ -259,7 +259,7 @@ export function Correspondence({ roles }: { roles: StaffRole[] }) {
                 {readiness.data.checks.map((check) => (
                   <span
                     key={check.component}
-                    className="inline-flex items-center gap-2 rounded-md border border-driftwood/60 px-2.5 py-1.5 text-sm"
+                    className="inline-flex items-center gap-2 rounded-md border border-line px-2.5 py-1.5 text-sm"
                   >
                     {componentLabel(check.component)}
                     <Badge tone={check.status === 'ready' ? 'green' : 'red'}>
@@ -301,7 +301,7 @@ export function Correspondence({ roles }: { roles: StaffRole[] }) {
                       cell: (item: CorrespondenceSummary) => (
                         <Link
                           to={`/requests/${item.request_number}/messages?message=${item.id}`}
-                          className="font-heading font-bold text-whulge underline-offset-2 hover:underline"
+                          className="font-heading font-bold text-accent underline-offset-2 hover:underline"
                         >
                           {item.request_number}
                         </Link>
@@ -329,7 +329,7 @@ export function Correspondence({ roles }: { roles: StaffRole[] }) {
                             {CORRESPONDENCE_STATUS_LABELS[item.status] ?? item.status}
                           </Badge>
                           {item.delivery_status && (
-                            <p className="text-xs text-pacific/80">
+                            <p className="text-xs text-ink-muted">
                               {DELIVERY_STATUS_LABELS[item.delivery_status]
                                 ?? item.delivery_status}
                             </p>
@@ -352,7 +352,7 @@ export function Correspondence({ roles }: { roles: StaffRole[] }) {
                   rowKey={(item) => item.id}
                 />
                 <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <span className="text-sm text-pacific/80">
+                  <span className="text-sm text-ink-muted">
                     Showing {shownFrom}–{shownThrough} of {listTotal} messages
                   </span>
                   {boundedPage > 0 && (

@@ -7,13 +7,14 @@ openwiki:
   roles: [domain, workflow]
   change_kinds: [review-workflow, rendering, handling-paths]
   source_paths: [apps/records/handling.py, apps/records/derivatives.py, apps/records/preview.py, apps/records/review.py, apps/records/opaque_review.py, apps/records/media_review.py]
-  symbols: [handling_for, handling_for_item, build_derivative, review_record, approve_second_review, render_redacted_record, record_opaque_disposition, create_media_redaction, render_media_redactions]
-  test_paths: [apps/records/tests/test_handling.py, apps/records/tests/test_derivatives.py, apps/records/tests/test_record_review.py, apps/records/tests/test_media_and_opaque_review.py, apps/api/tests/test_records_misc.py]
+  symbols: [handling_for, handling_for_item, build_derivative, review_record, bulk_review_records, bulk_review_selection, bulk_review_confirmed_selection, approve_second_review, render_redacted_record, record_opaque_disposition, create_media_redaction, render_media_redactions]
+  test_paths: [apps/records/tests/test_handling.py, apps/records/tests/test_derivatives.py, apps/records/tests/test_record_review.py, apps/records/tests/test_media_and_opaque_review.py, apps/api/tests/test_records_misc.py, apps/api/tests/test_bulk_review_by_filter.py]
   invariants:
     - A record's original bytes are never replaced; a reading copy or redacted copy is always a new derived object.
     - A record that cannot be rendered is never marked reviewed by default; a named human records a basis and reasoning.
     - Every redaction cites an exemption, and a second-review exemption needs a distinct second reviewer before burn-in.
-  validation_commands: ["PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_handling apps.records.tests.test_derivatives --settings=config.test_settings"]
+    - A filter-driven bulk decision writes only the exact set the reviewer confirmed (same count and digest), or it writes nothing.
+  validation_commands: ["PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_handling apps.records.tests.test_derivatives --settings=config.test_settings", "PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_bulk_review_by_filter --settings=config.test_settings"]
 ---
 
 # Record Review, Handling, and Derivatives
@@ -92,10 +93,12 @@ verified PDF for the converted or original copy.
 `apps/records/review.py` owns the reviewer's decisions:
 
 - `review_record` and `bulk_review_records` set a `RecordItem` review state. `_require_reviewer`
-  gates the actor. `bulk_review_records` refuses records in the `superseded` state, which a
+  gates the actor. `bulk_review_records` takes an explicit list of record IDs, capped at
+  `BULK_REVIEW_MAX_ITEMS` (200). It refuses records in the `superseded` state, which a
   Records Officer sets when an over-broad collection is re-scoped. Those records are decided
   one at a time through `review_record`. See
   [collection and Vault](collection-and-vault.md#superseding-an-over-broad-collection).
+  Filter-driven decisions over larger sets use the preview-then-confirm flow below.
 - `create_redaction` and `void_redaction` add or void a `Redaction`. Every redaction requires
   an `ExemptionCitation`; a voided redaction keeps its row.
 - `approve_second_review` records the second decision. `RecordItem.second_review_required`
@@ -113,6 +116,68 @@ Invariants that tests enforce:
   in `apps/records/tests/test_record_review.py`.
 - Review and redaction evidence is read-only in the admin
   (`test_review_and_production_evidence_is_read_only_in_admin` in `test_feature_audit_regressions.py`).
+
+## Bulk decisions over a filter
+
+A reviewer can record one responsiveness outcome (`responsive` or `non_responsive`) for every
+record a filter matches, not only for an explicit ID list. Filter mode is a two-step
+preview-then-confirm flow, because the decision is written to every matching record at once.
+The staff record-items screen (`frontend/src/pages/RecordItems.tsx`) fetches the preview and sends the confirmation.
+
+- `GET /api/staff/record-items/bulk-selection/` (`RecordItemViewSet.bulk_selection`) runs
+  `bulk_review_selection`. It returns the matching count, the `eligible_count` a decision
+  would change, the `excluded` breakdown, and a `selection_sha256` digest of the eligible IDs.
+  Its `max_items` field reports `BULK_REVIEW_FILTER_MAX_ITEMS` (10,000).
+- `POST /api/staff/record-items/bulk-review/` with a `filter`, `state`, `expected_count`, and
+  `selection_sha256` runs `bulk_review_confirmed_selection`. It locks the matched rows with
+  `select_for_update`, re-splits them, and refuses the write with HTTP 409 and code
+  `selection_changed` unless the count and digest still match what the reviewer saw.
+- A request body sends either `record_item_ids` or `filter`, never both. A filter must name
+  exactly one request (`request`), and only the keys in `BULK_FILTER_KEYS` are accepted.
+
+Skipped records are counted, never overturned. A decision never changes a record that is
+`withheld`, `duplicate`, or `superseded`, and a record already in the requested state is
+counted as `already`. A non-responsive decision also skips a record with an active redaction
+(`redacted`), because that redaction must be voided on purpose. Each changed record gets its
+own `record.reviewed` audit row, and one `record.bulk_reviewed` row records the filter. Search
+text is stored only as `search_sha256`.
+
+The capability catalog marks `record_items.bulk_review` as `human_confirmation`, so a
+token caller gets a human handoff rather than a write. The check runs before any selection
+is computed (see [agent parity](../architecture/agent-parity.md)). The audit row is described
+in [compliance](compliance.md).
+
+```mermaid
+sequenceDiagram
+    participant R as Reviewer in staff app
+    participant API as RecordItemViewSet
+    participant S as review service
+    R->>API: GET bulk-selection with filter and state
+    API->>S: bulk_review_selection over matching IDs
+    S-->>API: matching, eligible_count, excluded, selection_sha256
+    API-->>R: counts and digest
+    R->>API: POST bulk-review with filter, expected_count, selection_sha256
+    API->>API: human_only_handoff refuses token callers
+    API->>S: bulk_review_confirmed_selection
+    S->>S: lock rows and re-split
+    alt count or digest changed
+        S-->>API: BulkSelectionChanged
+        API-->>R: 409 selection_changed, nothing written
+    else confirmed set matches
+        S-->>API: reviewed count, one audit row per record and one bulk row
+        API-->>R: reviewed_count and review_state
+    end
+```
+
+Caption: the preview-then-confirm flow for a filter decision; the write happens only when the
+confirmed count and digest still match.
+
+Focused tests in `apps/api/tests/test_bulk_review_by_filter.py`, including
+`test_every_matching_record_is_decided_beyond_the_explicit_cap`,
+`test_a_changed_set_is_refused_and_nothing_is_written`,
+`test_records_needing_their_own_judgement_are_skipped_and_counted`,
+`test_a_token_caller_is_handed_off_for_a_filter_decision`, and
+`test_too_many_matching_records_are_refused_before_any_lock`.
 
 ## Opaque record dispositions
 

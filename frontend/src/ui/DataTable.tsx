@@ -114,16 +114,16 @@ export function DataTable<T extends RowData>({
     // `relative` makes this scroller the containing block for absolutely
     // positioned cell content (`sr-only` text). Without it that content
     // escapes the horizontal clip and widens the whole page on a phone.
-    <div className="relative overflow-x-auto rounded-lg border border-driftwood/60">
+    <div className="nx-table-wrap relative overflow-x-auto">
       <table
         aria-label={label}
-        className={`w-full border-collapse bg-white text-sm ${fits ? '' : 'min-w-max'}`}
+        className={`nx-table ${fits ? '' : 'min-w-max'}`}
       >
         <thead>
           {table.getHeaderGroups().map((headerGroup) => (
             <tr
               key={headerGroup.id}
-              className="border-b border-driftwood bg-skylight text-left"
+              className="text-left"
             >
               {headerGroup.headers.map((header) => {
                 const column = byId.get(header.column.id)
@@ -147,26 +147,26 @@ export function DataTable<T extends RowData>({
                           : 'none'
                         : undefined
                     }
-                    className={`${fits ? 'px-2.5' : 'px-3'} py-2.5 font-heading text-xs font-semibold uppercase tracking-[0.07em] text-pacific/80 ${column.align === 'right' ? 'text-right' : ''} ${fits && !column.grow ? 'whitespace-nowrap' : ''} ${column.grow ? 'w-full min-w-[12rem]' : ''}`}
+                    className={`${fits ? 'px-2.5' : 'px-3'} py-2.5 ${column.align === 'right' ? 'text-right' : ''} ${fits && !column.grow ? 'whitespace-nowrap' : ''} ${column.grow ? 'w-full min-w-[12rem]' : ''}`}
                   >
                     {sortable ? (
                       <button
                         type="button"
                         onClick={() => onSort(column.id)}
                         className={
-                          'inline-flex items-center gap-1 rounded font-heading text-xs font-semibold '
-                          + 'uppercase tracking-[0.07em] focus-visible:outline-2 '
-                          + 'focus-visible:outline-offset-2 focus-visible:outline-whulge '
+                          'inline-flex items-center gap-1 rounded font-semibold '
+                          + 'focus-visible:outline-2 '
+                          + 'focus-visible:outline-offset-2 focus-visible:outline-focus '
                           + (sorted
-                            ? 'text-pacific underline'
-                            : 'text-pacific/80 hover:text-pacific hover:underline')
+                            ? 'text-ink underline'
+                            : 'text-ink-muted hover:text-ink hover:underline')
                         }
                       >
                         {column.headerCell ?? column.header}
                         {/* Decoration. `aria-sort` carries the state to
                             assistive technology and the underline carries it
                             without relying on colour. */}
-                        <span aria-hidden="true" className="text-[0.7rem]">
+                        <span aria-hidden="true" className="text-xs">
                           {sorted === 'asc' ? '▲' : sorted === 'desc' ? '▼' : '↕'}
                         </span>
                       </button>
@@ -206,18 +206,17 @@ export function DataTable<T extends RowData>({
                 tabIndex={onRowActivate ? 0 : undefined}
                 aria-label={onRowActivate ? rowLabel?.(row) : undefined}
                 className={
-                  'border-b border-seafoam last:border-0 '
-                  + (emphasised ? 'bg-skylight ' : '')
+                  (emphasised ? 'bg-surface-selected ' : '')
                   + (onRowActivate
-                    ? 'cursor-pointer hover:bg-seaglass/10 focus-visible:outline-2 '
-                      + 'focus-visible:-outline-offset-2 focus-visible:outline-whulge'
+                    ? 'cursor-pointer focus-visible:outline-2 '
+                      + 'focus-visible:-outline-offset-2 focus-visible:outline-focus'
                     : '')
                 }
               >
                 {columns.map((column) => (
                   <td
                     key={column.id}
-                    className={`${fits ? 'px-2.5' : 'px-3'} py-3 text-pacific ${column.align === 'right' ? 'text-right' : ''} ${fits ? 'align-top' : ''} ${column.grow ? 'w-full min-w-[12rem]' : ''}`}
+                    className={`${fits ? 'px-2.5' : 'px-3'} py-3 ${column.align === 'right' ? 'text-right' : ''} ${fits ? 'align-top' : ''} ${column.grow ? 'w-full min-w-[12rem]' : ''}`}
                   >
                     {column.cell(row)}
                   </td>

@@ -14,11 +14,11 @@ function SectionLinks({ items }: { items: NavItem[] }) {
         <li key={item.path}>
           <Link
             to={item.path}
-            className="block h-full rounded-xl border border-driftwood/60 bg-white p-5 shadow-sm transition hover:border-seaglass hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-whulge"
+            className="block h-full rounded-xl border border-line bg-surface-raised p-5 shadow-sm transition hover:border-flow hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
-            <span className="font-heading text-lg font-bold text-pacific">{item.label}</span>
+            <span className="font-heading text-lg font-bold text-ink">{item.label}</span>
             {item.description && (
-              <span className="mt-2 block text-sm leading-relaxed text-pacific/80">{item.description}</span>
+              <span className="mt-2 block text-sm leading-relaxed text-ink-muted">{item.description}</span>
             )}
           </Link>
         </li>

@@ -82,7 +82,7 @@ export function NoActionModal({
           />
         </Field>
         {shortfall && (
-          <p aria-live="polite" className="text-sm text-pacific/80">
+          <p aria-live="polite" className="text-sm text-ink-muted">
             {shortfall}
           </p>
         )}

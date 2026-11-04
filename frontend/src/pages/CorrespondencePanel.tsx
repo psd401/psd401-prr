@@ -283,7 +283,7 @@ function DeliveryAttempts({ correspondenceId }: { correspondenceId: string }) {
   if (attempts.isPending) return <Spinner label="Loading attempts…" />
   if (attempts.isError) return <ErrorNote error={attempts.error} />
   if (attempts.data.length === 0) {
-    return <p className="text-xs text-pacific/80">No delivery attempts recorded.</p>
+    return <p className="text-xs text-ink-muted">No delivery attempts recorded.</p>
   }
 
   return (
@@ -291,10 +291,10 @@ function DeliveryAttempts({ correspondenceId }: { correspondenceId: string }) {
       {attempts.data.map((attempt) => (
         <li
           key={attempt.id}
-          className="rounded-md border border-driftwood/40 bg-skylight/60 px-3 py-2 text-xs text-pacific/80"
+          className="rounded-md border border-line bg-surface-sunken px-3 py-2 text-xs text-ink-muted"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="font-heading font-bold text-pacific">
+            <span className="font-heading font-bold text-ink">
               Attempt {attempt.attempt_number} · {attempt.result_category}
             </span>
             <span>{attempt.result_at?.slice(0, 16).replace('T', ' ') ?? 'In progress'}</span>
@@ -378,15 +378,15 @@ function CorrespondenceItem({
   return (
     <article
       aria-label={subject}
-      className={`relative rounded-lg border bg-white p-4 shadow-sm ${
+      className={`relative rounded-lg border bg-surface-raised p-4 shadow-sm ${
         item.direction === 'inbound'
-          ? 'ml-0 border-ocean/50 lg:mr-16'
-          : 'mr-0 border-seaglass/50 lg:ml-16'
+          ? 'ml-0 border-line-strong lg:mr-16'
+          : 'mr-0 border-flow lg:ml-16'
       }`}
     >
       <div
         className={`absolute top-0 h-full w-1 rounded-l-lg ${
-          item.direction === 'inbound' ? 'left-0 bg-ocean' : 'right-0 bg-seaglass'
+          item.direction === 'inbound' ? 'left-0 bg-info' : 'right-0 bg-flow'
         }`}
       />
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -400,17 +400,17 @@ function CorrespondenceItem({
             </Badge>
             {item.automated && <Badge tone="amber">Safety net</Badge>}
           </div>
-          <h3 className="text-base text-pacific">{subject}</h3>
-          <p className="mt-0.5 text-xs text-pacific/80">
+          <h3 className="text-base text-ink">{subject}</h3>
+          <p className="mt-0.5 text-xs text-ink-muted">
             {CORRESPONDENCE_KIND_LABELS[item.kind]} · {actorSummary(item)}
           </p>
         </div>
-        <time className="text-xs text-pacific/80">
+        <time className="text-xs text-ink-muted">
           {correspondenceTimestamp(item).slice(0, 16).replace('T', ' ')}
         </time>
       </div>
 
-      <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-pacific/80">
+      <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
         {timestamps.map(([label, timestamp]) => (
           <div key={label} className="flex gap-1">
             <dt className="font-heading font-bold">{label}</dt>
@@ -428,14 +428,14 @@ function CorrespondenceItem({
           role="region"
           aria-label={`${subject} message body`}
           tabIndex={0}
-          className="mt-3 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-md border border-driftwood/30 bg-skylight/50 p-3 text-sm text-pacific/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-whulge"
+          className="mt-3 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
           {body}
         </div>
       )}
 
       {(item.denial_exemption_citations ?? []).length > 0 && (
-        <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+        <div className="mt-3 rounded-md border border-warning bg-warning-soft px-3 py-2 text-sm text-warning-ink">
           <p className="font-heading font-bold">Denial exemption basis</p>
           <ul className="mt-1 list-disc pl-5">
             {item.denial_exemption_citations.map((citation) => (
@@ -448,7 +448,7 @@ function CorrespondenceItem({
       )}
 
       {item.recipients.length > 0 && (
-        <dl className="mt-3 grid gap-1 text-xs text-pacific/80 sm:grid-cols-3">
+        <dl className="mt-3 grid gap-1 text-xs text-ink-muted sm:grid-cols-3">
           {(['to', 'cc', 'bcc'] as const).map((recipientType) => {
             const addresses = addressesFor(item.recipients, recipientType)
             if (!addresses) return null
@@ -463,18 +463,18 @@ function CorrespondenceItem({
       )}
 
       {item.attachments.length > 0 && (
-        <div className="mt-3 space-y-2 border-t border-driftwood/40 pt-3">
-          <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+        <div className="mt-3 space-y-2 border-t border-line pt-3">
+          <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
             Attachments
           </p>
           {item.attachments.map((attachment) => (
             <div
               key={attachment.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-driftwood/40 px-3 py-2"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-line px-3 py-2"
             >
               <div>
-                <p className="text-sm text-pacific">{attachment.original_filename}</p>
-                <p className="text-xs text-pacific/80">
+                <p className="text-sm text-ink">{attachment.original_filename}</p>
+                <p className="text-xs text-ink-muted">
                   {humanFileSize(attachment.size)} · {scanStatusLabel(attachment.scan_status)}
                 </p>
               </div>
@@ -498,7 +498,7 @@ function CorrespondenceItem({
       )}
 
       {(item.failure_category || item.failure_description) && (
-        <div className="mt-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
+        <div className="mt-3 rounded-md border border-danger bg-danger-soft px-3 py-2 text-sm text-danger-ink">
           <p className="font-heading font-bold">
             {item.failure_category || 'Delivery failed'}
           </p>
@@ -506,7 +506,7 @@ function CorrespondenceItem({
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-pacific/80">
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
         {item.delivery && (
           <Badge
             tone={
@@ -544,7 +544,7 @@ function CorrespondenceItem({
         </div>
       )}
 
-      <div className="mt-4 flex flex-wrap gap-2 border-t border-driftwood/40 pt-3">
+      <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-3">
         {item.direction === 'outbound' && (
           <Button variant="ghost" onClick={() => onPreview(item)} disabled={busy}>
             Preview exact message
@@ -608,7 +608,7 @@ function CorrespondenceItem({
       </div>
 
       {showAttempts && (
-        <div className="mt-3 border-t border-driftwood/40 pt-3">
+        <div className="mt-3 border-t border-line pt-3">
           <DeliveryAttempts correspondenceId={item.id} />
         </div>
       )}
@@ -783,7 +783,7 @@ function ScopeCountNotice({
   return (
     <p
       role="status"
-      className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+      className="rounded-md border border-warning bg-warning-soft px-3 py-2 text-sm text-warning-ink"
     >
       {notice}
     </p>
@@ -1103,17 +1103,17 @@ function StatutoryResponseBanner({
   const step = outstandingStatutoryStep(response)
   const due = response.due_date
   return (
-    <div className="mb-4 rounded-lg border border-driftwood/60 bg-skylight/60 p-4">
+    <div className="mb-4 rounded-lg border border-line bg-surface-sunken p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={step ? 'amber' : 'green'}>
           {STATUTORY_RESPONSE_LABELS[response.state] ?? response.state}
         </Badge>
-        <span className="text-sm text-pacific/80">
+        <span className="text-sm text-ink-muted">
           {due ? `Five-business-day response due ${due}` : 'Due date still calculating'}
         </span>
       </div>
       {response.next_action && (
-        <p className="mt-2 font-heading text-sm font-bold text-pacific">
+        <p className="mt-2 font-heading text-sm font-bold text-ink">
           {`Next: ${response.next_action}`}
         </p>
       )}
@@ -1127,19 +1127,19 @@ function StatutoryResponseBanner({
               aria-hidden="true"
               className={`mt-1.5 size-2 shrink-0 rounded-full ${
                 entry.state === 'done'
-                  ? 'bg-seaglass'
+                  ? 'bg-flow'
                   : entry.state === 'current'
-                    ? 'bg-whulge'
-                    : 'bg-driftwood'
+                    ? 'bg-accent'
+                    : 'bg-line-strong'
               }`}
             />
             <span
               className={
                 entry.state === 'current'
-                  ? 'font-heading font-semibold text-pacific'
+                  ? 'font-heading font-semibold text-ink'
                   : entry.state === 'done'
-                    ? 'text-pacific/80 line-through'
-                    : 'text-pacific/80'
+                    ? 'text-ink-muted line-through'
+                    : 'text-ink-muted'
               }
             >
               {entry.label}
@@ -1200,10 +1200,10 @@ function CorrectionOutcomeList({
   if (items.length === 0) return null
   return (
     <div>
-      <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+      <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
         {heading}
       </p>
-      <ul className="mt-1 space-y-1 text-sm text-pacific">
+      <ul className="mt-1 space-y-1 text-sm text-ink">
         {items.map((item) => (
           <li key={item.id}>
             {`${CORRESPONDENCE_KIND_LABELS[item.kind] ?? item.kind}: `}
@@ -1818,7 +1818,7 @@ export function CorrespondencePanel({
           : undefined
       }
     >
-      <p className="mb-4 text-sm text-pacific/80">
+      <p className="mb-4 text-sm text-ink-muted">
         Django owns the exact conversation record. Request state changes only after
         confirmed delivery, never when a message is merely queued.
       </p>
@@ -1837,9 +1837,9 @@ export function CorrespondencePanel({
       )}
 
       {canManage && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-driftwood/60 bg-white/60 p-3">
-          <p className="text-sm text-pacific/80">
-            <span className="font-heading font-bold text-pacific">Requester on file:</span>{' '}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-surface-raised p-3">
+          <p className="text-sm text-ink-muted">
+            <span className="font-heading font-bold text-ink">Requester on file:</span>{' '}
             {requesterName || 'Not recorded'}
             {requesterEmail ? ` <${requesterEmail}>` : ''}
           </p>
@@ -1860,7 +1860,7 @@ export function CorrespondencePanel({
       )}
 
       {!canManage && canDraft && (
-        <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+        <div className="mb-4 rounded-md border border-warning bg-warning-soft px-3 py-2 text-sm text-warning-ink">
           <span className="font-heading font-bold">Human approval required.</span>{' '}
           Agents may prepare drafts, but a Records Officer must send
           them in an authenticated staff session.
@@ -1901,19 +1901,19 @@ export function CorrespondencePanel({
       />
 
       {cycleRows.length > 0 && (
-        <div className="mt-5 border-t border-driftwood/50 pt-4">
-          <h3 className="text-sm text-pacific">Clarification review</h3>
+        <div className="mt-5 border-t border-line pt-4">
+          <h3 className="text-sm text-ink">Clarification review</h3>
           <div className="mt-2 space-y-2">
             {cycleRows.map((cycle) => (
               <div
                 key={cycle.id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-driftwood/40 bg-skylight/50 px-3 py-2"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line bg-surface-sunken px-3 py-2"
               >
                 <div>
-                  <p className="font-heading text-sm font-bold text-pacific">
+                  <p className="font-heading text-sm font-bold text-ink">
                     {cycleState(cycle)}
                   </p>
-                  <p className="text-xs text-pacific/80">
+                  <p className="text-xs text-ink-muted">
                     Opened {cycle.opened_at.slice(0, 10)}
                     {cycle.responded_at ? ` · response ${cycle.responded_at.slice(0, 10)}` : ''}
                   </p>
@@ -1963,8 +1963,8 @@ export function CorrespondencePanel({
 
           {AUTHORED_KINDS.has(compose.kind) && (
             <>
-              <div className="flex flex-wrap items-center gap-3 rounded-md border border-driftwood/60 bg-skylight/50 px-3 py-2">
-                <p className="text-sm text-pacific/80">
+              <div className="flex flex-wrap items-center gap-3 rounded-md border border-line bg-surface-sunken px-3 py-2">
+                <p className="text-sm text-ink-muted">
                   This message is authored by you. The district template is a
                   starting point you can edit before saving.
                 </p>
@@ -2057,7 +2057,7 @@ export function CorrespondencePanel({
 
           {compose.kind === 'denial' && (
             <>
-              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              <div className="rounded-md border border-warning bg-warning-soft px-3 py-2 text-sm text-warning-ink">
                 <span className="font-heading font-bold">
                   Full-exemption denial only.
                 </span>{' '}
@@ -2066,25 +2066,25 @@ export function CorrespondencePanel({
                 exemption citation.
               </div>
               <fieldset className="space-y-1">
-                <legend className="font-heading text-sm font-bold text-pacific">
+                <legend className="font-heading text-sm font-bold text-ink">
                   Exemption citations
                 </legend>
-                <p className="text-xs text-pacific/80">
+                <p className="text-xs text-ink-muted">
                   Required structured legal basis. Citations marked for second
                   review cannot yet be approved.
                 </p>
                 {exemptions.isPending ? (
                   <Spinner label="Loading exemption citations…" />
                 ) : activeExemptions.length === 0 ? (
-                  <p className="text-sm text-red-800">
+                  <p className="text-sm text-danger-ink">
                     No active, approval-eligible exemption citations are available.
                   </p>
                 ) : (
-                  <div className="space-y-2 rounded-md border border-driftwood/40 p-3">
+                  <div className="space-y-2 rounded-md border border-line p-3">
                     {activeExemptions.map((citation) => (
                       <label
                         key={citation.id}
-                        className="flex items-start gap-2 text-sm text-pacific"
+                        className="flex items-start gap-2 text-sm text-ink"
                       >
                         <input
                           type="checkbox"
@@ -2124,7 +2124,7 @@ export function CorrespondencePanel({
 
           {compose.kind === 'no_records_closure' && (
             <>
-              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              <div className="rounded-md border border-warning bg-warning-soft px-3 py-2 text-sm text-warning-ink">
                 <span className="font-heading font-bold">
                   Human legal determination.
                 </span>{' '}
@@ -2168,20 +2168,20 @@ export function CorrespondencePanel({
                 />
               </Field>
               <fieldset className="space-y-3">
-                <legend className="font-heading text-sm font-bold text-pacific">
+                <legend className="font-heading text-sm font-bold text-ink">
                   Search record
                 </legend>
-                <p className="text-xs text-pacific/80">
+                <p className="text-xs text-ink-muted">
                   Identify each likely location, custodian, method, date range,
                   and result. Follow and document obvious leads.
                 </p>
                 {compose.searchSteps.map((step, index) => (
                   <div
                     key={index}
-                    className="space-y-3 rounded-md border border-driftwood/40 p-3"
+                    className="space-y-3 rounded-md border border-line p-3"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <p className="font-heading text-sm font-bold text-pacific">
+                      <p className="font-heading text-sm font-bold text-ink">
                         Search step {index + 1}
                       </p>
                       {compose.searchSteps.length > 1 && (
@@ -2275,7 +2275,7 @@ export function CorrespondencePanel({
                     />
                   </Field>
                   <fieldset className="space-y-2">
-                    <legend className="font-heading text-sm font-bold text-pacific">
+                    <legend className="font-heading text-sm font-bold text-ink">
                       Obvious-lead review
                     </legend>
                     {([
@@ -2286,7 +2286,7 @@ export function CorrespondencePanel({
                     ] as const).map(([field, label]) => (
                       <label
                         key={field}
-                        className="flex items-start gap-2 text-sm text-pacific"
+                        className="flex items-start gap-2 text-sm text-ink"
                       >
                         <input
                           type="checkbox"
@@ -2610,12 +2610,12 @@ export function CorrespondencePanel({
               </Field>
               {installments.isPending && <Spinner label="Loading installments…" />}
               {installments.isError && <ErrorNote error={installments.error} />}
-              <p className="text-sm text-pacific/80">
+              <p className="text-sm text-ink-muted">
                 The secure download link is built by the server from the
                 installment you chose. There is nothing to type, and nothing to
                 mistype.
               </p>
-              <label className="flex items-center gap-2 text-sm text-pacific">
+              <label className="flex items-center gap-2 text-sm text-ink">
                 <input
                   type="checkbox"
                   checked={compose.isFinal}
@@ -2783,11 +2783,11 @@ export function CorrespondencePanel({
             )}
             {edit.item.kind === 'installment_notice' && (
               <>
-                <p className="text-sm text-pacific/80">
+                <p className="text-sm text-ink-muted">
                   The secure download link comes from the installment itself
                   and is re-derived on every edit.
                 </p>
-                <label className="flex items-center gap-2 text-sm text-pacific">
+                <label className="flex items-center gap-2 text-sm text-ink">
                   <input
                     type="checkbox"
                     checked={edit.isFinal}
@@ -2803,20 +2803,20 @@ export function CorrespondencePanel({
             )}
             {edit.item.kind === 'denial' && (
               <fieldset className="space-y-1">
-                <legend className="font-heading text-sm font-bold text-pacific">
+                <legend className="font-heading text-sm font-bold text-ink">
                   Exemption citations
                 </legend>
-                <p className="text-xs text-pacific/80">
+                <p className="text-xs text-ink-muted">
                   Changing this list replaces the draft legal-basis snapshot.
                 </p>
                 {exemptions.isPending ? (
                   <Spinner label="Loading exemption citations…" />
                 ) : (
-                  <div className="space-y-2 rounded-md border border-driftwood/40 p-3">
+                  <div className="space-y-2 rounded-md border border-line p-3">
                     {editDenialExemptions.map((citation) => (
                       <label
                         key={citation.id}
-                        className="flex items-start gap-2 text-sm text-pacific"
+                        className="flex items-start gap-2 text-sm text-ink"
                       >
                         <input
                           type="checkbox"
@@ -2918,17 +2918,17 @@ export function CorrespondencePanel({
         {preview && (
           <div className="space-y-4">
             <div>
-              <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+              <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                 Subject
               </p>
-              <p className="mt-1 text-sm text-pacific">{preview.subject}</p>
+              <p className="mt-1 text-sm text-ink">{preview.subject}</p>
             </div>
             {(preview.denial_exemption_citations ?? []).length > 0 && (
               <div>
-                <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+                <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                   Denial exemption basis
                 </p>
-                <ul className="mt-1 list-disc pl-5 text-sm text-pacific">
+                <ul className="mt-1 list-disc pl-5 text-sm text-ink">
                   {preview.denial_exemption_citations.map((citation) => (
                     <li key={citation.id}>
                       {citation.citation} — {citation.short_name}
@@ -2938,10 +2938,10 @@ export function CorrespondencePanel({
               </div>
             )}
             <div>
-              <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+              <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                 Recipients
               </p>
-              <p className="mt-1 break-all text-sm text-pacific">
+              <p className="mt-1 break-all text-sm text-ink">
                 {preview.recipients
                   .map(
                     (recipient) => {
@@ -2955,27 +2955,27 @@ export function CorrespondencePanel({
               </p>
             </div>
             <div>
-              <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+              <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                 Attachments ({preview.attachments.length})
               </p>
               {preview.attachments.length === 0 ? (
-                <p className="mt-1 text-sm text-pacific/80">No attachments.</p>
+                <p className="mt-1 text-sm text-ink-muted">No attachments.</p>
               ) : (
                 <ul className="mt-1 space-y-2">
                   {preview.attachments.map((attachment) => (
                     <li
                       key={attachment.id}
-                      className="rounded-md border border-driftwood/40 bg-white p-3"
+                      className="rounded-md border border-line bg-surface-raised p-3"
                     >
-                      <p className="break-all text-sm font-medium text-pacific">
+                      <p className="break-all text-sm font-medium text-ink">
                         {attachment.original_filename}
                       </p>
-                      <p className="mt-1 text-xs text-pacific/80">
+                      <p className="mt-1 text-xs text-ink-muted">
                         {humanFileSize(attachment.size)}
                         {' · '}
                         {attachment.content_type}
                       </p>
-                      <p className="mt-1 text-xs text-pacific/80">
+                      <p className="mt-1 text-xs text-ink-muted">
                         {scanStatusLabel(attachment.scan_status)}
                         {' · '}
                         {attachment.quarantined
@@ -2989,10 +2989,10 @@ export function CorrespondencePanel({
                       {/* The checksum is integrity evidence, not something an
                           officer reads. Keep it available, out of the way. */}
                       <details className="mt-1">
-                        <summary className="cursor-pointer text-xs text-pacific/80">
+                        <summary className="cursor-pointer text-xs text-ink-muted">
                           File checksum
                         </summary>
-                        <p className="mt-1 break-all font-mono text-xs text-pacific/80">
+                        <p className="mt-1 break-all font-mono text-xs text-ink-muted">
                           SHA-256 {attachment.sha256}
                         </p>
                       </details>
@@ -3002,10 +3002,10 @@ export function CorrespondencePanel({
               )}
             </div>
             <div>
-              <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+              <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                 Message
               </p>
-              <div className="mt-1 whitespace-pre-wrap rounded-md border border-driftwood/40 bg-white p-3 text-sm text-pacific">
+              <div className="mt-1 whitespace-pre-wrap rounded-md border border-line bg-surface-raised p-3 text-sm text-ink">
                 {preview.body}
               </div>
             </div>
@@ -3039,14 +3039,14 @@ export function CorrespondencePanel({
             }}
           >
             <div>
-              <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+              <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                 Subject
               </p>
-              <p className="mt-1 text-sm text-pacific">
+              <p className="mt-1 text-sm text-ink">
                 {correspondenceSubject(actionConfirmation.item)}
               </p>
             </div>
-            <p className="text-sm text-pacific/80">
+            <p className="text-sm text-ink-muted">
               {actionConfirmation.action === 'approveAndSend'
                 ? `${deliveryActionRecipient(actionConfirmation.item)} Confirm you have reviewed the exact message, recipients, attachments, and legal basis — sending freezes this content as the record of what was sent.`
                 : actionConfirmation.action === 'queue'
@@ -3086,7 +3086,7 @@ export function CorrespondencePanel({
               cancel.mutate({ item: cancelTarget, reason: cancelReason })
             }}
           >
-            <p className="text-sm text-pacific/80">
+            <p className="text-sm text-ink-muted">
               Cancellation is allowed only before a successful send and is recorded
               in the audit trail.
             </p>
@@ -3126,7 +3126,7 @@ export function CorrespondencePanel({
       >
         {deleteTarget && (
           <div className="space-y-4">
-            <p className="text-sm text-pacific/80">
+            <p className="text-sm text-ink-muted">
               This draft was never sent. Deleting it removes it from the case;
               the deletion is recorded in the audit trail.
             </p>
@@ -3159,7 +3159,7 @@ export function CorrespondencePanel({
       >
         {correctionResult ? (
           <div className="space-y-4">
-            <p className="text-sm text-pacific/80">
+            <p className="text-sm text-ink-muted">
               {`The record now names ${correctionResult.requester.name} `}
               {`<${correctionResult.requester.email}>, replacing `}
               {`${correctionResult.previous_requester.name} `}
@@ -3199,7 +3199,7 @@ export function CorrespondencePanel({
               })
             }}
           >
-            <p className="text-sm text-pacific/80">
+            <p className="text-sm text-ink-muted">
               Use this when the request was forwarded and intake recorded the
               sender instead of the requester. What was submitted is kept as
               the record of what arrived; open drafts are re-addressed to the
@@ -3234,7 +3234,7 @@ export function CorrespondencePanel({
               />
             </Field>
             {reasonShortfall(correctionReason) && (
-              <p className="text-sm text-pacific/80">
+              <p className="text-sm text-ink-muted">
                 {reasonShortfall(correctionReason)}
               </p>
             )}
@@ -3280,7 +3280,7 @@ export function CorrespondencePanel({
               resolve.mutate({ cycle: resolveTarget, notes: resolutionNotes })
             }}
           >
-            <p className="text-sm text-pacific/80">
+            <p className="text-sm text-ink-muted">
               Receiving a reply does not resolve the legal clarification state.
               Confirm the scope and record substantive resolution notes.
             </p>

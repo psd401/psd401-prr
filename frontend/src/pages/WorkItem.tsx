@@ -36,11 +36,11 @@ export function WorkItemRows({ rows }: { rows: WorkItemSummary[] }) {
     <ol className="space-y-3">
       {rows.map((row) => (
         <li key={row.id}>
-          <article className="rounded-xl border border-driftwood/60 bg-white p-4 shadow-sm">
+          <article className="rounded-xl border border-line bg-surface-raised p-4 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="font-heading text-lg font-bold text-pacific">{row.next_action}</p>
-                <p className="mt-1 text-sm text-pacific/80">
+                <p className="font-heading text-lg font-bold text-ink">{row.next_action}</p>
+                <p className="mt-1 text-sm text-ink-muted">
                   {row.request_number ?? 'No matched case'}
                   {row.assignee_username ? ` · ${row.assignee_username}` : ' · Unassigned'}
                 </p>
@@ -50,12 +50,12 @@ export function WorkItemRows({ rows }: { rows: WorkItemSummary[] }) {
               </Badge>
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm">
-              <span className="text-pacific/80">
+              <span className="text-ink-muted">
                 {row.urgency_date ? `Next due ${row.urgency_date}` : 'No current due date'}
               </span>
               <Link
                 to={row.detail_url}
-                className="rounded-lg font-heading font-semibold text-whulge underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-whulge"
+                className="rounded-lg font-heading font-semibold text-accent underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 aria-label={`Open ${row.next_action} for ${row.request_number ?? 'unmatched work'}`}
               >
                 Open work item
@@ -280,7 +280,7 @@ export function WorkItemDetail({ roles }: { roles: StaffRole[] }) {
         {row.source_url && (
           <Link
             to={row.source_url}
-            className="mt-5 inline-flex rounded-lg bg-cedar px-3.5 py-2 font-heading text-sm font-semibold text-white hover:bg-pacific focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-whulge"
+            className="mt-5 inline-flex rounded-lg bg-action px-3.5 py-2 font-heading text-sm font-semibold text-on-action hover:bg-action-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
             Open source context
           </Link>
@@ -293,7 +293,7 @@ export function WorkItemDetail({ roles }: { roles: StaffRole[] }) {
         ) : (
           <ol className="space-y-2">
             {row.events.map((event) => (
-              <li key={event.id} className="border-b border-driftwood/40 pb-2 text-sm last:border-0">
+              <li key={event.id} className="border-b border-line pb-2 text-sm last:border-0">
                 <span className="font-heading font-semibold">{event.event_type.replaceAll('_', ' ')}</span>
                 {' · '}{event.actor_username ?? 'System'}{' · '}{event.occurred_at.slice(0, 16).replace('T', ' ')}
               </li>

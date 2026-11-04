@@ -8,9 +8,6 @@ export interface PrrEnvConfig {
   readonly vpcId: string;
   readonly vpcCidr: string;
   readonly availabilityZone: string;
-  // Owned by psd-aws-infra (psd401/psd-aws-infra#42); this stack only places
-  // the host in it.
-  readonly subnetId: string;
   // Only prod pins to an existing Elastic IP allocation; dev has the stack
   // allocate and own its own EIP.
   readonly eipAllocationId?: string;
@@ -46,8 +43,6 @@ const shared = {
 export const prodConfig: PrrEnvConfig = {
   ...shared,
   envName: "prod",
-  // psd401-prr-prod, 172.25.200.0/24.
-  subnetId: "subnet-02ccab0368061c253",
   // 54.68.97.81 — pinned: both public and district-internal DNS already
   // point here. Never create a second EIP for prod.
   eipAllocationId: "eipalloc-0f263927cd1983f48",

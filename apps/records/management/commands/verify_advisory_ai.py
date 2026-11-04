@@ -8,6 +8,7 @@ from apps.records.advisory_ai import (
     AdvisoryProviderError,
     _validate_proposal,
     invoke_advisory_model,
+    model_for_kind,
 )
 from apps.records.models import AdvisoryRun
 
@@ -15,8 +16,19 @@ from apps.records.models import AdvisoryRun
 class Command(BaseCommand):
     help = "Verify Bedrock advisory inference without reading or writing a request."
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--model",
+            default="",
+            help=(
+                "Bedrock model identifier to verify instead of the configured "
+                "request-intent model, e.g. before switching a setting to it."
+            ),
+        )
+
     def handle(self, *args, **options):
         kind = AdvisoryRun.Kind.REQUEST_INTENT
+        model = options["model"] or model_for_kind(kind)
         received_date = timezone.localdate()
         payload = {
             "kind": kind,
@@ -29,7 +41,7 @@ class Command(BaseCommand):
             "available_record_systems": [],
         }
         try:
-            proposal = invoke_advisory_model(kind, payload)
+            proposal = invoke_advisory_model(kind, payload, model_identifier=model)
             _validate_proposal(kind, proposal, received_date=received_date)
         except AdvisoryProviderError as exc:
             raise CommandError(
@@ -43,7 +55,7 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 "Bedrock advisory verification passed — "
-                f"{runtime.get('PRR_AI_MODEL')} in "
+                f"{model} in "
                 f"{runtime.get('PRR_AI_AWS_REGION')}; "
                 "synthetic data only and no legal record was created."
             )

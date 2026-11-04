@@ -101,10 +101,10 @@ export function RecordHandlingPanel({
     return (
       <section className="space-y-3">
         <Badge tone={failed ? 'red' : 'amber'}>{record.handling_label}</Badge>
-        <p className="text-sm text-pacific">
+        <p className="text-sm text-ink">
           {record.derivative_detail || record.handling_detail}
         </p>
-        <p className="text-xs text-pacific/80">
+        <p className="text-xs text-ink-muted">
           The original file is kept exactly as collected. Redactions are burned
           into the rendition, which is the copy a requester receives — releasing
           the original would ship tracked changes, comments, and author details
@@ -205,19 +205,19 @@ function MediaReviewPanel({
     <section className="space-y-4">
       <div>
         <Badge tone="blue">{record.handling_label}</Badge>
-        <p className="mt-2 text-sm text-pacific">{record.handling_detail}</p>
+        <p className="mt-2 text-sm text-ink">{record.handling_detail}</p>
       </div>
 
       <video
         controls
         preload="metadata"
-        className="max-h-[50vh] w-full rounded-md border border-driftwood bg-black"
+        className="max-h-[50vh] w-full rounded-md border border-line bg-black"
         src={`/api/staff/record-items/${record.id}/stream/`}
       >
         <track kind="captions" />
       </video>
 
-      <p className="text-xs text-pacific/80">
+      <p className="text-xs text-ink-muted">
         Mark every interval that must be withheld, then produce the released
         copy. Nothing is detected automatically: an automated blur that misses
         one frame discloses the person it was meant to protect, and no reviewer
@@ -226,7 +226,7 @@ function MediaReviewPanel({
 
       {canReview && (
         <form
-          className="grid gap-3 rounded-md border border-driftwood p-3 sm:grid-cols-2"
+          className="grid gap-3 rounded-md border border-line p-3 sm:grid-cols-2"
           onSubmit={(event) => {
             event.preventDefault()
             mark.mutate()
@@ -296,7 +296,7 @@ function MediaReviewPanel({
             {active.map((row) => (
               <li
                 key={row.id}
-                className="rounded-md border border-driftwood px-3 py-2 text-sm text-pacific"
+                className="rounded-md border border-line px-3 py-2 text-sm text-ink"
               >
                 <span className="font-mono">
                   {row.starts_at.toFixed(2)}s – {row.ends_at.toFixed(2)}s
@@ -324,7 +324,7 @@ function MediaReviewPanel({
             Produce released copy
           </Button>
           {record.review_state !== 'responsive' && (
-            <p className="text-xs text-pacific/80">
+            <p className="text-xs text-ink-muted">
               Mark the record responsive before producing a released copy.
             </p>
           )}
@@ -383,8 +383,8 @@ function OpaquePanel({
   return (
     <section className="space-y-3">
       <Badge tone="red">{record.handling_label}</Badge>
-      <p className="text-sm text-pacific">{record.handling_detail}</p>
-      <p className="text-xs text-pacific/80">
+      <p className="text-sm text-ink">{record.handling_detail}</p>
+      <p className="text-xs text-ink-muted">
         This record still needs a decision. Record what was attempted and what
         was concluded — that reasoning is the whole evidentiary basis, because
         nobody could open the file itself.

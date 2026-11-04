@@ -112,12 +112,12 @@ function CopyBlock({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <div className="mb-1 flex items-center justify-between gap-3">
-        <h3 className="font-heading text-sm font-bold text-pacific">{label}</h3>
+        <h3 className="font-heading text-sm font-bold text-ink">{label}</h3>
         <Button type="button" variant="ghost" onClick={copy}>
           {copied ? 'Copied' : 'Copy'}
         </Button>
       </div>
-      <pre className="overflow-x-auto rounded-md bg-pacific p-3 text-xs leading-relaxed text-skylight">
+      <pre className="overflow-x-auto rounded-md bg-surface-inverse p-3 text-xs leading-relaxed text-on-inverse">
         <code>{value}</code>
       </pre>
     </div>
@@ -235,14 +235,14 @@ export function AgentAccess() {
         {shownSecret && (
           <section
             aria-live="polite"
-            className="rounded-lg border-2 border-amber-400 bg-amber-50 p-4"
+            className="rounded-lg border-2 border-warning bg-warning-soft p-4"
           >
-            <h2 className="text-lg text-pacific">Save this token now</h2>
-            <p className="mt-1 text-sm text-pacific/75">
+            <h2 className="text-lg text-ink">Save this token now</h2>
+            <p className="mt-1 text-sm text-ink-muted">
               This is the only response that contains the credential. It cannot be
               recovered later.
             </p>
-            <div className="mt-3 rounded-md bg-white p-3 font-mono text-sm text-pacific shadow-inner">
+            <div className="mt-3 rounded-md bg-surface-raised p-3 font-mono text-sm text-ink shadow-inner">
               {shownSecret.token}
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
@@ -264,7 +264,7 @@ export function AgentAccess() {
         )}
 
         <Card title="Personal access tokens">
-          <p className="mb-4 text-sm text-pacific/80">
+          <p className="mb-4 text-sm text-ink-muted">
             Each token carries your current staff roles. Removing your role membership
             removes the token&apos;s effective authority. Tokens cannot perform
             human-only legal actions: approving or queueing correspondence, denying
@@ -274,7 +274,7 @@ export function AgentAccess() {
 
           <form
             onSubmit={submit}
-            className="mb-5 grid gap-3 rounded-md bg-skylight p-4 md:grid-cols-[minmax(12rem,1fr)_10rem_auto]"
+            className="mb-5 grid gap-3 rounded-md bg-surface-sunken p-4 md:grid-cols-[minmax(12rem,1fr)_10rem_auto]"
           >
             <Field label="Token name">
               <Input
@@ -284,7 +284,7 @@ export function AgentAccess() {
                 maxLength={100}
                 required
               />
-              {nameError && <span role="alert" className="text-xs text-red-800">{nameError}</span>}
+              {nameError && <span role="alert" className="text-xs text-danger-ink">{nameError}</span>}
             </Field>
             <Field label="Lifetime (days)">
               <Input
@@ -295,7 +295,7 @@ export function AgentAccess() {
                 required
               />
               {lifetimeError && (
-                <span role="alert" className="text-xs text-red-800">{lifetimeError}</span>
+                <span role="alert" className="text-xs text-danger-ink">{lifetimeError}</span>
               )}
             </Field>
             <div className="self-end">
@@ -304,7 +304,7 @@ export function AgentAccess() {
               </Button>
             </div>
             {createError && (
-              <p role="alert" className="text-sm text-red-800 md:col-span-3">
+              <p role="alert" className="text-sm text-danger-ink md:col-span-3">
                 {createError}
               </p>
             )}
@@ -374,7 +374,7 @@ export function AgentAccess() {
         >
           {confirmation && (
             <div className="space-y-4">
-              <p className="text-sm text-pacific">
+              <p className="text-sm text-ink">
                 {confirmation.action === 'rotate'
                   ? `Rotate ${confirmation.token.name}? Its current credential will be revoked immediately.`
                   : `Revoke ${confirmation.token.name}? Clients using this credential will immediately lose access.`}
@@ -412,7 +412,7 @@ export function AgentAccess() {
 
         <Card title="Connect Claude Code or Claude Desktop">
           <div className="space-y-5">
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+            <div className="rounded-md border border-warning bg-warning-soft p-3 text-sm text-warning-ink">
               The hosted <code>/mcp</code> transport is available for clients that
               can send the personal-token header. Use the hosted Claude Code command
               below. Claude Desktop&apos;s local stdio configuration works from a
@@ -427,9 +427,9 @@ export function AgentAccess() {
 
         <Card title="REST quick start">
           <div className="mb-4 flex flex-wrap gap-x-5 gap-y-2 text-sm">
-            <a className="text-ocean underline" href="/api/docs/">Swagger API docs</a>
-            <a className="text-ocean underline" href="/api/redoc/">ReDoc API docs</a>
-            <a className="text-ocean underline" href="/api/staff/capabilities/">
+            <a className="text-ink-muted underline" href="/api/docs/">Swagger API docs</a>
+            <a className="text-ink-muted underline" href="/api/redoc/">ReDoc API docs</a>
+            <a className="text-ink-muted underline" href="/api/staff/capabilities/">
               Raw capability catalog
             </a>
           </div>
@@ -437,8 +437,8 @@ export function AgentAccess() {
         </Card>
 
         <section>
-          <h2 className="mb-1 text-xl text-pacific">Live agent guardrails</h2>
-          <p className="mb-4 text-sm text-pacific/80">
+          <h2 className="mb-1 text-xl text-ink">Live agent guardrails</h2>
+          <p className="mb-4 text-sm text-ink-muted">
             These groups are rendered from the server capability catalog. The UI
             does not decide which actions an agent may execute.
           </p>
@@ -449,13 +449,13 @@ export function AgentAccess() {
               )
               return (
                 <Card key={policy}>
-                  <h3 className="text-lg text-pacific">{policyLabels[policy]}</h3>
-                  <p className="mt-1 text-sm text-pacific/80">{catalog.data.policy[policy]}</p>
+                  <h3 className="text-lg text-ink">{policyLabels[policy]}</h3>
+                  <p className="mt-1 text-sm text-ink-muted">{catalog.data.policy[policy]}</p>
                   <ul className="mt-4 space-y-3">
                     {capabilities.map((capability) => (
-                      <li key={capability.id} className="border-t border-seafoam pt-3 first:border-0 first:pt-0">
-                        <code className="text-xs text-whulge">{capability.id}</code>
-                        <p className="mt-1 text-sm text-pacific">{capability.outcome}</p>
+                      <li key={capability.id} className="border-t border-line pt-3 first:border-0 first:pt-0">
+                        <code className="text-xs text-accent">{capability.id}</code>
+                        <p className="mt-1 text-sm text-ink">{capability.outcome}</p>
                       </li>
                     ))}
                   </ul>

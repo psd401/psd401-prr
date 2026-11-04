@@ -1,4 +1,4 @@
-// ABOUTME: Data table with PSD styling — column defs in, striped rows out.
+// ABOUTME: Data table in Nexus nx-table styling — column defs in, rows out.
 // ABOUTME: Used by every list screen for a consistent workspace feel.
 import type { ReactNode } from 'react'
 
@@ -78,13 +78,13 @@ export function Table<T>({
     // `relative` makes this scroller the containing block for absolutely
     // positioned cell content (`sr-only` text). Without it that content
     // escapes the horizontal clip and widens the whole page on a phone.
-    <div className="relative overflow-x-auto rounded-lg border border-driftwood/60">
+    <div className="nx-table-wrap relative overflow-x-auto">
       <table
         aria-label={label}
-        className={`w-full border-collapse bg-white text-sm ${fits ? '' : 'min-w-max'}`}
+        className={`nx-table ${fits ? '' : 'min-w-max'}`}
       >
         <thead>
-          <tr className="border-b border-driftwood bg-skylight text-left">
+          <tr className="text-left">
             {columns.map((c) => {
               const sortable = !!c.sortKey && !!onSort
               const sorted = sortable && sort && sort.key === c.sortKey
@@ -100,24 +100,24 @@ export function Table<T>({
                   aria-sort={
                     sortable ? (sorted ? SORT_LABEL[sorted] : 'none') : undefined
                   }
-                  className={`${fits ? 'px-2.5' : 'px-3'} py-2.5 font-heading text-xs font-semibold uppercase tracking-[0.07em] text-pacific/80 ${c.align === 'right' ? 'text-right' : ''} ${fits && !c.grow ? 'whitespace-nowrap' : ''} ${c.grow ? 'w-full min-w-[12rem]' : ''}`}
+                  className={`${fits ? 'px-2.5' : 'px-3'} py-2.5 ${c.align === 'right' ? 'text-right' : ''} ${fits && !c.grow ? 'whitespace-nowrap' : ''} ${c.grow ? 'w-full min-w-[12rem]' : ''}`}
                 >
                   {sortable ? (
                     <button
                       type="button"
                       onClick={() => c.sortKey && onSort(c.sortKey)}
                       className={
-                        'inline-flex items-center gap-1 rounded font-heading text-xs font-semibold '
-                        + 'uppercase tracking-[0.07em] focus-visible:outline-2 '
-                        + 'focus-visible:outline-offset-2 focus-visible:outline-whulge '
-                        + (sorted ? 'text-pacific underline' : 'text-pacific/80 hover:text-pacific hover:underline')
+                        'inline-flex items-center gap-1 rounded font-semibold '
+                        + 'focus-visible:outline-2 '
+                        + 'focus-visible:outline-offset-2 focus-visible:outline-focus '
+                        + (sorted ? 'text-ink underline' : 'text-ink-muted hover:text-ink hover:underline')
                       }
                     >
                       {c.headerCell ?? c.header}
                       {/* The arrow is decoration; `aria-sort` on the header
                           carries the state to assistive technology, and the
                           underline carries it without relying on colour. */}
-                      <span aria-hidden="true" className="text-[0.7rem]">
+                      <span aria-hidden="true" className="text-xs">
                         {sorted === 'asc' ? '▲' : sorted === 'desc' ? '▼' : '↕'}
                       </span>
                     </button>
@@ -144,12 +144,12 @@ export function Table<T>({
                 }
               } : undefined}
               tabIndex={onRowClick ? 0 : undefined}
-              className={`border-b border-seafoam last:border-0 ${onRowClick ? 'cursor-pointer hover:bg-seaglass/10' : ''}`}
+              className={onRowClick ? 'cursor-pointer' : undefined}
             >
               {columns.map((c) => (
                 <td
                   key={c.header}
-                  className={`${fits ? 'px-2.5' : 'px-3'} py-3 text-pacific ${c.align === 'right' ? 'text-right' : ''} ${fits ? 'align-top' : ''} ${c.grow ? 'w-full min-w-[12rem]' : ''}`}
+                  className={`${fits ? 'px-2.5' : 'px-3'} py-3 ${c.align === 'right' ? 'text-right' : ''} ${fits ? 'align-top' : ''} ${c.grow ? 'w-full min-w-[12rem]' : ''}`}
                 >
                   {c.cell(row)}
                 </td>

@@ -18,6 +18,7 @@ import * as path from "node:path";
 
 import { grantAdvisoryBedrockInference } from "./advisory-bedrock";
 import { UBUNTU_2404_AMD64_GP3_SSM_PARAM, type PrrEnvConfig } from "./config";
+import { lookupSharedSubnet } from "./shared-subnet";
 import {
   acknowledgeGuard,
   GUARD_S3_BASELINE,
@@ -77,9 +78,18 @@ export class PrrHostingStack extends cdk.Stack {
     // must not have those paths. This one has its own route table whose only
     // route goes to the internet gateway, and it assigns a public address at
     // launch so user data reaches the internet before the Elastic IP lands.
+    // Found by its standard 08 tags, never an ID in code; the answer is
+    // cached in cdk.context.json, and any other subnet would replace the
+    // instance and its PostgreSQL root volume.
+    const sharedSubnet = lookupSharedSubnet(
+      this,
+      config.vpcId,
+      `psd401-prr-${config.envName}`,
+      config.availabilityZone,
+    );
     const subnet = ec2.Subnet.fromSubnetAttributes(this, "Subnet", {
-      subnetId: config.subnetId,
-      availabilityZone: config.availabilityZone,
+      subnetId: sharedSubnet.subnetId,
+      availabilityZone: sharedSubnet.availabilityZone,
     });
     cdk.Annotations.of(subnet).acknowledgeWarning(
       "@aws-cdk/aws-ec2:noSubnetRouteTableId",

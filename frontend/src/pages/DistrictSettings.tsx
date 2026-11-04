@@ -274,13 +274,13 @@ function SecretSummary({ setting }: { setting: DistrictSetting }) {
   const state = secretState(setting)
   if (!state.set) {
     return (
-      <p className="mt-2 text-xs text-pacific/80">
+      <p className="mt-2 text-xs text-ink-muted">
         No value is installed. The feature that needs it stays off.
       </p>
     )
   }
   return (
-    <p className="mt-2 text-xs text-pacific/80">
+    <p className="mt-2 text-xs text-ink-muted">
       {`Installed, fingerprint ${state.fingerprint}`}
       {state.set_by ? ` — set by ${state.set_by}` : ''}
       {state.set_at ? ` on ${formatWhen(state.set_at)}` : ''}
@@ -295,13 +295,13 @@ function VerificationNote({ setting }: { setting: DistrictSetting }) {
   if (!check) return null
   if (check.ok) {
     return (
-      <p className="mt-2 text-xs text-pacific/80">
+      <p className="mt-2 text-xs text-ink-muted">
         {`Verified against Google on ${formatWhen(check.checked_at)}.`}
       </p>
     )
   }
   return (
-    <p className="mt-2 text-xs text-amber-900">
+    <p className="mt-2 text-xs text-warning-ink">
       {`Saved, but it did not authenticate when it was last checked on `}
       {formatWhen(check.checked_at)}
       {`. ${check.detail}`}
@@ -316,8 +316,8 @@ function changedBy(change: SettingChange): string {
 
 function ChangeLine({ change }: { change: SettingChange }) {
   return (
-    <li className="border-t border-driftwood/60 py-2 text-sm text-pacific/80">
-      <span className="font-heading font-semibold text-pacific">
+    <li className="border-t border-line py-2 text-sm text-ink-muted">
+      <span className="font-heading font-semibold text-ink">
         {`Changed to ${displayChangeValue(change.new_value)}`}
       </span>
       {` from ${displayChangeValue(change.old_value)} by `}
@@ -347,7 +347,7 @@ function History({ settingKey }: { settingKey: string }) {
   if (history.isError) return <ErrorNote error={history.error} />
   if (history.data.results.length === 0) {
     return (
-      <p className="mt-3 border-t border-driftwood/60 py-2 text-sm text-pacific/80">
+      <p className="mt-3 border-t border-line py-2 text-sm text-ink-muted">
         No recorded changes yet.
       </p>
     )
@@ -534,13 +534,13 @@ export function DistrictSettings() {
       />
       {byCategory.map((group) => (
         <Card key={group.category} title={group.category} className="mb-6">
-          <ul className="divide-y divide-driftwood/60">
+          <ul className="divide-y divide-line">
             {group.settings.map((setting) => (
               <li key={setting.key} className="py-4">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-heading font-bold text-pacific">
+                      <span className="font-heading font-bold text-ink">
                         {setting.label}
                       </span>
                       {setting.type === 'boolean'
@@ -552,12 +552,12 @@ export function DistrictSettings() {
                         <Badge tone="amber">Unverified</Badge>
                       )}
                     </div>
-                    <p className="mt-2 text-sm leading-relaxed text-pacific/80">
+                    <p className="mt-2 text-sm leading-relaxed text-ink-muted">
                       {setting.consequence}
                     </p>
                     {isSecret(setting) && <SecretSummary setting={setting} />}
                     <VerificationNote setting={setting} />
-                    <p className="mt-2 text-xs text-pacific/80">
+                    <p className="mt-2 text-xs text-ink-muted">
                       {setting.last_change
                         ? `Last changed by ${changedBy(setting.last_change)} on `
                           + `${formatWhen(setting.last_change.at)} — `
@@ -616,7 +616,7 @@ export function DistrictSettings() {
       >
         {pending && (
           <form onSubmit={submit} className="space-y-4">
-            <p className="text-sm leading-relaxed text-pacific/80">
+            <p className="text-sm leading-relaxed text-ink-muted">
               {pending.consequence}
             </p>
             {!isSwitch && (
@@ -631,7 +631,7 @@ export function DistrictSettings() {
                 {problem && (
                   <p
                     role="alert"
-                    className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900"
+                    className="rounded-md border border-danger bg-danger-soft px-3 py-2 text-sm text-danger-ink"
                   >
                     {problem}
                   </p>
@@ -652,7 +652,7 @@ export function DistrictSettings() {
               />
             </Field>
             {shortfall && (
-              <p aria-live="polite" className="text-sm text-pacific/80">
+              <p aria-live="polite" className="text-sm text-ink-muted">
                 {shortfall}
               </p>
             )}

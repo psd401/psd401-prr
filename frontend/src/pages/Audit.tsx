@@ -130,7 +130,7 @@ export function Audit() {
                   />
                 )}
                 {rows.length > 0 && (
-                  <p className="mt-4 text-sm text-pacific/80">
+                  <p className="mt-4 text-sm text-ink-muted">
                     Showing {rows.length} of {total} total entries
                   </p>
                 )}
@@ -158,7 +158,7 @@ export function Audit() {
         onClose={() => setSelected(null)}
       >
         {selected && (
-          <pre className="max-h-96 overflow-auto rounded-md border border-driftwood/60 bg-skylight/60 p-3 text-xs text-pacific">
+          <pre className="max-h-96 overflow-auto rounded-md border border-line bg-surface-sunken p-3 text-xs text-ink">
             {JSON.stringify(selected, null, 2)}
           </pre>
         )}

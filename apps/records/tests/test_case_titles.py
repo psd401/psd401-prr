@@ -223,7 +223,7 @@ class CaseTitleRunTests(TestCase):
         )
         captured = {}
 
-        def fake_invoke(kind, payload, *, attachment_blocks=None):
+        def fake_invoke(kind, payload, *, attachment_blocks=None, model_identifier=None):
             captured["kind"] = kind
             captured["payload"] = payload
             captured["attachment_blocks"] = attachment_blocks

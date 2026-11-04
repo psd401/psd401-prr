@@ -309,6 +309,10 @@ response ceiling are all edited there with a reason and a history:
 | `PRR_AI_PROVIDER` | `bedrock` | `bedrock` is the only approved provider |
 | `PRR_AI_AWS_REGION` | blank | an AWS Region such as `us-west-2` |
 | `PRR_AI_MODEL` | blank | a Bedrock model identifier, at most 255 characters |
+| `PRR_AI_MODEL_INTENT` | blank (uses `PRR_AI_MODEL`) | model for request intent |
+| `PRR_AI_MODEL_CASE_TITLE` | blank (uses `PRR_AI_MODEL`) | model for case titles |
+| `PRR_AI_MODEL_RESPONSIVENESS` | blank (uses `PRR_AI_MODEL`) | model for record responsiveness |
+| `PRR_AI_MODEL_REDACTION` | blank (uses `PRR_AI_MODEL`) | model for redaction candidates |
 | `PRR_AI_TIMEOUT_SECONDS` | `30` | 1-120 |
 | `PRR_AI_MAX_INPUT_CHARACTERS` | `50000` | 1000-250000 |
 | `PRR_AI_MAX_RESPONSE_BYTES` | `65536` | 1024-1048576 |
@@ -318,6 +322,33 @@ and the production Compose overlay still carries those three values as the
 one-time bootstrap seed the settings-store import reads. Editing the overlay
 afterwards does nothing: change the model on the Settings page, where the
 change has a name and a reason on it.
+
+Each advisory kind can run on its own model, so the district can trial a
+strong model for request intent and a fast, cheap one for record review, and
+move one kind at a time. Every run records the model it was created with, and
+the Bedrock call uses that recorded model even if the setting changes before a
+worker picks the run up. Output budgets are per kind (`MAX_OUTPUT_TOKENS` in
+`apps/records/advisory_ai.py`: intent 2000, case title 1000, responsiveness
+1000, redaction 4000); replies are still bounded by the response ceiling and
+validated against their schema.
+
+The production grant (`infra/cdk/lib/advisory-bedrock.ts`) is the real allow
+list. A setting naming any other model fails closed as `provider_rejected`.
+Each entry is a US cross-region inference profile whose destination models are
+in `us-east-1`, `us-east-2`, and `us-west-2` only:
+
+- `us.amazon.nova-2-lite-v1:0`
+- `us.anthropic.claude-opus-5-5`
+- `us.anthropic.claude-fable-5-1`
+- `us.anthropic.claude-sonnet-5-5`
+- `us.anthropic.claude-haiku-5-5`
+- `us.openai.gpt-6.1-sol`
+- `us.openai.gpt-6.1-terra`
+
+Before pointing a setting at a model for the first time, run
+`python manage.py verify_advisory_ai --model <profile id>` in production. It
+sends synthetic data only and confirms the model answers through the Converse
+API with valid bounded JSON.
 
 Advisory AI cannot be enabled at all unless an approved model is set. Only the
 `bedrock` provider, a real AWS Region, and a bounded model identifier count as
@@ -338,8 +369,9 @@ API with bounded SDK timeouts/retries and output size, treats source content as
 prompt-injection-bearing data, and validates exact keys, vocabularies, counts,
 lengths, active RecordSystem slugs, and confidence ranges before persistence.
 Provider error bodies and source/model text are not copied into failure rows or
-audit details. The deployed IAM policy pins the US Nova 2 Lite profile and its
-documented US destination models; there is no wildcard Bedrock grant.
+audit details. The deployed IAM policy pins each allow-listed US inference
+profile and its documented US destination models; there is no wildcard Bedrock
+grant.
 
 Redaction analysis requires a PDF with a searchable coordinate-bearing text
 layer. Vault-ingested Gmail records already pass through the searchable-PDF OCR
