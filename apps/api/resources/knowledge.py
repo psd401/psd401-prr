@@ -18,7 +18,7 @@ import re
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
-from django.db import transaction
+from django.db import IntegrityError, models, transaction
 from rest_framework import serializers, viewsets
 
 from apps.api.identity import StaffRole
@@ -46,30 +46,35 @@ def _is_email(value: str) -> bool:
     return True
 
 
-def _required_text(value: str, label: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        raise serializers.ValidationError(f"Enter the {label}.")
-    return text
+class _KnowledgeSerializer(serializers.Serializer):
+    """Plain serializers over these small models, with the write path spelled
+    out, rather than ModelSerializer. A CharField trims and refuses a blank
+    value by default, which is the rule every required text field here wants."""
+
+    model_class: type[models.Model]
+
+    id = serializers.IntegerField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+    def create(self, validated_data):
+        return self.model_class._default_manager.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        instance.save()
+        return instance
 
 
-class KnowledgeRoleAccountSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = KnowledgeRoleAccount
-        fields = [
-            "id",
-            "role",
-            "account_email",
-            "starts_on",
-            "ends_on",
-            "note",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+class KnowledgeRoleAccountSerializer(_KnowledgeSerializer):
+    model_class = KnowledgeRoleAccount
 
-    def validate_role(self, value):
-        return _required_text(value, "role")
+    role = serializers.CharField(max_length=200)
+    account_email = serializers.EmailField(max_length=254)
+    starts_on = serializers.DateField(required=False, allow_null=True)
+    ends_on = serializers.DateField(required=False, allow_null=True)
+    note = serializers.CharField(max_length=500, required=False, allow_blank=True)
 
     def validate_account_email(self, value):
         return str(value).strip().lower()
@@ -85,13 +90,13 @@ class KnowledgeRoleAccountSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class KnowledgeNoiseSenderSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = KnowledgeNoiseSender
-        fields = ["id", "kind", "value", "note", "active", "created_at", "updated_at"]
-        read_only_fields = ["id", "created_at", "updated_at"]
-        # Uniqueness is checked in validate() on the normalized value.
-        validators = []
+class KnowledgeNoiseSenderSerializer(_KnowledgeSerializer):
+    model_class = KnowledgeNoiseSender
+
+    kind = serializers.ChoiceField(choices=KnowledgeNoiseSender.Kind.choices)
+    value = serializers.CharField(max_length=254)
+    note = serializers.CharField(max_length=500, required=False, allow_blank=True)
+    active = serializers.BooleanField(required=False)
 
     def validate(self, attrs):
         kind = attrs.get("kind", getattr(self.instance, "kind", ""))
@@ -122,26 +127,16 @@ class KnowledgeNoiseSenderSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class KnowledgeSystemNoteSerializer(serializers.ModelSerializer):
+class KnowledgeSystemNoteSerializer(_KnowledgeSerializer):
+    model_class = KnowledgeSystemNote
+
     record_system_id = serializers.PrimaryKeyRelatedField(
         source="record_system",
         queryset=RecordSystem.objects.all(),
     )
     record_system_slug = serializers.CharField(source="record_system.slug", read_only=True)
     record_system_name = serializers.CharField(source="record_system.name", read_only=True)
-
-    class Meta:
-        model = KnowledgeSystemNote
-        fields = [
-            "id",
-            "record_system_id",
-            "record_system_slug",
-            "record_system_name",
-            "notes",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+    notes = serializers.CharField()
 
     def validate_record_system_id(self, value):
         if self.instance is None and KnowledgeSystemNote.objects.filter(record_system=value).exists():
@@ -149,9 +144,6 @@ class KnowledgeSystemNoteSerializer(serializers.ModelSerializer):
                 "That system already has search notes; edit them instead."
             )
         return value
-
-    def validate_notes(self, value):
-        return _required_text(value, "search notes")
 
     def update(self, instance, validated_data):
         # A note belongs to the system it was written for.
@@ -197,9 +189,14 @@ class _AuditedKnowledgeViewSet(viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
-        with transaction.atomic():
-            instance = serializer.save()
-            self._audit("created", instance.pk, after=self.snapshot(instance))
+        try:
+            with transaction.atomic():
+                instance = serializer.save()
+                self._audit("created", instance.pk, after=self.snapshot(instance))
+        except IntegrityError as exc:
+            # A concurrent create won the unique constraint after this one
+            # passed validation; answer as validation would have.
+            raise serializers.ValidationError("That entry already exists.") from exc
 
     def perform_update(self, serializer):
         with transaction.atomic():

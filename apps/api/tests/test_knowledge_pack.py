@@ -1,7 +1,11 @@
 # ABOUTME: Staff API tests for the district knowledge pack — Records Officer
 # ABOUTME: only, validated entries, and an audit row for every edit (#35).
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission, User
 from django.test import TestCase
+from rest_framework.authtoken.models import Token
 
 from apps.api.identity import StaffRole, apply_staff_roles
 from apps.audit.models import AuditLog
@@ -51,6 +55,32 @@ class KnowledgePackAccessTests(TestCase):
         for path in (ROLE_ACCOUNTS, NOISE_SENDERS, SYSTEM_NOTES):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 200)
+
+
+class KnowledgePackReadOnlyAgentTests(TestCase):
+    """The shared read-only MCP identity reads most staff resources; the pack
+    names staff accounts, so it must not."""
+
+    def setUp(self):
+        # auth.User directly (it is AUTH_USER_MODEL) so user_permissions is typed.
+        agent = User.objects.create(username="mcp-readonly")
+        agent.set_unusable_password()
+        agent.save(update_fields=["password"])
+        agent.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="records",
+                codename="read_staff_api",
+            )
+        )
+        self.headers = {"Authorization": f"Token {Token.objects.create(user=agent).key}"}
+
+    def test_the_read_only_agent_identity_cannot_read_the_pack(self):
+        # Control: the same token reads an ordinary staff resource, so the
+        # refusals below come from the pack's own gate.
+        self.assertEqual(self.client.get("/api/staff/requests/", headers=self.headers).status_code, 200)
+        for path in (ROLE_ACCOUNTS, NOISE_SENDERS, SYSTEM_NOTES):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path, headers=self.headers).status_code, 403)
 
 
 class KnowledgeRoleAccountTests(TestCase):
@@ -238,6 +268,26 @@ class KnowledgeSystemNoteTests(TestCase):
         self.assertEqual(self.client.delete(f"{SYSTEM_NOTES}{note.pk}/").status_code, 204)
         self.assertTrue(
             AuditLog.objects.filter(action="knowledge.system_note_deleted").exists()
+        )
+
+    def test_a_concurrent_duplicate_note_is_a_validation_error(self):
+        KnowledgeSystemNote.objects.create(record_system=self.system, notes="First.")
+        # Simulate the race: the other create commits after this one's
+        # validation already passed.
+        with patch(
+            "apps.api.resources.knowledge.KnowledgeSystemNoteSerializer.validate_record_system_id",
+            side_effect=lambda value: value,
+            autospec=False,
+        ):
+            response = self.client.post(
+                SYSTEM_NOTES,
+                {"record_system_id": self.system.pk, "notes": "Second."},
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(KnowledgeSystemNote.objects.count(), 1)
+        self.assertFalse(
+            AuditLog.objects.filter(action="knowledge.system_note_created").exists()
         )
 
     def test_a_note_cannot_move_to_another_system(self):

@@ -198,13 +198,16 @@ Request-intent input (schema version 6) also carries what the Records Officer
 knows about where records live. Each active registry system is offered with
 its custodian title and email, retention days and note, adequate-search
 checklist, and the officer's own search notes. A `district_knowledge` section
-adds the role-to-account mappings (each with its date range) and the active
+adds the role-to-account mappings (each with its date range; two holders of one
+role may overlap, as in a handover or a co-principalship, and both are sent) and the active
 noise senders from **Configuration > Knowledge**, which only a Records Officer
 can read or edit and where every change is audited.
 
 The whole context is cut to fit under `PRR_AI_MAX_INPUT_CHARACTERS` together
 with the request description. Each system's slug, name and keywords are always
-kept, since `record_system_slugs` may use only those; a checklist or search
+kept, since `record_system_slugs` may use only those; that list alone is not
+bounded, exactly as before this change, so a registry too large for the ceiling
+would exceed it rather than lose systems. A checklist or search
 note over 2,000 characters is shortened, and the remaining detail, role
 accounts and noise senders are added only while they fit. Anything cut marks
 the run's input as truncated. Because the pack is in the input fingerprint, an

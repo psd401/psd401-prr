@@ -239,7 +239,8 @@ way you would:
 
 - **Role accounts**: which district account held a role, such as a school's
   principal or the HR director, and from when until when. Leave a date blank
-  for an open end.
+  for an open end. Ranges for one role may overlap, for a handover or shared
+  role; the advisory is given every holder.
 - **Noise senders**: sender domains, addresses, and mailing lists that are
   district mass mail. The advisory is told never to search for them.
 - **System search notes**: how each registry system is actually searched, in
