@@ -148,8 +148,13 @@ response was delivered for a case the safety net still considers unanswered.
   `terminal_unverified` branches. `apps/api/tests/test_officer_receipt_and_templates.py`
   (`GuidedStatutoryResponseTests`, `AwaitingStatutoryResponseQueueTests`) covers the guided
   steps and the queue. `apps/records/tests/test_external_initial_response.py` covers recording
-  an external first response. On the frontend, `CorrespondencePanel.test.tsx` and
+  an external first response in the service. `apps/api/tests/test_external_initial_response_api.py`
+  covers the endpoint, its human-only refusal, and the attestation it returns. On the frontend, `CorrespondencePanel.test.tsx` and
   `RequestDetail.test.tsx` cover the ladder and the delivered state.
+- **Escalation.** A change that alters when the safety net fires, or the rule for
+  `automatic_blocked`, is a compliance change. Read [compliance](compliance.md) first and
+  run the compliance tests as well.
+
 - **Escalation.** A change that alters when the safety net fires, or the rule for
   `automatic_blocked`, is a compliance change. Read [compliance](compliance.md) first and
   run the compliance tests as well.

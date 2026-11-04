@@ -459,7 +459,8 @@ is side-effect-free. It reads its bounds from `InboundMimeLimits`, which
 
 Focused tests: `apps/correspondence/tests/test_mime_security.py` (preflight bounds, sniffing,
 OOXML, HTML, and related-part rules), `test_mime_delivery_status.py` (DSN normalization and
-rejection), `test_inbound_receiving.py` (raw storage before parse, idempotent replay, conflicts,
+rejection), `test_delivery_status_receiving.py` (end-to-end DSN evidence: matches only stable
+outbound Message-IDs and never rewrites legal state), `test_inbound_receiving.py` (raw storage before parse, idempotent replay, conflicts,
 and attachment scan enqueue after commit), and `test_inbound_quarantine_reservations.py`
 (reservation leases and cleanup). Concurrency is covered in `test_inbound_concurrency.py`.
 
