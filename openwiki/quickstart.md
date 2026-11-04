@@ -179,6 +179,12 @@ them before a large merge, not for a one-file change.
   says the application setting decides, and the overlay is kept only for a one-time import. The
   source does not settle which applies to a given release. See
   [deployment](operations/deployment.md#host-compose-wrapper) before changing either.
+- **Restore-drill release gate.** `docs/backups.md` says the recurring deploy rejects pending
+  migrations unless the reviewer pins a completed drill's evidence. The current release script
+  in `infra/cdk/lib/prr-hosting-stack.ts` takes an application backup and then runs `migrate`,
+  and no drill or migration-digest check was found in `infra/`. `docs/project-status.md` says
+  the release-gate machinery was retired. Treat the drill as a manual procedure until the
+  owner confirms. See [backups](operations/backups.md#restore-verifier-and-the-release-ordering).
 
 ## Backlog
 
