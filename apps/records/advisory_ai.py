@@ -1543,7 +1543,9 @@ def _advisory_system_message(kind: str) -> str:
         output_contract = (
             "Return exactly: candidates (array). Each candidate must contain exactly "
             "span_ids (non-empty array using only supplied text-span IDs), exemption_id "
-            "(integer using only a supplied active exemption ID), confidence (0..1), and "
+            "(integer using only a supplied active exemption ID), pattern (one of "
+            + ", ".join(RedactionProposal.Pattern.values)
+            + "), confidence (0..1), and "
             "rationale (string). Never return coordinates. Propose the narrowest spans "
             "that may contain exempt information. These are candidates for human legal "
             "review, not legal conclusions. Return an empty candidates array when none apply."

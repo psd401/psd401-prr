@@ -1408,6 +1408,21 @@ class AdvisoryRun(models.Model):
 class RedactionProposal(AppendOnlyModelMixin, models.Model):
     """One coordinate-grounded model candidate, never a legal redaction."""
 
+    class Pattern(models.TextChoices):
+        """What kind of information the candidate covers (#40), so proposals
+        can be reviewed a group at a time. Proposals made before the model
+        was asked for it are ``other``."""
+
+        PHONE = "phone", "Phone number"
+        EMAIL = "email", "Email address"
+        ADDRESS = "address", "Home address"
+        STUDENT_IDENTIFIER = "student_identifier", "Student identifier"
+        GOVERNMENT_ID = "government_id", "SSN or government ID"
+        FINANCIAL_ACCOUNT = "financial_account", "Financial account"
+        MEDICAL = "medical", "Medical or health information"
+        PERSON_NAME = "person_name", "Person's name"
+        OTHER = "other", "Other"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     advisory_run = models.ForeignKey(
         AdvisoryRun,
@@ -1441,6 +1456,7 @@ class RedactionProposal(AppendOnlyModelMixin, models.Model):
         validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
     )
     rationale = models.CharField(max_length=1000)
+    pattern = models.CharField(max_length=40, choices=Pattern.choices, default=Pattern.OTHER)
     source_span_ids = models.JSONField()
     source_text_sha256 = models.CharField(max_length=64)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -3374,6 +3390,63 @@ class ReviewBatch(models.Model):
 
     def __str__(self):
         return f"{self.kind} batch {self.pk}: {self.outcome}"
+
+
+class RedactionBatch(models.Model):
+    """Accept a group of redaction proposals after a sampled check (#40).
+
+    A group is the pending proposals on one case with one exemption and one
+    pattern. When the batch opens a random sample is drawn; the reviewer
+    accepts or rejects each sampled proposal. Only if every sampled proposal
+    is accepted are the rest accepted, each through
+    ``redaction_ai.accept_redaction_proposal`` -> ``create_redaction`` with
+    its own exemption citation (rule 3) and its own second-review rule. One
+    rejection blocks the batch; the sample decisions stand and the rest stay
+    pending for one-at-a-time review.
+    """
+
+    class Outcome(models.TextChoices):
+        OPEN = "open", "Open"
+        APPLIED = "applied", "Applied"
+        BLOCKED = "blocked", "Blocked"
+
+    request = models.ForeignKey(
+        PublicRecordsRequest,
+        on_delete=models.PROTECT,
+        related_name="redaction_batches",
+    )
+    exemption = models.ForeignKey(
+        ExemptionCitation,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    pattern = models.CharField(max_length=40, choices=RedactionProposal.Pattern.choices)
+    proposal_ids = models.JSONField()
+    sample_ids = models.JSONField()
+    judgments = models.JSONField(default=dict, blank=True)
+    outcome = models.CharField(max_length=20, choices=Outcome.choices, default=Outcome.OPEN)
+    accepted_count = models.PositiveIntegerField(default=0)
+    skipped_count = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"redaction batch {self.pk}: {self.outcome}"
 
 
 class EvaluationSet(models.Model):

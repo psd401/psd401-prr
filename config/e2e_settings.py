@@ -30,3 +30,11 @@ PRR_TRUST_NON_RESPONSIVE_MODE = "auto"
 PRR_TRUST_NON_RESPONSIVE_AUTO_MIN_CONFIDENCE = 90
 PRR_TRUST_BATCH_SAMPLE_SIZE = 2
 PRR_TRUST_ELUSION_SAMPLE_SIZE = 3
+# Redaction proposals may be accepted a group at a time (#40).
+PRR_TRUST_REDACTION_MODE = "batch"
+
+# A local stand-in for the private bucket, so acceptance flows can open,
+# redact, and burn in real PDFs. apps.secure_files honours it only while the
+# test-fixture switch above is on; no deployed setting names it.
+PRR_E2E_FILESYSTEM_OBJECT_STORE = str(BASE_DIR / ".verification" / "e2e-objects")  # noqa: F405
+

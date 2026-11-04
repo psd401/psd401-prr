@@ -12,6 +12,7 @@ import { api, unwrap, type Page } from '../api/client'
 import type { StaffRole } from '../api/auth'
 import { DiscardBatchCard } from '../case/BatchReview'
 import { RecordClusters } from '../case/RecordClusters'
+import { RedactionProposals } from '../case/RedactionProposals'
 import { RecordHandlingPanel } from '../case/RecordHandlingPanel'
 import {
   Badge,
@@ -1482,6 +1483,9 @@ export function RecordItems({
       {targetedItem.isError && <ErrorNote error={targetedItem.error} />}
       {canReview && request !== '' && (
         <DiscardBatchCard request={request} onOpen={(id) => updateListParams({ item: id })} />
+      )}
+      {canReview && request !== '' && (
+        <RedactionProposals request={request} onOpen={(id) => updateListParams({ item: id })} />
       )}
       {activeGroup === 'cluster' && request !== '' && (
         <RecordClusters

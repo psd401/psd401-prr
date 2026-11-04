@@ -50,7 +50,8 @@
     "officer-knowledge-pack-edit",
     "officer-approve-estimate-letter",
     "reviewer-cluster-approve-sampled",
-    "reviewer-elusion-signoff"
+    "reviewer-elusion-signoff",
+    "reviewer-redaction-group-accept"
   ],
   "e2e_screenshots": {
     "staff-login-open-case": [
@@ -236,6 +237,11 @@
     "reviewer-elusion-signoff": [
       "reviewer-elusion-sample.png",
       "reviewer-elusion-signed-off.png"
+    ],
+    "reviewer-redaction-group-accept": [
+      "reviewer-redaction-groups.png",
+      "reviewer-redaction-group-sample.png",
+      "reviewer-redaction-group-built.png"
     ]
   },
   "strictness": "block",

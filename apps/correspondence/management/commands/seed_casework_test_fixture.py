@@ -119,6 +119,10 @@ FIXTURE_TRUST_CLUSTER_DOMAIN = "newsletter.example"
 FIXTURE_TRUST_CLUSTER_COUNT = 4
 FIXTURE_TRUST_DISCARD_DOMAIN = "vendor-ads.example"
 FIXTURE_TRUST_DISCARD_COUNT = 5
+#: A case whose responsive records carry AI redaction proposals (#40), for
+#: the group-acceptance flow. Its PDFs live in the e2e filesystem store.
+FIXTURE_REDACTION_REQUEST_NUMBER = "PRR-E2E-0012"
+FIXTURE_REDACTION_RECORD_COUNT = 3
 FIXTURE_ESTIMATE_LETTER_INTENT = (
     "Route 12 bus video from March 3, 2026, between 3 and 4 p.m."
 )
@@ -1090,6 +1094,104 @@ def _seed_trust_ladder_case(officer):
                 proposal={"suggested_state": "non_responsive", "confidence": confidence,
                           "matched_terms": [], "rationale": "Synthetic newsletter."},
             )
+    return request
+
+
+def _seed_redaction_proposal_case(officer):
+    """Seed responsive PDFs with pending phone-number redaction proposals.
+
+    The PDFs are real and stored in the e2e filesystem object store, and each
+    proposal's advisory run carries the input fingerprint the live builder
+    computes, so accepting one goes through the real create_redaction.
+    """
+    import io
+
+    import pymupdf as fitz
+    from django.conf import settings as django_settings
+
+    # The PDFs need somewhere to live. Only the browser run has the local
+    # store; the fixture's own unit tests seed without this case.
+    if not getattr(django_settings, "PRR_E2E_FILESYSTEM_OBJECT_STORE", ""):
+        return None
+
+    from apps.records.advisory_ai import advisory_input_sha256
+    from apps.records.models import ExemptionCitation, RedactionProposal
+    from apps.records.storage import generated_record_storage_key
+    from apps.secure_files import _object_store_client
+
+    requester, _ = Requester.objects.get_or_create(
+        email="staff-phones@example.org",
+        defaults={"id": _fixture_uuid("redaction-requester"), "name": "Staff Phones Requester"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_REDACTION_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("redaction-request"),
+            "requester": requester,
+            "description": "Coaching staff contact lists for spring 2026.",
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    if not created:
+        return request
+    exemption, _ = ExemptionCitation.objects.get_or_create(
+        citation="RCW 42.56.250(4)",
+        defaults={"short_name": "Employee personal contact information"},
+    )
+    client = _object_store_client()
+    for index in range(FIXTURE_REDACTION_RECORD_COUNT):
+        label = f"redaction-roster-{index}"
+        document = fitz.open()
+        page = document.new_page(width=612, height=792)
+        page.insert_text((72, 96), f"Coach roster {index}: cell 555-01{index:02d}.", fontsize=12)
+        pdf = document.tobytes()
+        document.close()
+        # A fresh generated key per seed, as ingest would make, so a store
+        # left over from an earlier run never collides.
+        key = generated_record_storage_key(request.pk, original_filename=f"{label}.pdf")
+        client.put_object(
+            Bucket=django_settings.OBJECT_STORE["bucket"], Key=key,
+            Body=io.BytesIO(pdf), IfNoneMatch="*",
+        )
+        item = RecordItem.objects.create(
+            pk=_fixture_uuid(label),
+            request=request,
+            source_system="fixture",
+            original_filename=f"synthetic-{label}.pdf",
+            storage_key=key,
+            content_length=len(pdf),
+            content_type="application/pdf",
+            sha256=hashlib.sha256(pdf).hexdigest(),
+            review_state=RecordItem.ReviewState.RESPONSIVE,
+            reviewed_by=officer,
+            reviewed_at=_BASE_TIME,
+        )
+        run = AdvisoryRun(
+            kind=AdvisoryRun.Kind.RECORD_REDACTIONS,
+            request=request,
+            record_item=item,
+            model_identifier="synthetic-redaction-model",
+            input_sha256="",
+            state=AdvisoryRun.State.COMPLETE,
+            requested_by=officer,
+        )
+        run.input_sha256 = advisory_input_sha256(run)
+        run.save()
+        RedactionProposal.objects.create(
+            advisory_run=run,
+            record_item=item,
+            page_number=1,
+            x0=0.1, y0=0.1, x1=0.5, y1=0.15,
+            exemption=exemption,
+            pattern=RedactionProposal.Pattern.PHONE,
+            confidence=0.93,
+            rationale="An employee's personal cell number.",
+            source_span_ids=["p1s1"],
+            source_text_sha256=hashlib.sha256(label.encode()).hexdigest(),
+        )
     return request
 
 
@@ -2662,6 +2764,7 @@ class Command(BaseCommand):
             _seed_knowledge_pack()
             _seed_estimate_letter_case(officer)
             _seed_trust_ladder_case(officer)
+            _seed_redaction_proposal_case(officer)
             _seed_email_intake_redirect_cases(officer, inbound_transport)
             _reconcile_fixture_inbound_work(request)
             _seed_role_work(

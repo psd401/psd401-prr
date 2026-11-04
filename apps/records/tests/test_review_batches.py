@@ -137,10 +137,14 @@ class ClusterBatchTests(_Fixture):
         decided = decide_batch(batch.pk, actor=self.reviewer, judgments=judgments)
 
         self.assertEqual(decided.outcome, ReviewBatch.Outcome.BLOCKED)
-        self.assertEqual(decided.applied_count, 0)
+        # The three sampled judgments were recorded, and are counted.
+        self.assertEqual(decided.applied_count, 3)
         self.assertEqual(RecordItem.objects.get(pk=batch.sample_ids[0]).review_state, R.RESPONSIVE)
         self.assertEqual(RecordItem.objects.filter(review_state=R.NON_RESPONSIVE).count(), 2)
         self.assertEqual(RecordItem.objects.filter(review_state=R.UNREVIEWED).count(), 5)
+        # Blocked means per-record review: the rest cannot be re-batched.
+        with self.assertRaises(ValidationError):
+            create_cluster_batch([i.pk for i in items], state=R.NON_RESPONSIVE, actor=self.reviewer)
 
     def test_every_sampled_record_must_be_judged_and_nothing_else(self):
         batch = create_cluster_batch([i.pk for i in self._items(5)], state=R.RESPONSIVE, actor=self.reviewer)
@@ -268,6 +272,9 @@ class DiscardBatchTests(_Fixture):
             AuditLog.objects.get(action="review.batch_decided").detail["elusion_responsive_found"], 1,
         )
         self.assertEqual(RecordItem.objects.filter(review_state=R.UNREVIEWED).count(), 10)
+        # A failed elusion check cannot be retried on the same pile.
+        with self.assertRaises(ValidationError):
+            create_discard_batch(self.prr, actor=self.reviewer)
 
     @override_settings(PRR_TRUST_NON_RESPONSIVE_MODE="batch")
     def test_nothing_is_staged_unless_non_responsive_is_auto(self):

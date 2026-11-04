@@ -1044,6 +1044,61 @@ CAPABILITIES = (
         ["/requests/:number/records"],
     ),
     _capability(
+        "redaction_batches.groups",
+        "Read a case's pending redaction proposals grouped by exemption and "
+        "pattern, the redaction trust mode, and how many records carry "
+        "active redactions.",
+        "GET",
+        "/api/staff/redaction-batches/groups/",
+        ["/requests/:number/records"],
+    ),
+    _capability(
+        "redaction_batches.create",
+        "Open a group of pending redaction proposals (one exemption and "
+        "pattern on one case) and draw a random sample for the reviewer. "
+        "Opening accepts nothing.",
+        "POST",
+        "/api/staff/redaction-batches/",
+        ["/requests/:number/records"],
+        risk="low",
+    ),
+    _capability(
+        "redaction_batches.decide",
+        "Record the reviewer's accept or reject of every sampled proposal; "
+        "accept the rest of the group, each as its own exemption-backed "
+        "redaction, only if every sampled proposal was accepted.",
+        "POST",
+        "/api/staff/redaction-batches/{id}/decide/",
+        ["/requests/:number/records"],
+        execution="human_only",
+        risk="high",
+        constraints=[
+            "human_legal_judgment",
+            "exemption_citation_required",
+            "interactive_staff_session",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
+        "redaction_batches.build",
+        "Build the immutable redacted PDF for every responsive record on a "
+        "case whose redactions are approved, skipping any still awaiting a "
+        "required second review.",
+        "POST",
+        "/api/staff/redaction-batches/build/",
+        ["/requests/:number/records"],
+        execution="human_only",
+        risk="high",
+        constraints=[
+            "distinct_second_reviewer",
+            "integrity_verified",
+            "immutable_artifact",
+            "rasterized_burn_in",
+            "interactive_staff_session",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
         "review_batches.policy",
         "Read the trust-ladder policy for responsiveness (suggest, batch, or "
         "auto per outcome; sample sizes; the discard confidence floor) and "

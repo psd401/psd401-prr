@@ -21,12 +21,14 @@ behind; the reopen is audited. The sample keeps the size it was drawn with,
 even if the sample-size setting changed since.
 
 ``decide_batch`` takes the reviewer's judgment of every sampled record. Each
-judgment is recorded as an ordinary single review. Only if every judgment
+judgment is recorded as an ordinary single review (and counted in
+``applied_count`` whatever the outcome). Only if every judgment
 matches the proposed outcome is that outcome applied to the rest, through the
 same review service, in the reviewer's name; one disagreement (for a discard
 batch, one responsive record found) blocks the batch and the rest stay
-unreviewed. A record someone reviewed after the batch opened is skipped, not
-overturned. The AI applies nothing; ``AdvisoryRun.applied`` stays false.
+unreviewed, and no new batch may cover any of them: they go back to
+per-record review for good. A record someone reviewed after the batch opened
+is skipped, not overturned. The AI applies nothing; ``AdvisoryRun.applied`` stays false.
 
 A decision runs in one transaction over at most ``MAX_BATCH_RECORDS``
 records, one review-service call each, like the existing bulk review; if
@@ -90,7 +92,21 @@ def _open_batch(*, request, kind, label, state, ids, sample_size, actor, min_con
     # the open batch and its sample rather than leaving one behind each time.
     # ``ids`` is in primary-key order, so equal sets compare equal. Locking
     # the case serializes two opens of the same new set.
+    # Lock the case row (the result is not needed, only the lock).
     PublicRecordsRequest.objects.select_for_update().filter(pk=request.pk).first()
+    # A blocked batch sends its records to per-record review for good: a
+    # fresh sample over the same records would undo the disagreement.
+    wanted = set(ids)
+    if any(
+        wanted.intersection(blocked.record_item_ids)
+        for blocked in ReviewBatch.objects.filter(
+            request=request, outcome=ReviewBatch.Outcome.BLOCKED,
+        )
+    ):
+        raise ValidationError(
+            "A batch over some of these records was blocked by a disagreement; "
+            "review them one at a time."
+        )
     for open_batch in ReviewBatch.objects.filter(
         request=request, kind=kind, proposed_state=state, outcome=ReviewBatch.Outcome.OPEN,
     ):
@@ -219,7 +235,10 @@ def decide_batch(batch_id, *, actor, judgments: dict) -> ReviewBatch:
             _review_record(pk, state=judgments[pk], actor=actor)
 
     agreed = all(state == batch.proposed_state for state in judgments.values())
-    applied = skipped = 0
+    # Every review this batch records is counted, including a blocked
+    # batch's sample judgments.
+    applied = sum(1 for pk in batch.sample_ids if pk in unreviewed)
+    skipped = 0
     if agreed:
         for pk in batch.record_item_ids:
             if pk in judgments:
@@ -229,7 +248,6 @@ def decide_batch(batch_id, *, actor, judgments: dict) -> ReviewBatch:
                 continue
             _review_record(pk, state=batch.proposed_state, actor=actor, bulk=True)
             applied += 1
-        applied += sum(1 for pk in batch.sample_ids if pk in unreviewed)
 
     batch.judgments = judgments
     batch.outcome = ReviewBatch.Outcome.APPLIED if agreed else ReviewBatch.Outcome.BLOCKED
