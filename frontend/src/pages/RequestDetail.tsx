@@ -852,17 +852,17 @@ export function RequestDetail({
     <>
       <div className="grid min-w-0 gap-6 lg:grid-cols-2">
         {showOverview && <Card title="Request" className="lg:col-span-2">
-          <p className="mb-1 font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+          <p className="mb-1 font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
             Description
           </p>
-          <div className="whitespace-pre-wrap rounded-md border border-driftwood/40 bg-skylight/60 p-3 text-sm text-pacific">
+          <div className="whitespace-pre-wrap rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink">
             {r.description}
           </div>
-          <p className="mt-2 text-xs italic text-pacific/80">
+          <p className="mt-2 text-xs italic text-ink-muted">
             Legal record of the request as received — never edited (RCW 42.56).
           </p>
           {r.merged_sources && r.merged_sources.length > 0 && (
-            <p className="mt-2 text-sm text-pacific">
+            <p className="mt-2 text-sm text-ink">
               Includes merged {r.merged_sources.length === 1 ? 'case' : 'cases'}{' '}
               {r.merged_sources.map((source, index) => (
                 <span key={source}>
@@ -878,25 +878,25 @@ export function RequestDetail({
           )}
           <div className="mt-4 grid gap-4 sm:grid-cols-3">
             <div>
-              <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+              <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                 Channel
               </p>
-              <p className="mt-1 text-sm text-pacific">{CHANNEL_LABELS[r.channel] ?? r.channel}</p>
+              <p className="mt-1 text-sm text-ink">{CHANNEL_LABELS[r.channel] ?? r.channel}</p>
             </div>
             <div>
-              <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+              <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                 Requester
               </p>
               {r.requester ? (
                 <>
-                  <p className="mt-1 text-sm text-pacific">{r.requester.name}</p>
-                  <p className="break-all text-sm text-pacific/80">{r.requester.email}</p>
-                  <p className="text-sm text-pacific/80">{r.requester.phone || '—'}</p>
+                  <p className="mt-1 text-sm text-ink">{r.requester.name}</p>
+                  <p className="break-all text-sm text-ink-muted">{r.requester.email}</p>
+                  <p className="text-sm text-ink-muted">{r.requester.phone || '—'}</p>
                   {r.requester.company && (
-                    <p className="text-sm text-pacific/80">{r.requester.company}</p>
+                    <p className="text-sm text-ink-muted">{r.requester.company}</p>
                   )}
                   {(r.requester.mailing_address || r.requester.city || r.requester.state || r.requester.postal_code) && (
-                    <address className="mt-1 text-sm not-italic text-pacific/80">
+                    <address className="mt-1 text-sm not-italic text-ink-muted">
                       {r.requester.mailing_address && <div>{r.requester.mailing_address}</div>}
                       <div>
                         {[r.requester.city, r.requester.state].filter(Boolean).join(', ')}{' '}
@@ -905,10 +905,10 @@ export function RequestDetail({
                     </address>
                   )}
                 </>
-              ) : <p className="mt-1 text-sm text-pacific/80">Restricted</p>}
+              ) : <p className="mt-1 text-sm text-ink-muted">Restricted</p>}
             </div>
             <div>
-              <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+              <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                 Assigned officer
               </p>
               {canManageRequest ? (
@@ -928,7 +928,7 @@ export function RequestDetail({
                   ))}
                 </Select>
               ) : (
-                <p className="mt-1 text-sm text-pacific">
+                <p className="mt-1 text-sm text-ink">
                   {r.assigned_officer_username ?? '—'}
                 </p>
               )}
@@ -947,7 +947,7 @@ export function RequestDetail({
         {showActionZone && (
           <div className="lg:col-span-2">
             {closingClarification && (
-              <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              <div className="mb-3 rounded-md border border-warning bg-warning-soft px-4 py-3 text-sm text-warning-ink">
                 Resolve the clarification from Messages after reviewing
                 the received response and recording substantive resolution notes. If
                 the requester withdrew or the documented clarification period expired,
@@ -996,7 +996,7 @@ export function RequestDetail({
             its five-day obligation live on the case of record, and reopening
             it would leave an empty case with a retired number. */}
         {showOverview && terminalRequest && r.merged_into && (
-          <div className="lg:col-span-2 rounded-md border border-driftwood/60 bg-skylight/60 px-4 py-3 text-sm text-pacific">
+          <div className="lg:col-span-2 rounded-md border border-line bg-surface-sunken px-4 py-3 text-sm text-ink">
             This case was merged into{' '}
             <Link className="font-semibold underline" to={`/requests/${r.merged_into}`}>
               {r.merged_into}
@@ -1008,7 +1008,7 @@ export function RequestDetail({
         )}
         {showOverview && canManageRequest && terminalRequest && !r.merged_into && (
           <div className="lg:col-span-2 flex flex-wrap items-center justify-end gap-3">
-            <p className="mr-auto text-sm text-pacific/80">
+            <p className="mr-auto text-sm text-ink-muted">
               This request is closed. Reopening it is recorded on the timeline
               with your name and reason; it does not start a new five-day
               response clock.
@@ -1030,13 +1030,13 @@ export function RequestDetail({
           <Card title="Request-intent advisory" className="lg:col-span-2">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="max-w-3xl">
-                <p className="text-sm text-pacific/80">
+                <p className="text-sm text-ink-muted">
                   Advisory only. Model output is untrusted and permanently not
                   applied. It cannot change routing, scope, fees, estimates,
                   status, or requester correspondence.
                 </p>
                 {intentAdvisory.data?.latest && (
-                  <p className="mt-1 text-xs text-pacific/80">
+                  <p className="mt-1 text-xs text-ink-muted">
                     Model {intentAdvisory.data.latest.model_identifier} · input SHA-256{' '}
                     {intentAdvisory.data.latest.input_sha256.slice(0, 16)}…
                     {intentAdvisory.data.latest.input_truncated ? ' · input truncated' : ''}
@@ -1057,98 +1057,98 @@ export function RequestDetail({
             </div>
             {intentAdvisory.isError && <ErrorNote error={intentAdvisory.error} />}
             {intentAdvisory.data && !intentAdvisory.data.enabled && (
-              <p className="mt-3 text-sm text-pacific/80">
+              <p className="mt-3 text-sm text-ink-muted">
                 Turned off in this environment. It is a configuration setting
                 (PRR_AI_ADVISORY_ENABLED plus a Bedrock region and model), not
                 a pending approval — an administrator can switch it on.
               </p>
             )}
             {intentAdvisory.data?.latest?.state === 'failed' && (
-              <p className="mt-3 text-sm text-red-700">
+              <p className="mt-3 text-sm text-danger-ink">
                 {intentAdvisory.data.latest.failure_detail}
               </p>
             )}
             {['pending', 'running'].includes(intentAdvisory.data?.latest?.state ?? '') && (
-              <p className="mt-3 text-sm text-pacific/80">Analysis in progress…</p>
+              <p className="mt-3 text-sm text-ink-muted">Analysis in progress…</p>
             )}
             {intentAdvisory.data?.latest?.state === 'complete' && (
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <div>
-                  <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+                  <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                     Proposed summary
                   </p>
-                  <p className="mt-1 text-sm text-pacific">
+                  <p className="mt-1 text-sm text-ink">
                     {intentAdvisory.data.latest.proposal.summary}
                   </p>
                 </div>
                 <div>
-                  <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+                  <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                     Required search anchors
                   </p>
-                  <p className="mt-1 text-sm text-pacific">
+                  <p className="mt-1 text-sm text-ink">
                     {intentAdvisory.data.latest.proposal.required_search_terms?.join(' · ') || 'None'}
                   </p>
-                  <p className="mt-3 font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+                  <p className="mt-3 font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                     Alternative search terms
                   </p>
-                  <p className="mt-1 text-sm text-pacific">
+                  <p className="mt-1 text-sm text-ink">
                     {intentAdvisory.data.latest.proposal.search_terms?.join(' · ') || 'None'}
                   </p>
                 </div>
                 <div>
-                  <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+                  <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                     Proposed systems
                   </p>
-                  <p className="mt-1 text-sm text-pacific">
+                  <p className="mt-1 text-sm text-ink">
                     {intentAdvisory.data.latest.proposal.record_system_slugs?.join(' · ') || 'None'}
                   </p>
                 </div>
                 <div>
-                  <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+                  <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                     Proposed date range
                   </p>
-                  <p className="mt-1 text-sm text-pacific">
+                  <p className="mt-1 text-sm text-ink">
                     {intentAdvisory.data.latest.proposal.date_range?.start || 'No start proposed'}
                     {' to '}
                     {intentAdvisory.data.latest.proposal.date_range?.end || 'the receipt date'}
                   </p>
-                  <p className="mt-1 text-xs text-pacific/80">
+                  <p className="mt-1 text-xs text-ink-muted">
                     Only records in existence when the request arrived can be
                     responsive, so the end never runs past the receipt date.
                   </p>
                 </div>
                 <div>
-                  <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+                  <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                     Narrowing options to offer
                   </p>
                   {intentAdvisory.data.latest.proposal.narrowing_options?.length ? (
-                    <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-pacific">
+                    <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-ink">
                       {intentAdvisory.data.latest.proposal.narrowing_options.map((option) => (
                         <li key={option.rationale}>
                           {option.rationale}
-                          <span className="block text-xs text-pacific/80">
+                          <span className="block text-xs text-ink-muted">
                             {option.terms.join(' · ')}
                           </span>
                         </li>
                       ))}
                     </ul>
-                  ) : <p className="mt-1 text-sm text-pacific">None</p>}
-                  <p className="mt-1 text-xs text-pacific/80">
+                  ) : <p className="mt-1 text-sm text-ink">None</p>}
+                  <p className="mt-1 text-xs text-ink-muted">
                     Drafting material for a human scope conversation. Nothing
                     here narrows the request or reaches the requester.
                   </p>
                 </div>
                 <div>
-                  <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+                  <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                     Questions for human consideration
                   </p>
                   {intentAdvisory.data.latest.proposal.clarification_questions?.length ? (
-                    <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-pacific">
+                    <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-ink">
                       {intentAdvisory.data.latest.proposal.clarification_questions.map((question) => (
                         <li key={question}>{question}</li>
                       ))}
                     </ul>
-                  ) : <p className="mt-1 text-sm text-pacific">None</p>}
+                  ) : <p className="mt-1 text-sm text-ink">None</p>}
                 </div>
               </div>
             )}
@@ -1157,19 +1157,19 @@ export function RequestDetail({
 
         {showCollection && canManageRequest && (
           <Card title="Google Vault scope count" className="lg:col-span-2">
-            <p className="text-sm text-pacific/80">
+            <p className="text-sm text-ink-muted">
               Count possible Gmail messages for human-reviewed terms, district
               custodians, and an optional date range. This does not create an
               export, hold, collection task, status change, or requester message.
               The first count may create the request&apos;s empty Vault matter.
             </p>
-            <p className="mt-1 text-xs text-pacific/80">
+            <p className="mt-1 text-xs text-ink-muted">
               Google does not provide this count operation for Drive. A count is
               a scoping estimate, not a responsiveness determination.
             </p>
             {vaultCounts.isError && <ErrorNote error={vaultCounts.error} />}
             {vaultCounts.data && !vaultCounts.data.enabled && (
-              <p className="mt-3 text-sm text-amber-800">
+              <p className="mt-3 text-sm text-warning-ink">
                 Vault counting is unavailable until the delegated Vault identity is configured.
               </p>
             )}
@@ -1194,13 +1194,13 @@ export function RequestDetail({
                 />
               </Field>
               <fieldset>
-                <legend className="font-heading text-sm font-bold text-pacific">
+                <legend className="font-heading text-sm font-bold text-ink">
                   Account scope
                 </legend>
-                <p className="mt-1 text-xs text-pacific/80">
+                <p className="mt-1 text-xs text-ink-muted">
                   Choose the narrowest scope you can support. All district accounts may take longer.
                 </p>
-                <div className="mt-2 flex flex-wrap gap-5 text-sm text-pacific">
+                <div className="mt-2 flex flex-wrap gap-5 text-sm text-ink">
                   <label className="flex items-center gap-2">
                     <input
                       type="radio"
@@ -1281,54 +1281,54 @@ export function RequestDetail({
             </form>
             {requestVaultCount.isError && <ErrorNote error={requestVaultCount.error} />}
             {['pending', 'running'].includes(vaultCounts.data?.latest?.state ?? '') && (
-              <p className="mt-4 text-sm text-pacific/80">Vault count in progress…</p>
+              <p className="mt-4 text-sm text-ink-muted">Vault count in progress…</p>
             )}
             {vaultCounts.data?.latest?.state === 'failed' && (
-              <p className="mt-4 text-sm text-red-700">
+              <p className="mt-4 text-sm text-danger-ink">
                 {vaultCounts.data.latest.failure_detail}
               </p>
             )}
             {vaultCounts.data?.latest?.state === 'complete' && (
-              <div className="mt-5 rounded-lg border border-seaglass/40 bg-skylight/50 p-4">
-                <p className="font-heading text-2xl font-bold text-pacific">
+              <div className="mt-5 rounded-lg border border-flow bg-surface-sunken p-4">
+                <p className="font-heading text-2xl font-bold text-ink">
                   {new Intl.NumberFormat().format(vaultCounts.data.latest.total_count ?? 0)}{' '}
                   possible Gmail messages
                 </p>
-                <p className="mt-1 text-sm text-pacific/80">
+                <p className="mt-1 text-sm text-ink-muted">
                   This is a search-universe estimate, not a responsiveness determination.
                 </p>
-                <p className="mt-1 text-xs text-pacific/80">
+                <p className="mt-1 text-xs text-ink-muted">
                   Scope: {vaultCounts.data.latest.search_scope === 'entire_org'
                     ? 'all district accounts'
                     : `${vaultCounts.data.latest.custodian_emails.length} specified district account(s)`}
                 </p>
                 <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-4">
                   <div>
-                    <dt className="text-pacific/80">Accounts queried</dt>
-                    <dd className="font-heading font-bold text-pacific">
+                    <dt className="text-ink-muted">Accounts queried</dt>
+                    <dd className="font-heading font-bold text-ink">
                       {vaultCounts.data.latest.queried_accounts_count ?? 0}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-pacific/80">Accounts matching</dt>
-                    <dd className="font-heading font-bold text-pacific">
+                    <dt className="text-ink-muted">Accounts matching</dt>
+                    <dd className="font-heading font-bold text-ink">
                       {vaultCounts.data.latest.matching_accounts_count ?? 0}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-pacific/80">Not queryable</dt>
-                    <dd className="font-heading font-bold text-pacific">
+                    <dt className="text-ink-muted">Not queryable</dt>
+                    <dd className="font-heading font-bold text-ink">
                       {vaultCounts.data.latest.non_queryable_accounts_count ?? 0}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-pacific/80">Account errors</dt>
-                    <dd className="font-heading font-bold text-pacific">
+                    <dt className="text-ink-muted">Account errors</dt>
+                    <dd className="font-heading font-bold text-ink">
                       {vaultCounts.data.latest.accounts_with_errors_count ?? 0}
                     </dd>
                   </div>
                 </dl>
-                <p className="mt-3 text-xs text-pacific/80">
+                <p className="mt-3 text-xs text-ink-muted">
                   Input SHA-256 {vaultCounts.data.latest.input_sha256.slice(0, 16)}… ·{' '}
                   {vaultCounts.data.latest.trigger === 'automatic'
                     ? 'run automatically when the request arrived — review the scope before collecting'
@@ -1363,7 +1363,7 @@ export function RequestDetail({
                   </Button>
                 )}
                 {vaultCollectionState === 'failed' && (
-                  <div className="mt-4 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+                  <div className="mt-4 rounded-md border border-danger bg-danger-soft p-3 text-sm text-danger-ink">
                     <p className="font-semibold">Vault collection needs attention.</p>
                     <p className="mt-1">
                       {vaultCollectionRetryable
@@ -1379,15 +1379,15 @@ export function RequestDetail({
                   </div>
                 )}
                 {vaultCollectionState != null && vaultCollectionState !== 'failed' && (
-                  <div className="mt-4 rounded-md border border-seaglass/40 bg-white/70 p-3 text-sm text-pacific">
+                  <div className="mt-4 rounded-md border border-flow bg-surface-raised p-3 text-sm text-ink">
                     <p className="font-semibold">Vault export queued.</p>
-                    <p className="mt-1 text-pacific/80">
+                    <p className="mt-1 text-ink-muted">
                       Follow it in{' '}
-                      <Link to={`/requests/${r.number}/collection`} className="text-whulge underline">
+                      <Link to={`/requests/${r.number}/collection`} className="text-accent underline">
                         Collection tasks
                       </Link>
                       . After ingestion, classify the exported messages in{' '}
-                      <Link to={`/requests/${r.number}/records`} className="text-whulge underline">
+                      <Link to={`/requests/${r.number}/records`} className="text-accent underline">
                         Record items
                       </Link>
                       .
@@ -1402,68 +1402,68 @@ export function RequestDetail({
         {showOverview && <Card title="Deadlines">
           <dl className="space-y-3 text-sm">
             <div className="flex justify-between gap-3">
-              <dt className="text-pacific/80">Matter kind</dt>
-              <dd className="font-heading font-bold text-pacific">
+              <dt className="text-ink-muted">Matter kind</dt>
+              <dd className="font-heading font-bold text-ink">
                 {r.matter_kind_display}
               </dd>
             </div>
             <div className="flex justify-between gap-3">
-              <dt className="text-pacific/80">Received</dt>
-              <dd className="font-heading font-bold text-pacific">{r.received_at.slice(0, 10)}</dd>
+              <dt className="text-ink-muted">Received</dt>
+              <dd className="font-heading font-bold text-ink">{r.received_at.slice(0, 10)}</dd>
             </div>
             {r.matter_kind === 'public_records' && (
               <div className="flex justify-between gap-3">
-                <dt className="text-pacific/80">Statutory response due</dt>
-                <dd className="font-heading font-bold text-pacific">
+                <dt className="text-ink-muted">Statutory response due</dt>
+                <dd className="font-heading font-bold text-ink">
                   {r.statutory_response_due ?? '—'}
                 </dd>
               </div>
             )}
             {r.matter_kind === 'ferpa_parent' && (
               <div className="flex justify-between gap-3">
-                <dt className="text-pacific/80">FERPA access due (45 days)</dt>
-                <dd className="font-heading font-bold text-pacific">
+                <dt className="text-ink-muted">FERPA access due (45 days)</dt>
+                <dd className="font-heading font-bold text-ink">
                   {r.ferpa_access_due ?? '—'}
                 </dd>
               </div>
             )}
             <div className="flex justify-between gap-3">
-              <dt className="text-pacific/80">Estimated completion</dt>
-              <dd className="font-heading font-bold text-pacific">
+              <dt className="text-ink-muted">Estimated completion</dt>
+              <dd className="font-heading font-bold text-ink">
                 {r.estimated_completion ?? '—'}
               </dd>
             </div>
             {r.matter_kind === 'public_records' && (
               <div className="flex justify-between gap-3">
-                <dt className="text-pacific/80">Tolled business days</dt>
-                <dd className="font-heading font-bold text-pacific">
+                <dt className="text-ink-muted">Tolled business days</dt>
+                <dd className="font-heading font-bold text-ink">
                   {r.tolled_business_days}
                 </dd>
               </div>
             )}
             <div className="flex justify-between gap-3">
-              <dt className="text-pacific/80">Acknowledgment sent</dt>
-              <dd className="font-heading font-bold text-pacific">
+              <dt className="text-ink-muted">Acknowledgment sent</dt>
+              <dd className="font-heading font-bold text-ink">
                 {r.acknowledgment_sent_at ? r.acknowledgment_sent_at.slice(0, 10) : '—'}
               </dd>
             </div>
             <div className="flex justify-between gap-3">
-              <dt className="text-pacific/80">Closed</dt>
-              <dd className="font-heading font-bold text-pacific">
+              <dt className="text-ink-muted">Closed</dt>
+              <dd className="font-heading font-bold text-ink">
                 {r.closed_at ? r.closed_at.slice(0, 10) : '—'}
               </dd>
             </div>
           </dl>
-          <div className="mt-5 border-t border-driftwood/50 pt-4">
+          <div className="mt-5 border-t border-line pt-4">
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone={responsePlanStatus.tone}>{responsePlanStatus.title}</Badge>
               {responsePlan?.automated === true && (
-                <span className="text-xs text-pacific/80">Automated safety-net message</span>
+                <span className="text-xs text-ink-muted">Automated safety-net message</span>
               )}
             </div>
-            <p className="mt-2 text-sm text-pacific/80">{responsePlanStatus.description}</p>
+            <p className="mt-2 text-sm text-ink-muted">{responsePlanStatus.description}</p>
             {r.external_initial_response && (
-              <p className="mt-2 text-sm text-pacific">
+              <p className="mt-2 text-sm text-ink">
                 Recorded as sent through {r.external_initial_response.sent_via_label}
                 {r.external_initial_response.responded_on
                   ? ` on ${r.external_initial_response.responded_on}`
@@ -1475,9 +1475,9 @@ export function RequestDetail({
               </p>
             )}
             {r.matter_kind === 'ferpa_parent' && (
-              <div className="mt-3 border-t border-driftwood/50 pt-3">
+              <div className="mt-3 border-t border-line pt-3">
                 {r.ferpa_identity_verification ? (
-                  <p className="text-sm text-pacific">
+                  <p className="text-sm text-ink">
                     Identity verified under 34 CFR 99.10 by{' '}
                     {r.ferpa_identity_verification.method_display.toLowerCase()}
                     {r.ferpa_identity_verification.verified_by
@@ -1488,7 +1488,7 @@ export function RequestDetail({
                   </p>
                 ) : (
                   <>
-                    <p className="text-sm text-pacific/80">
+                    <p className="text-sm text-ink-muted">
                       No identity verification on record. Nothing may be
                       disclosed to this requester until one is.
                     </p>
@@ -1512,7 +1512,7 @@ export function RequestDetail({
               </div>
             )}
             {responsePlan?.next_action && (
-              <p className="mt-2 font-heading text-sm font-bold text-pacific">
+              <p className="mt-2 font-heading text-sm font-bold text-ink">
                 {`Next: ${responsePlan.next_action}`}
               </p>
             )}
@@ -1527,21 +1527,21 @@ export function RequestDetail({
                       aria-hidden="true"
                       className={`mt-1.5 size-2 shrink-0 rounded-full ${
                         step.state === 'done'
-                          ? 'bg-seaglass'
+                          ? 'bg-flow'
                           : step.state === 'current'
-                            ? 'bg-whulge'
-                            : 'bg-driftwood'
+                            ? 'bg-accent'
+                            : 'bg-line-strong'
                       }`}
                     />
                     <span
-                      // pacific/80 is the lightest tint that clears WCAG 2 AA
-                      // at 14px on white; /70 is 4.44:1 and fails.
+                      // ink-muted is the lightest ink token that clears WCAG 2
+                      // AA at 14px in every theme.
                       className={
                         step.state === 'current'
-                          ? 'font-heading font-semibold text-pacific'
+                          ? 'font-heading font-semibold text-ink'
                           : step.state === 'done'
-                            ? 'text-pacific/80 line-through'
-                            : 'text-pacific/80'
+                            ? 'text-ink-muted line-through'
+                            : 'text-ink-muted'
                       }
                     >
                       {step.label}
@@ -1558,18 +1558,18 @@ export function RequestDetail({
               </ol>
             )}
             {responsePlan?.state !== 'delivered' && (
-              <p className="mt-2 text-xs text-pacific/80">
+              <p className="mt-2 text-xs text-ink-muted">
                 {responsePlan?.automatic_check ?? 'Hourly at :30 Pacific on and after the due date.'}
               </p>
             )}
             {canManageRequest && (
               <div className="mt-3 flex flex-wrap gap-4 text-sm">
-                <Link to="/configuration/message-templates" className="text-whulge underline-offset-2 hover:underline">
+                <Link to="/configuration/message-templates" className="text-accent underline-offset-2 hover:underline">
                   Review five-day response template
                 </Link>
                 <Link
                   to={`/requests/${r.number}/messages`}
-                  className="text-whulge underline-offset-2 hover:underline"
+                  className="text-accent underline-offset-2 hover:underline"
                 >
                   Prepare a human acknowledgment
                 </Link>
@@ -1579,27 +1579,27 @@ export function RequestDetail({
         </Card>}
 
         {showOverview && <Card title="Estimate">
-          <p className="text-sm text-pacific/80">Current estimated completion</p>
-          <p className="mt-1 font-heading text-2xl font-bold text-pacific">
+          <p className="text-sm text-ink-muted">Current estimated completion</p>
+          <p className="mt-1 font-heading text-2xl font-bold text-ink">
             {r.estimated_completion ?? '—'}
           </p>
           {canManageRequest && (
-            <p className="mt-2 text-xs text-pacific/80">
+            <p className="mt-2 text-xs text-ink-muted">
               Draft estimate revisions in Messages; the
               estimate changes only after confirmed delivery.
             </p>
           )}
           {r.estimate_revisions.length > 0 && (
-            <div className="mt-4 space-y-2 border-t border-driftwood/40 pt-3">
-              <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+            <div className="mt-4 space-y-2 border-t border-line pt-3">
+              <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                 Revision history
               </p>
               {r.estimate_revisions.map((rev, i) => (
-                <div key={i} className="text-sm text-pacific">
+                <div key={i} className="text-sm text-ink">
                   <span className="font-heading font-bold">
                     {rev.previous_date ?? '—'} → {rev.new_date}
                   </span>
-                  <span className="text-pacific/80">
+                  <span className="text-ink-muted">
                     {canManageRequest ? (
                       <>
                         {' '}— {rev.reason} ({rev.automated ? 'automated' : rev.revised_by ?? 'system'},{' '}
@@ -1647,13 +1647,13 @@ export function RequestDetail({
                   return (
                     <div
                       key={attachment.id}
-                      className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-driftwood/40 p-3"
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line p-3"
                     >
                       <div>
-                        <p className="font-heading text-sm font-bold text-pacific">
+                        <p className="font-heading text-sm font-bold text-ink">
                           {attachment.original_filename}
                         </p>
-                        <p className="text-xs text-pacific/80">
+                        <p className="text-xs text-ink-muted">
                           {humanFileSize(attachment.size)} · SHA-256 {attachment.sha256.slice(0, 12)}…
                         </p>
                       </div>
@@ -1702,7 +1702,7 @@ export function RequestDetail({
           )}
           <Link
             to={`/requests/${r.number}/collection`}
-            className="mt-4 inline-block text-sm font-semibold text-whulge underline-offset-2 hover:underline"
+            className="mt-4 inline-block text-sm font-semibold text-accent underline-offset-2 hover:underline"
           >
             Open collection work
           </Link>
@@ -1710,7 +1710,7 @@ export function RequestDetail({
 
         {showCollection && r.footage_preservations.length > 0 && (
           <Card title="Footage preservation" className="lg:col-span-2">
-            <p className="mb-3 text-sm text-pacific/80">
+            <p className="mb-3 text-sm text-ink-muted">
               Cameras overwrite footage on a fixed schedule. Once a request has
               been received, letting that footage age out is destruction of a
               public record under RCW 42.56.100 — holds here are racing that
@@ -1733,11 +1733,11 @@ export function RequestDetail({
                     roles.includes('records_officer')
                     || roles.includes('admin')
                   ) ? (
-                    <p className="text-sm text-pacific/80">
+                    <p className="text-sm text-ink-muted">
                       Hold details and authorized controls are listed below in this case.
                     </p>
                   ) : (
-                    <p className="text-sm text-pacific/80">
+                    <p className="text-sm text-ink-muted">
                       <strong>Records Officer handoff required.</strong>{' '}
                       Preservation details and camera exclusions are restricted.
                     </p>
@@ -1761,7 +1761,7 @@ export function RequestDetail({
             reopen.mutate()
           }}
         >
-          <p className="text-sm text-pacific/80">
+          <p className="text-sm text-ink-muted">
             The closure stays on the timeline. Reopening does not restart the
             RCW 42.56.520 response clock, so a request that closed overdue
             reopens overdue.
@@ -1873,12 +1873,12 @@ export function RequestDetail({
         }}
       >
         <div className="space-y-4">
-          <p className="text-sm text-pacific/80">
+          <p className="text-sm text-ink-muted">
             This creates a collection task and starts a Vault export for the exact
             completed count below. It does not decide which records are responsive
             and it does not send a requester message.
           </p>
-          <div className="rounded-lg border border-pacific/10 bg-skylight/50 p-3 text-sm text-pacific">
+          <div className="rounded-lg border border-line bg-surface-sunken p-3 text-sm text-ink">
             <p className="font-semibold">
               {new Intl.NumberFormat().format(latestVaultCount?.total_count ?? 0)} possible messages
             </p>
@@ -1896,18 +1896,18 @@ export function RequestDetail({
             </p>
           </div>
           {latestVaultCount?.search_scope === 'entire_org' ? (
-            <p className="text-sm text-amber-800">
+            <p className="text-sm text-warning-ink">
               This district-wide account scope may produce a large export. Google
               Vault does not support an organization-wide hold through this path;
               the export itself remains auditable and unchanged.
             </p>
           ) : (
-            <p className="text-sm text-pacific/80">
+            <p className="text-sm text-ink-muted">
               A targeted mail hold for the specified district accounts will be
               verified or created before the export starts.
             </p>
           )}
-          <label className="flex items-start gap-2 text-sm text-pacific">
+          <label className="flex items-start gap-2 text-sm text-ink">
             <input
               className="mt-1"
               type="checkbox"
@@ -1949,7 +1949,7 @@ export function RequestDetail({
         onClose={() => setClosingCase(false)}
       >
         <form onSubmit={submitCaseClosure} className="space-y-4">
-          <p className="text-sm text-pacific/80">
+          <p className="text-sm text-ink-muted">
             The closure, your name, and this reason go on the timeline and into
             the audit trail. Nothing is deleted and no requester message is
             sent.
@@ -2032,7 +2032,7 @@ export function RequestDetail({
         onClose={() => setClosingNonRequest(false)}
       >
         <form onSubmit={submitNonRequestClosure} className="space-y-4">
-          <p className="text-sm text-pacific/80">
+          <p className="text-sm text-ink-muted">
             This preserves the original email, request row, timeline, and audit
             trail while recording that the message did not ask for public records.
           </p>
@@ -2075,7 +2075,7 @@ export function RequestDetail({
         onClose={() => setVerifyingFerpa(false)}
       >
         <form onSubmit={submitFerpaVerification} className="space-y-4">
-          <p className="text-sm text-pacific/80">
+          <p className="text-sm text-ink-muted">
             34 CFR 99.10 gives the right of access to a parent or eligible
             student and to nobody else. This records your judgment that the
             person asking is that person: the method and what you relied on go
@@ -2134,7 +2134,7 @@ export function RequestDetail({
         onClose={() => setAttesting(false)}
       >
         <form onSubmit={submitAttestation} className="space-y-4">
-          <p className="text-sm text-pacific/80">
+          <p className="text-sm text-ink-muted">
             This records your statement that the five-day response already
             reached the requester through a channel this system did not
             deliver. It sends nothing and starts no clock. The channel, the
@@ -2189,7 +2189,7 @@ export function RequestDetail({
         onClose={() => setMerging(false)}
       >
         <form onSubmit={submitMerge} className="space-y-4">
-          <p className="text-sm text-pacific/80">
+          <p className="text-sm text-ink-muted">
             Every requester email on this case moves to the case you name, this
             case closes as Closed – Duplicate with a link to it, and the merge
             is recorded on both timelines. The case you name keeps its own

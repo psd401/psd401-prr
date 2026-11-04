@@ -8,19 +8,19 @@ import { boundedActivity, type ActivityEntry } from './activity'
 
 function ActivityList({ entries }: { entries: ActivityEntry[] }) {
   return (
-    <ol className="space-y-4 border-l-2 border-seaglass/40 pl-4">
+    <ol className="space-y-4 border-l-2 border-flow pl-4">
       {entries.map((entry) => (
         <li key={entry.id} className="relative">
           <span
             className={
               'absolute -left-[21px] top-1 size-2.5 rounded-full '
-              + (entry.flagged ? 'bg-red-600' : 'bg-seaglass')
+              + (entry.flagged ? 'bg-danger' : 'bg-flow')
             }
           />
-          <p className="text-xs text-pacific/80">
+          <p className="text-xs text-ink-muted">
             {entry.occurred_at.slice(0, 16).replace('T', ' ')} · {entry.type}
           </p>
-          <p className="font-heading text-sm font-bold text-pacific">
+          <p className="font-heading text-sm font-bold text-ink">
             {entry.label}
           </p>
           {entry.detail && (
@@ -28,8 +28,8 @@ function ActivityList({ entries }: { entries: ActivityEntry[] }) {
               className={
                 'mt-1 whitespace-pre-wrap text-sm '
                 + (entry.flagged
-                  ? 'rounded-md border border-red-300 bg-red-50 p-2 text-red-950'
-                  : 'text-pacific/80')
+                  ? 'rounded-md border border-danger bg-danger-soft p-2 text-danger-ink'
+                  : 'text-ink-muted')
               }
             >
               {entry.detail}
@@ -40,7 +40,7 @@ function ActivityList({ entries }: { entries: ActivityEntry[] }) {
               may see that no person acted; anyone else gets no byline rather
               than invented provenance. */}
           {entry.actor_username && (
-            <p className="mt-1 text-xs text-pacific/80">
+            <p className="mt-1 text-xs text-ink-muted">
               By {entry.actor_username}
             </p>
           )}

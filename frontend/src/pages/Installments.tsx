@@ -512,7 +512,7 @@ export function Installments({
           title="Ready to release"
           actions={ready.length > 0 ? (
             <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 text-sm text-pacific">
+              <label className="flex items-center gap-2 text-sm text-ink">
                 <input
                   type="checkbox"
                   checked={allSelected}
@@ -612,18 +612,18 @@ export function Installments({
         {schedules.isError ? (
           <ErrorNote error={schedules.error} />
         ) : currentSchedule ? (
-          <div className="space-y-2 text-sm text-pacific">
+          <div className="space-y-2 text-sm text-ink">
             <p>
               <span className="font-heading font-semibold">{currentSchedule.name}</span>{' '}
               <Badge tone="green">Effective {currentSchedule.effective_on}</Badge>
             </p>
             <p>Statutory schedule: $0.15 photocopy page, $0.10 scanned page, $0.05 per four electronic files, and $0.10/GB.</p>
-            <p className="text-xs text-pacific/80">
+            <p className="text-xs text-ink-muted">
               Counsel: {currentSchedule.counsel_approval_reference} · Adoption: {currentSchedule.adoption_reference}
             </p>
           </div>
         ) : (
-          <p className="text-sm text-pacific/80">
+          <p className="text-sm text-ink-muted">
             No fee schedule is active. Do not assess or communicate a fee until counsel approval and formal district adoption are recorded.
           </p>
         )}
@@ -643,19 +643,19 @@ export function Installments({
         {waiverFloors.isError ? (
           <ErrorNote error={waiverFloors.error} />
         ) : currentFloor ? (
-          <div className="space-y-1 text-sm text-pacific">
+          <div className="space-y-1 text-sm text-ink">
             <p>
               Assessments under{' '}
               <span className="font-heading font-semibold">${currentFloor.amount}</span>{' '}
               prompt a waiver. Nothing is waived automatically; a Records Officer
               records the waiver and its reason on the assessment.
             </p>
-            <p className="text-xs text-pacific/80">
+            <p className="text-xs text-ink-muted">
               Counsel: {currentFloor.counsel_reference} · Effective {currentFloor.effective_on}
             </p>
           </div>
         ) : (
-          <p className="text-sm text-pacific/80">
+          <p className="text-sm text-ink-muted">
             No waiver floor is adopted, so no assessment will prompt a waiver.
           </p>
         )}
@@ -676,7 +676,7 @@ export function Installments({
           {depositGates.isError ? (
             <ErrorNote error={depositGates.error} />
           ) : gateRows.length === 0 ? (
-            <p className="text-sm text-pacific/80">
+            <p className="text-sm text-ink-muted">
               No deposit is holding work on this case. A deposit gate stops
               collection or production until the requester pays; it never closes
               the case and never expires.
@@ -737,7 +737,7 @@ export function Installments({
                         Lift
                       </Button>
                     </div>
-                  ) : <span className="text-xs text-pacific/70">—</span>),
+                  ) : <span className="text-xs text-ink-muted">—</span>),
                 },
               ]}
               rows={gateRows}
@@ -854,13 +854,13 @@ export function Installments({
                         {r.requires_access_code ? 'Change access code' : 'Add access code'}
                       </Button>
                       {r.fee_assessment?.below_waiver_floor && !r.fee_paid_at && (
-                        <span className="self-center text-xs font-semibold text-amber-900">
+                        <span className="self-center text-xs font-semibold text-warning-ink">
                           Under the ${r.fee_assessment.waiver_floor_amount} waiver
                           floor — waive it or collect it
                         </span>
                       )}
                       {openProductionGate ? (
-                        <span className="self-center text-xs font-semibold text-amber-900">
+                        <span className="self-center text-xs font-semibold text-warning-ink">
                           ${openProductionGate.amount} deposit required before
                           production
                         </span>
@@ -887,7 +887,7 @@ export function Installments({
                         Prepare package
                       </Button>
                       ) : feeBalance > 0 && !r.fee_paid_at ? (
-                        <span className="self-center text-xs font-semibold text-amber-900">Payment required</span>
+                        <span className="self-center text-xs font-semibold text-warning-ink">Payment required</span>
                       ) : (
                         <Button
                           type="button"
@@ -924,7 +924,7 @@ export function Installments({
             activateSchedule.mutate()
           }}
         >
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             This creates an immutable schedule from the rates the district adopted. Activate it only after district counsel approval and formal adoption; the application does not supply either approval, and it will refuse a statutory-default rate above the RCW 42.56.120 cap.
           </p>
           <Field label="Basis">
@@ -1086,7 +1086,7 @@ export function Installments({
             activateFloor.mutate()
           }}
         >
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             An assessment under this amount will prompt the officer to waive it.
             Adopting a floor waives nothing by itself and changes no existing
             assessment.
@@ -1146,7 +1146,7 @@ export function Installments({
             applyGate.mutate()
           }}
         >
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             RCW 42.56.120(2) allows a deposit of up to ten percent of the
             estimated charge. While the deposit is open the work you pick here
             refuses to run. The case stays open and nothing closes on its own.
@@ -1223,7 +1223,7 @@ export function Installments({
             if (payingGate) recordGatePayment.mutate(payingGate)
           }}
         >
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             Recording the full deposit releases the held work. A partial payment
             does not; lift the gate with a reason instead.
           </p>
@@ -1300,7 +1300,7 @@ export function Installments({
             if (liftingGate) liftGate.mutate(liftingGate)
           }}
         >
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             This releases the held work without the deposit. The reason is
             recorded on the case under your name.
           </p>
@@ -1339,7 +1339,7 @@ export function Installments({
             if (assessing) assessFee.mutate(assessing)
           }}
         >
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             Apply {currentSchedule?.name} to {assessing?.request_number}, installment {assessing?.sequence}. The calculation and every revision are retained as immutable evidence.
           </p>
           <div className="grid gap-4 md:grid-cols-4">
@@ -1377,7 +1377,7 @@ export function Installments({
               </Field>
             ))}
           </div>
-          <label className="flex items-start gap-2 text-sm text-pacific">
+          <label className="flex items-start gap-2 text-sm text-ink">
             <input
               type="checkbox"
               checked={assessmentForm.use_flat_fee}
@@ -1395,8 +1395,8 @@ export function Installments({
               onChange={(event) => setAssessmentForm({ ...assessmentForm, waiver_reason: event.target.value })}
             />
           </Field>
-          <fieldset className="space-y-3 rounded-lg border border-driftwood/60 p-4">
-            <legend className="px-1 font-heading text-sm font-semibold text-pacific">Customized service charge (only when legally applicable)</legend>
+          <fieldset className="space-y-3 rounded-lg border border-line p-4">
+            <legend className="px-1 font-heading text-sm font-semibold text-ink">Customized service charge (only when legally applicable)</legend>
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="Customized service cost">
                 <Input
@@ -1472,7 +1472,7 @@ export function Installments({
             if (recordingPayment) recordPayment.mutate(recordingPayment)
           }}
         >
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             Record district finance receipt evidence for {recordingPayment?.request_number}. Partial payments remain outstanding; release stays blocked until the exact assessed total is recorded.
           </p>
           <Field label="Amount received">
@@ -1531,11 +1531,11 @@ export function Installments({
         onClose={() => setGeneratingLog(null)}
       >
         <div className="space-y-4">
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             Generate the RCW 42.56.210(3) exemption and withholding log for{' '}
             {generatingLog?.request_number}, installment {generatingLog?.sequence}?
           </p>
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             The PDF is derived from the approved review, citation, redaction, and
             second-review evidence. It is stored as an immutable artifact and included
             in the requester package.
@@ -1561,11 +1561,11 @@ export function Installments({
         onClose={() => setPreparing(null)}
       >
         <div className="space-y-4">
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             Prepare {preparing?.request_number}, installment {preparing?.sequence}?
             The system will verify every source against its SHA-256 digest and recorded byte count.
           </p>
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             The resulting requester ZIP is an immutable legal artifact and cannot be overwritten.
             If the installment contents later change, prepare a new package.
           </p>
@@ -1595,12 +1595,12 @@ export function Installments({
       >
         {releasedLink ? (
           <div className="space-y-4">
-            <p className="text-sm text-pacific">
+            <p className="text-sm text-ink">
               The package is released and the requester notice has been sent
               under your name. The scoped URL is shown only in this response and
               the protected message; it is not exposed in the installment list.
             </p>
-            <p className="text-xs text-pacific/80">
+            <p className="text-xs text-ink-muted">
               Draft reference: {releasedNoticeId}
             </p>
             <Input
@@ -1620,23 +1620,23 @@ export function Installments({
           </div>
         ) : (
           <div className="space-y-4">
-            <p className="text-sm text-pacific">
+            <p className="text-sm text-ink">
               Release {releasing?.request_number}, installment {releasing?.sequence}
               {' '}and send the notice? This activates requester access to the
               verified package and delivers the installment notice, drafted by
               the server from this installment, under your name. The scoped link
               will expire.
             </p>
-            <p className="text-sm text-pacific">
+            <p className="text-sm text-ink">
               Confirm that any approved fee is paid and that the package is ready to communicate to the requester.
             </p>
             {releasing?.requires_access_code && (
-              <p className="text-sm text-pacific">
+              <p className="text-sm text-ink">
                 This installment has an access code. Send the code to the
                 requester in a separate message; it is not in this notice.
               </p>
             )}
-            <label className="flex items-start gap-2 text-sm text-pacific">
+            <label className="flex items-start gap-2 text-sm text-ink">
               <input
                 type="checkbox"
                 checked={isFinal}
@@ -1675,14 +1675,14 @@ export function Installments({
             if (editingContents) setItems.mutate(editingContents.id)
           }}
         >
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             Contents can change only until a package is prepared. After that the
             installment is an immutable legal artifact; to ship a different set
             of records, create a new installment.
           </p>
           <div className="max-h-72 space-y-1 overflow-y-auto">
             {editCandidates.map((row) => (
-              <label key={row.id} className="flex items-center gap-2 text-sm text-pacific">
+              <label key={row.id} className="flex items-center gap-2 text-sm text-ink">
                 <input
                   type="checkbox"
                   aria-label={`Include ${row.original_filename || row.id}`}
@@ -1722,14 +1722,14 @@ export function Installments({
             if (revoking) revoke.mutate(revoking.id)
           }}
         >
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             Revoking ends the requester's access to installment{' '}
             {revoking?.sequence} of {revoking?.request_number}. The released
             package, its manifest, and the audit trail are untouched; only the
             link stops working. The requester sees a page telling them to
             contact the records officer.
           </p>
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             Its records become available to put into a new installment.
           </p>
           <Field
@@ -1770,7 +1770,7 @@ export function Installments({
             if (codingAccess) setCode.mutate(codingAccess.id)
           }}
         >
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             An access code adds a second factor to the download page. Send it to
             the requester in a separate message — never in the notice that
             carries the link. The code is stored only as a hash: nobody,

@@ -176,13 +176,22 @@ async function checkResponsiveSurface(
   })
 }
 
-test('accessibility-audit', async ({ page }) => {
-  test.setTimeout(120_000)
-  const records: AuditRecord[] = []
-  const automatedChecks: AutomatedCheckRecord[] = []
+// Nexus themes (psd-dev-standards 10, rule 3). The first is the default the
+// responsive and forced-colors checks run in; every theme gets the full axe pass.
+const THEMES = ['nexus', 'commons', 'dark', 'commons-dark', 'high-contrast'] as const
+type Theme = (typeof THEMES)[number]
 
+async function useTheme(page: Page, theme: Theme) {
+  // The same per-browser choice the Appearance picker stores.
+  await page.addInitScript((value) => {
+    window.localStorage.setItem('prr-theme', value)
+  }, theme)
+}
+
+async function auditSurfaces(page: Page, theme: Theme, records: AuditRecord[]) {
   await page.goto('http://127.0.0.1:8000/')
   await page.goto('/')
+  await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
   await audit(page, 'login', records)
 
@@ -350,6 +359,16 @@ test('accessibility-audit', async ({ page }) => {
     'Activate fee schedule dialog',
     records,
   )
+  await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+}
+
+test('accessibility-audit', async ({ page }) => {
+  test.setTimeout(120_000)
+  const records: AuditRecord[] = []
+  const automatedChecks: AutomatedCheckRecord[] = []
+
+  await useTheme(page, 'nexus')
+  await auditSurfaces(page, 'nexus', records)
 
   // Two Inbox layouts, not one: the assignment queues render work rows (the
   // layout the retired My Work screen used to contribute here) and the
@@ -410,3 +429,22 @@ test('accessibility-audit', async ({ page }) => {
     'utf8',
   )
 })
+
+for (const theme of THEMES.slice(1)) {
+  test(`accessibility-audit in the ${theme} theme`, async ({ page }) => {
+    test.setTimeout(120_000)
+    const records: AuditRecord[] = []
+    await useTheme(page, theme)
+    await auditSurfaces(page, theme, records)
+    await writeFile(
+      path.resolve(`../.verification/axe-report-${theme}.json`),
+      `${JSON.stringify({
+        source_sha: process.env.PRR_SOURCE_SHA ?? 'local-uncommitted',
+        theme,
+        serious_or_critical: 0,
+        surfaces: records,
+      }, null, 2)}\n`,
+      'utf8',
+    )
+  })
+}

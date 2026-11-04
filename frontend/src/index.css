@@ -1,45 +1,102 @@
-/* ABOUTME: Tailwind entry + PSD brand design tokens and typography.
-   Source Sans keeps dense staff UI legible; Source Serif is an editorial accent. */
+/* ABOUTME: Tailwind entry over the vendored Nexus design system (psd-dev-standards 10).
+   ABOUTME: Nexus tokens become Tailwind colors here; themes switch via data-theme on <html>. */
 @import "tailwindcss";
+/* Nexus tokens override Tailwind's defaults of the same name (radius, ease,
+   font-sans, font-mono) because `base` sorts after `theme`. Component styles go
+   in `components`, so a Tailwind utility on an nx- element still wins. */
+@import "./nexus/tokens.css" layer(base);
+@import "./nexus/bundle.css" layer(components);
 
-@theme {
-  --color-pacific: #25424c;
-  --color-seaglass: #6ca18a;
-  --color-driftwood: #d7cdbe;
-  --color-cedar: #466857;
-  --color-whulge: #346780;
-  --color-seafoam: #eeebe4;
-  --color-meadow: #5d9068;
-  --color-ocean: #7396a9;
-  --color-skylight: #fffaec;
+/* Every Nexus theme, for `commons:` / `dark:`-style overrides on a screen. */
+@custom-variant commons (&:where([data-theme="commons"], [data-theme="commons"] *));
 
-  --font-heading: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
-  --font-body: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
-  --font-editorial: "Source Serif 4", ui-serif, Georgia, serif;
+/* `inline` makes each utility read the Nexus variable where it is used, so a
+   theme set on any ancestor recolors it. */
+@theme inline {
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-black: #000;
+
+  --color-surface-canvas: var(--surface-canvas);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-selected: var(--surface-selected);
+  --color-surface-header: var(--surface-header);
+  --color-on-header: var(--on-header);
+  --color-on-header-muted: var(--on-header-muted);
+  --color-surface-inverse: var(--surface-inverse);
+  --color-on-inverse: var(--on-inverse);
+  --color-scrim: var(--scrim);
+
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-ink-disabled: var(--ink-disabled);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-action: var(--action);
+  --color-action-hover: var(--action-hover);
+  --color-on-action: var(--on-action);
+  --color-accent: var(--accent);
+  --color-focus: var(--focus);
+  --color-focus-on-header: var(--focus-on-header);
+
+  --color-flow: var(--flow);
+  --color-flow-soft: var(--flow-soft);
+  --color-flow-ink: var(--flow-ink);
+  --color-agent: var(--agent);
+  --color-on-agent: var(--on-agent);
+  --color-attention: var(--attention);
+  --color-attention-soft: var(--attention-soft);
+  --color-attention-ink: var(--attention-ink);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-ink: var(--success-ink);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-ink: var(--warning-ink);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-ink: var(--danger-ink);
+  --color-on-danger: var(--on-danger);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-ink: var(--info-ink);
+
+  --font-heading: var(--font-sans);
+  --font-body: var(--font-sans);
+  --font-editorial: var(--font-display);
 }
 
-body {
-  font-family: var(--font-body);
-  background-color: var(--color-seafoam);
-  color: var(--color-pacific);
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-}
+/* Layered so an nx- component (in `components`) still sets its own font and
+   color over these element defaults. */
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--surface-canvas);
+    color: var(--ink);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
 
-h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-heading);
-  font-weight: 700;
-  letter-spacing: -0.018em;
-}
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+    font-weight: 700;
+    letter-spacing: -0.018em;
+  }
 
-button, input, select, textarea {
-  font: inherit;
-}
+  button, input, select, textarea {
+    font: inherit;
+  }
 
-::selection {
-  background-color: color-mix(in srgb, var(--color-seaglass) 35%, transparent);
+  ::selection {
+    background-color: var(--surface-selected);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

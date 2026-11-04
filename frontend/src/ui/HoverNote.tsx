@@ -43,7 +43,7 @@ export function HoverNote({
           side="top"
           align="start"
           sideOffset={4}
-          className="z-50 max-w-sm rounded-lg border border-driftwood bg-white px-2.5 py-1.5 text-xs text-pacific shadow-lg"
+          className="nx-tooltip z-50 max-w-sm"
         >
           {text}
         </Tooltip.Content>

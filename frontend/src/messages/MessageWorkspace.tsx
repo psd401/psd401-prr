@@ -652,9 +652,9 @@ function RequestMessageWorkspace({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-driftwood/50 bg-skylight/50 p-3">
+      <div className="rounded-lg border border-line bg-surface-sunken p-3">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="flex rounded-lg border border-driftwood bg-white p-1">
+          <div className="flex rounded-lg border border-line bg-surface-raised p-1">
             <Button
               variant={mode === 'messages' ? 'secondary' : 'ghost'}
               aria-pressed={mode === 'messages'}
@@ -701,7 +701,7 @@ function RequestMessageWorkspace({
         </div>
 
         <details className="mt-3">
-          <summary className="cursor-pointer font-heading text-sm font-semibold text-pacific">
+          <summary className="cursor-pointer font-heading text-sm font-semibold text-ink">
             Filters and sort
           </summary>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -829,17 +829,17 @@ function RequestMessageWorkspace({
               type="button"
               key={thread.id}
               onClick={() => updateParams({ [messageParam('thread')]: thread.id })}
-              className="flex w-full items-center justify-between rounded-lg border border-driftwood/50 bg-white p-3 text-left hover:border-ocean"
+              className="flex w-full items-center justify-between rounded-lg border border-line bg-surface-raised p-3 text-left hover:border-line-strong"
             >
               <span>
-                <span className="block font-heading font-semibold text-pacific">{thread.subject}</span>
-                <span className="text-xs text-pacific/80">Display-only provider thread</span>
+                <span className="block font-heading font-semibold text-ink">{thread.subject}</span>
+                <span className="text-xs text-ink-muted">Display-only provider thread</span>
               </span>
               <Badge tone="blue">{thread.message_count} messages</Badge>
             </button>
           ))}
           {threadRows.length > 0 && (
-            <p className="text-sm text-pacific/80">
+            <p className="text-sm text-ink-muted">
               Showing {threadsShownFrom}–{threadsShownThrough} of {threadTotal} threads
             </p>
           )}
@@ -883,8 +883,8 @@ function RequestMessageWorkspace({
           )}
 
           {Object.keys(checkedWork).length > 0 && (
-            <div className="flex flex-wrap items-end gap-2 rounded-lg border border-ocean/30 bg-ocean/5 p-3">
-              <span className="font-heading text-sm font-semibold text-pacific">
+            <div className="flex flex-wrap items-end gap-2 rounded-lg border border-line-strong bg-surface-sunken p-3">
+              <span className="font-heading text-sm font-semibold text-ink">
                 {Object.keys(checkedWork).length} selected (maximum 50)
               </span>
               <Field label="Bulk metadata action">
@@ -913,7 +913,7 @@ function RequestMessageWorkspace({
                 return (
                   <div
                     key={row.id}
-                    className={`rounded-lg border bg-white p-3 ${isSelected ? 'border-ocean ring-2 ring-ocean/20' : 'border-driftwood/50'}`}
+                    className={`rounded-lg border bg-surface-raised p-3 ${isSelected ? 'border-line-strong ring-2 ring-focus' : 'border-line'}`}
                   >
                     <div className="flex items-start gap-2">
                       {canManageInboundWork && row.work_item && (
@@ -941,11 +941,11 @@ function RequestMessageWorkspace({
                           </Badge>
                           {row.work_item && !row.work_item.is_read && <Badge tone="amber">Unread</Badge>}
                         </span>
-                        <span className="mt-2 block truncate font-heading font-semibold text-pacific">
+                        <span className="mt-2 block truncate font-heading font-semibold text-ink">
                           {summarySubject(row)}
                         </span>
-                        <span className="mt-1 line-clamp-2 block text-sm text-pacific/80">{summarySnippet(row)}</span>
-                        <span className="mt-2 block text-xs text-pacific/80">
+                        <span className="mt-1 line-clamp-2 block text-sm text-ink-muted">{summarySnippet(row)}</span>
+                        <span className="mt-2 block text-xs text-ink-muted">
                           {CORRESPONDENCE_KIND_LABELS[row.kind]} · {row.created_at.slice(0, 16).replace('T', ' ')}
                           {row.attachment_count ? ` · ${row.attachment_count} attachment${row.attachment_count === 1 ? '' : 's'}` : ''}
                         </span>
@@ -955,7 +955,7 @@ function RequestMessageWorkspace({
                 )
               })}
               {rows.length > 0 && (
-                <p className="text-sm text-pacific/80">
+                <p className="text-sm text-ink-muted">
                   Showing {shownFrom}–{shownThrough} of {total} messages
                 </p>
               )}
@@ -993,7 +993,7 @@ function RequestMessageWorkspace({
               {detail.data && (
                 <div className="space-y-3">
                   {canManageInboundWork && activeWork && (
-                    <div className="rounded-lg border border-driftwood/50 bg-skylight/50 p-3">
+                    <div className="rounded-lg border border-line bg-surface-sunken p-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge tone={activeWork.is_read ? 'neutral' : 'amber'}>
                           Personal: {activeWork.is_read ? 'Read' : 'Unread'}
@@ -1001,7 +1001,7 @@ function RequestMessageWorkspace({
                         <Badge tone={activeWork.disposition === 'needs_attention' ? 'red' : 'blue'}>
                           Team: {WORK_DISPOSITION_LABELS[activeWork.disposition]}
                         </Badge>
-                        {activeWork.assignee_username && <span className="text-xs text-pacific/80">Assigned to {activeWork.assignee_username}</span>}
+                        {activeWork.assignee_username && <span className="text-xs text-ink-muted">Assigned to {activeWork.assignee_username}</span>}
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button variant="ghost" onClick={() => workMutation.mutate({ action: activeWork.is_read ? 'unread' : 'read', work: activeWork, messageId: selectedId })} disabled={workMutation.isPending}>

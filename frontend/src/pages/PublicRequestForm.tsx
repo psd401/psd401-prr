@@ -15,7 +15,7 @@ import { PublicRequestLayout } from './PublicRequestLayout'
 const MAX_ATTACHMENT_COUNT = 10
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 const MAX_ATTACHMENT_TOTAL_BYTES = 50 * 1024 * 1024
-const PUBLIC_CONTROL_CLASS = 'border-ocean text-base focus:border-whulge focus:outline-whulge'
+const PUBLIC_CONTROL_CLASS = 'border-line-strong text-base focus:border-accent focus:outline-focus'
 
 const INITIAL_VALUES: PublicIntakeValues = {
   description: '',
@@ -49,13 +49,13 @@ function FieldBlock({
 }) {
   return (
     <div className="space-y-1.5">
-      <label htmlFor={id} className="block font-heading text-sm font-semibold text-pacific">
+      <label htmlFor={id} className="block font-heading text-sm font-semibold text-ink">
         {label}
       </label>
       {children}
-      {hint && <p id={`${id}-hint`} className="text-sm text-pacific/80">{hint}</p>}
+      {hint && <p id={`${id}-hint`} className="text-sm text-ink-muted">{hint}</p>}
       {error && (
-        <p id={`${id}-error`} role="alert" className="text-sm font-semibold text-red-800">
+        <p id={`${id}-error`} role="alert" className="text-sm font-semibold text-danger-ink">
           {error}
         </p>
       )}
@@ -166,13 +166,13 @@ export function PublicRequestForm() {
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
         <section aria-labelledby="public-request-heading">
           <div className="mb-7 max-w-3xl">
-            <p className="mb-2 font-heading text-sm font-semibold uppercase tracking-[0.08em] text-cedar">
+            <p className="mb-2 font-heading text-sm font-semibold uppercase tracking-[0.08em] text-success-ink">
               Washington Public Records Act
             </p>
-            <h1 id="public-request-heading" className="text-3xl font-bold text-pacific sm:text-4xl">
+            <h1 id="public-request-heading" className="text-3xl font-bold text-ink sm:text-4xl">
               Request public records
             </h1>
-            <p className="mt-3 max-w-2xl text-base text-pacific/80 sm:text-lg">
+            <p className="mt-3 max-w-2xl text-base text-ink-muted sm:text-lg">
               Describe the records you are looking for as clearly as you can. You do not need to
               explain why you want them or verify your identity.
             </p>
@@ -180,10 +180,10 @@ export function PublicRequestForm() {
 
           <form
             onSubmit={onSubmit}
-            className="space-y-7 rounded-2xl border border-driftwood/70 bg-white p-5 shadow-[0_1px_2px_rgba(37,66,76,0.06),0_12px_32px_rgba(37,66,76,0.06)] sm:p-8"
+            className="space-y-7 rounded-2xl border border-line bg-surface-raised p-5 shadow-(--shadow-card) sm:p-8"
           >
             {errors.form && (
-              <div role="alert" className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-900">
+              <div role="alert" className="rounded-lg border border-danger bg-danger-soft p-4 text-sm text-danger-ink">
                 <p className="font-semibold">We could not submit your request.</p>
                 <p className="mt-1">{errors.form}</p>
               </div>
@@ -209,9 +209,9 @@ export function PublicRequestForm() {
               />
             </FieldBlock>
 
-            <div className="border-t border-driftwood/60 pt-7">
+            <div className="border-t border-line pt-7">
               <h2 className="text-xl font-bold">How should we contact you?</h2>
-              <p className="mt-1 text-sm text-pacific/80">
+              <p className="mt-1 text-sm text-ink-muted">
                 Email is required so the district can respond. Everything else is optional.
               </p>
               <div className="mt-5 grid gap-5 sm:grid-cols-2">
@@ -326,7 +326,7 @@ export function PublicRequestForm() {
               </div>
             </div>
 
-            <div className="border-t border-driftwood/60 pt-7">
+            <div className="border-t border-line pt-7">
               <FieldBlock
                 id="attachments"
                 label="Attachments (optional)"
@@ -342,11 +342,11 @@ export function PublicRequestForm() {
                   onChange={(event) => onAttachmentChange(Array.from(event.target.files ?? []))}
                   aria-invalid={Boolean(errors.attachments)}
                   aria-describedby={describedBy('attachments', true, errors.attachments)}
-                  className={`${PUBLIC_CONTROL_CLASS} cursor-pointer file:mr-3 file:rounded-md file:border-0 file:bg-seafoam file:px-3 file:py-1.5 file:font-semibold file:text-pacific`}
+                  className={`${PUBLIC_CONTROL_CLASS} cursor-pointer file:mr-3 file:rounded-md file:border-0 file:bg-surface-canvas file:px-3 file:py-1.5 file:font-semibold file:text-ink`}
                 />
               </FieldBlock>
               {attachments.length > 0 && (
-                <ul className="mt-3 space-y-1 text-sm text-pacific/80" aria-label="Selected attachments">
+                <ul className="mt-3 space-y-1 text-sm text-ink-muted" aria-label="Selected attachments">
                   {attachments.map((file) => <li key={`${file.name}-${file.size}`}>{file.name}</li>)}
                 </ul>
               )}
@@ -364,15 +364,15 @@ export function PublicRequestForm() {
               />
             </div>
 
-            <div className="flex flex-col gap-3 border-t border-driftwood/60 pt-7 sm:flex-row sm:items-center sm:justify-between">
-              <p className="max-w-md text-sm text-pacific/80">
+            <div className="flex flex-col gap-3 border-t border-line pt-7 sm:flex-row sm:items-center sm:justify-between">
+              <p className="max-w-md text-sm text-ink-muted">
                 Your description becomes the legal record of what you requested. Review it before submitting.
               </p>
               <Button
                 type="submit"
                 variant="secondary"
                 disabled={isSubmitting}
-                className="min-h-11 justify-center px-6 text-base focus-visible:outline-whulge sm:shrink-0"
+                className="min-h-11 justify-center px-6 text-base focus-visible:outline-focus sm:shrink-0"
               >
                 {isSubmitting ? 'Submitting…' : 'Submit request'}
               </Button>
@@ -380,13 +380,13 @@ export function PublicRequestForm() {
           </form>
         </section>
 
-        <aside className="rounded-2xl border border-ocean/35 bg-skylight p-5 lg:sticky lg:top-6" aria-labelledby="what-happens-next">
+        <aside className="rounded-2xl border border-line-strong bg-surface-sunken p-5 lg:sticky lg:top-6" aria-labelledby="what-happens-next">
           <h2 id="what-happens-next" className="text-lg font-bold">What happens next</h2>
-          <p className="mt-2 text-sm text-pacific/80">
+          <p className="mt-2 text-sm text-ink-muted">
             The district will respond within five business days. The response may provide the records,
             give an estimated delivery date, ask for clarification, or explain a lawful exemption.
           </p>
-          <p className="mt-4 text-sm text-pacific/80">
+          <p className="mt-4 text-sm text-ink-muted">
             Public records are existing district records. This process is not for asking general
             questions or requesting that a new document be created.
           </p>

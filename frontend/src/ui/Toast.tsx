@@ -28,17 +28,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={push}>
       {children}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2">
+      <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2">
         {toasts.map((t) => (
           <div
             key={t.id}
             role="status"
-            className={`pointer-events-auto rounded-md border px-4 py-3 text-sm shadow-lg ${
+            // An error toast keeps the danger palette rather than Nexus's
+            // inverse toast, so a failure never reads like a confirmation.
+            className={`nx-toast pointer-events-auto min-w-0 ${
               t.tone === 'success'
-                ? 'border-seaglass bg-white text-cedar'
-                : 'border-red-300 bg-red-50 text-red-900'
+                ? ''
+                : 'border border-danger bg-danger-soft text-danger-ink'
             }`}
           >
+            <span aria-hidden="true">{t.tone === 'success' ? '✓' : '!'}</span>
             {t.text}
           </div>
         ))}

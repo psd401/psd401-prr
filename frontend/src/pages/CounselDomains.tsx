@@ -209,7 +209,7 @@ export function CounselDomains() {
         onClose={() => setRemoving(null)}
       >
         <div className="space-y-4">
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             Records touching this domain stop carrying the district counsel tag.
             Nothing already reviewed, withheld, or released changes. Deactivate
             instead if you want to keep the entry on record.

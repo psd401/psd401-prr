@@ -1,4 +1,4 @@
-// ABOUTME: Accessible modal dialog on the native <dialog> element, PSD styled.
+// ABOUTME: Accessible modal dialog on the native <dialog> element, Nexus styled.
 // ABOUTME: Used for all confirm/reason-gated actions across the app.
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 'react'
 
@@ -95,12 +95,15 @@ export function Modal({
       onClick={(e) => {
         if (dismissible && e.target === ref.current) onClose()
       }}
-      className={`m-auto w-full ${size === 'wide' ? 'max-w-6xl' : 'max-w-lg'} rounded-lg border border-driftwood bg-skylight p-0 shadow-xl backdrop:bg-pacific/50`}
+      // nx-modal draws the panel; the native dialog keeps focus, Escape and the
+      // top layer. Its padding moves to the header and body so the title rule
+      // runs edge to edge.
+      className={`nx-modal m-auto w-full gap-0 p-0 ${size === 'wide' ? 'max-w-6xl' : 'max-w-lg'} backdrop:bg-scrim [&:not([open])]:hidden`}
     >
-      <div className="border-b border-driftwood/60 bg-white px-5 py-3.5 rounded-t-lg">
-        <h2 id={titleId} className="text-lg text-pacific">{title}</h2>
+      <div className="border-b border-line px-6 py-4">
+        <h2 id={titleId} className="text-2xl">{title}</h2>
       </div>
-      <div className="p-5">{children}</div>
+      <div className="p-6">{children}</div>
     </dialog>
   )
 }
