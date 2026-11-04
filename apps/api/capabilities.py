@@ -769,6 +769,22 @@ CAPABILITIES = (
         risk="moderate",
     ),
     _capability(
+        "collection_tasks.supersede",
+        "Take one collection's unreviewed records out of review, keeping "
+        "every record as evidence.",
+        "POST",
+        "/api/staff/collection-tasks/{id}/supersede/",
+        ["/requests/:number/collection"],
+        execution="human_confirmation",
+        risk="high",
+        constraints=[
+            "records_officer_authority",
+            "substantive_reason",
+            "explicit_confirmation",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
         "preservations.list",
         "Browse camera-footage preservations and holds.",
         "GET",

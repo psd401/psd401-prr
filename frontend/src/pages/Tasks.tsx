@@ -62,6 +62,14 @@ interface VaultIngestProgress {
   completed_at: string | null
 }
 
+interface SupersedeResult {
+  collection_task_id: number
+  record_count: number
+}
+
+// The service refuses a shorter reason; the button stays disabled until then.
+const MIN_SUPERSEDE_REASON = 20
+
 interface TaskPatchPayload {
   id: number
   state?: string
@@ -147,6 +155,7 @@ export function Tasks({
   const [assignDraft, setAssignDraft] = useState('')
   const [creating, setCreating] = useState(false)
   const [manualTaskForm, setManualTaskForm] = useState(emptyManualTaskForm)
+  const [supersedeReason, setSupersedeReason] = useState<string | null>(null)
   const hydratedTarget = useRef('')
 
   const list = useQuery({
@@ -222,6 +231,30 @@ export function Tasks({
     },
     onError: (err) => toast('error', err.message),
   })
+  const supersedeTask = useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      api<SupersedeResult>(`/api/staff/collection-tasks/${id}/supersede/`, {
+        method: 'POST',
+        body: { reason },
+      }),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['collection-tasks'] })
+      qc.invalidateQueries({ queryKey: ['record-items'] })
+      qc.invalidateQueries({ queryKey: ['record-item-facets'] })
+      if (requestFilter) {
+        qc.invalidateQueries({ queryKey: ['case-workspace-summary', requestFilter] })
+        qc.invalidateQueries({ queryKey: ['case-closure-readiness', requestFilter] })
+      }
+      setSupersedeReason(null)
+      toast(
+        'success',
+        result.record_count === 0
+          ? 'No unreviewed records were left to supersede.'
+          : `${result.record_count} unreviewed records left review.`,
+      )
+    },
+    onError: (err) => toast('error', err.message),
+  })
   const createManualTask = useMutation({
     mutationFn: () => {
       if (!requestScope.data) throw new Error('The request is still loading.')
@@ -293,6 +326,7 @@ export function Tasks({
   }
 
   function closeTask() {
+    setSupersedeReason(null)
     setSelected(null)
     const next = new URLSearchParams(searchParams)
     next.delete('task')
@@ -595,6 +629,55 @@ export function Tasks({
                     ? ` · ${selected.vault_ingest.last_error_code}`
                     : ''}
                 </p>
+              </section>
+            )}
+
+            {canManageTask && selected.kind === 'vault_mail' && selected.state === 'complete' && (
+              <section className="rounded-xl border border-driftwood p-4">
+                <p className="font-heading text-sm font-bold text-pacific">
+                  Supersede this collection
+                </p>
+                <p className="mt-1 text-sm text-pacific/80">
+                  Takes every unreviewed record from this export out of review. Nothing is
+                  deleted, and records already decided are not changed. A later collection
+                  that finds the same message puts it back in review.
+                </p>
+                {supersedeReason === null ? (
+                  <div className="mt-3 flex justify-end">
+                    <Button type="button" variant="ghost" onClick={() => setSupersedeReason('')}>
+                      Supersede collection
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    <Field label="Reason">
+                      <Textarea
+                        value={supersedeReason}
+                        onChange={(event) => setSupersedeReason(event.target.value)}
+                        rows={3}
+                      />
+                    </Field>
+                    {supersedeTask.isError && <ErrorNote error={supersedeTask.error} />}
+                    <div className="flex justify-end gap-3">
+                      <Button type="button" variant="ghost" onClick={() => setSupersedeReason(null)}>
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => supersedeTask.mutate({
+                          id: selected.id,
+                          reason: supersedeReason.trim(),
+                        })}
+                        disabled={
+                          supersedeTask.isPending
+                          || supersedeReason.trim().length < MIN_SUPERSEDE_REASON
+                        }
+                      >
+                        Supersede unreviewed records
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </section>
             )}
 

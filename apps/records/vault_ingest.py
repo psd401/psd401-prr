@@ -802,7 +802,18 @@ def _message_duplicate(request_id, metadata):
     )
 
 
-def _mark_duplicate(artifact, duplicate):
+def _mark_duplicate(artifact, duplicate, task=None):
+    # A message an earlier, superseded collection brought in was taken out of
+    # review. When a collection (``task``) finds it again on its own terms, it
+    # goes back to a reviewer instead of folding into a record no one will
+    # open. Callers outside ingest re-point evidence only and pass no task.
+    if (
+        task is not None
+        and duplicate.review_state == RecordItem.ReviewState.SUPERSEDED
+    ):
+        from .collection_supersession import restore_superseded_record
+
+        restore_superseded_record(duplicate, task=task)
     artifact.outcome = VaultMessageArtifact.Outcome.DUPLICATE
     artifact.duplicate_of = duplicate
     artifact.record_item = None
@@ -901,7 +912,7 @@ def _process_message(
     )
     if raw_duplicate:
         attach(raw_duplicate.record_item)
-        _mark_duplicate(artifact, raw_duplicate.record_item)
+        _mark_duplicate(artifact, raw_duplicate.record_item, task=task)
         return not delivered_to
 
     # Message-ID plus the body digest catches what a byte hash cannot: the
@@ -933,7 +944,7 @@ def _process_message(
     existing = _message_duplicate(task.request_id, metadata)
     if existing is not None:
         attach(existing)
-        _mark_duplicate(artifact, existing)
+        _mark_duplicate(artifact, existing, task=task)
         return not delivered_to
 
     try:
@@ -966,7 +977,7 @@ def _process_message(
         artifact.rendered_sha256 = rendered_sha256
         artifact.save(update_fields=["rendered_sha256"])
         attach(converted_duplicate)
-        _mark_duplicate(artifact, converted_duplicate)
+        _mark_duplicate(artifact, converted_duplicate, task=task)
         return not delivered_to
 
     storage_key = generated_record_storage_key(
@@ -1049,7 +1060,7 @@ def _process_message(
         artifact.rendered_sha256 = rendered_sha256
         artifact.save(update_fields=["rendered_sha256"])
         attach(winner)
-        _mark_duplicate(artifact, winner)
+        _mark_duplicate(artifact, winner, task=task)
         return not delivered_to
     return not delivered_to
 

@@ -94,6 +94,15 @@ FIXTURE_REDIRECT_TARGET_REQUEST_NUMBER = "PRR-E2E-0007"
 #: its identity and sending its acknowledgment must not move a case another
 #: flow counts on being in the day-5 backlog.
 FIXTURE_FORWARDED_REQUEST_NUMBER = "PRR-E2E-0008"
+#: A case whose completed Vault collection swept in mail nobody has reviewed.
+#: It exists to prove superseding a collection end to end, and is isolated so
+#: taking its records out of review moves no count another flow depends on.
+FIXTURE_SUPERSEDE_REQUEST_NUMBER = "PRR-E2E-0009"
+FIXTURE_SUPERSEDE_DESCRIPTION = (
+    "Email about the spring facilities survey between March 1 and March 31, "
+    "2026."
+)
+FIXTURE_SUPERSEDE_RECORD_COUNT = 3
 FIXTURE_FORWARDED_DESCRIPTION = (
     "Copies of the traffic-safety study for the Harborview crossing, and any "
     "district correspondence about it from February 2026."
@@ -865,6 +874,61 @@ def _seed_awaiting_statutory_response_case(officer):
         raise CommandError(
             "The awaiting-statutory-response fixture case must hold one open "
             "request-action work item."
+        )
+    return request
+
+
+def _seed_supersede_case(officer):
+    """Seed one case with a completed Vault collection and unreviewed mail.
+
+    Records are deliberately not reconciled into the work queue; the fixture's
+    work-queue shape is asserted elsewhere and is not what this case proves.
+    """
+    requester, _ = Requester.objects.get_or_create(
+        email="survey@example.org",
+        defaults={
+            "id": _fixture_uuid("supersede-requester"),
+            "name": "Survey Requester",
+        },
+    )
+    request, _ = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_SUPERSEDE_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("supersede-request"),
+            "requester": requester,
+            "description": FIXTURE_SUPERSEDE_DESCRIPTION,
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    task, _ = CollectionTask.objects.get_or_create(
+        request=request,
+        kind=CollectionTask.Kind.VAULT_MAIL,
+        defaults={
+            "state": CollectionTask.State.COMPLETE,
+            "completed_at": _BASE_TIME,
+            "instructions": "Create the confirmed Google Vault Gmail export.",
+            "search_terms": '"facilities survey"',
+        },
+    )
+    for index in range(FIXTURE_SUPERSEDE_RECORD_COUNT):
+        label = f"supersede-newsletter-{index}"
+        filename = f"synthetic-{label}.eml"
+        RecordItem.objects.get_or_create(
+            pk=_fixture_uuid(label),
+            defaults={
+                "request": request,
+                "collection_task": task,
+                "source_system": "fixture",
+                "original_filename": filename,
+                "storage_key": f"fixtures/{filename}",
+                "content_length": 128,
+                "content_type": "application/octet-stream",
+                "sha256": hashlib.sha256(label.encode("utf-8")).hexdigest(),
+                "email_sender_domain": "example.org",
+            },
         )
     return request
 
@@ -2374,6 +2438,7 @@ class Command(BaseCommand):
                 )
             _seed_awaiting_statutory_response_case(officer)
             _seed_forwarded_requester_case(officer)
+            _seed_supersede_case(officer)
             _seed_email_intake_redirect_cases(officer, inbound_transport)
             _reconcile_fixture_inbound_work(request)
             _seed_role_work(

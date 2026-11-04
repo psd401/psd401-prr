@@ -203,6 +203,22 @@ Each added record is written to the audit log under your name with the file
 name, size, and SHA-256 digest; the record's custodian stays blank because it
 names where a record was found, not who uploaded it.
 
+### Superseding an over-broad Vault collection
+
+A Vault export can bring in far more mail than the request asked for. When
+that happens, open the Vault task on the **Collection** tab and choose
+**Supersede collection**. It is a Records Officer action and needs a written
+reason of at least 20 characters.
+
+Every record from that export that nobody has reviewed yet leaves the review
+queue, the work counts, and the release list. Nothing is deleted: the records
+stay on the case under the **Superseded** filter on the **Records** tab, and
+any of them can still be reviewed one at a time. Records a reviewer already
+decided are not changed. A later collection that finds one of the same
+messages puts it back in review as **Unreviewed**. Superseded records count as
+decided for a no-records closure. The supersession, every record it moved,
+your reason, and the count are written to the audit log under your name.
+
 ### An email that belongs to a case you already have
 
 When a requester follows up from a fresh email thread, intake opens a new case

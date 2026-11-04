@@ -462,6 +462,10 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         review_state = self.request.query_params.get("review_state")
         if review_state:
             qs = qs.filter(review_state=review_state)
+        elif self.action in {"list", "facets"}:
+            # A superseded collection's records left review on purpose. They
+            # stay one filter away, and every detail action still finds them.
+            qs = qs.exclude(review_state=RecordItem.ReviewState.SUPERSEDED)
         source_system = self.request.query_params.get("source_system")
         if source_system:
             qs = qs.filter(source_system=source_system)

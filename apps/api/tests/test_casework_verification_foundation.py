@@ -98,6 +98,7 @@ class CaseworkVerificationFoundationTests(SimpleTestCase):
                 "complete-liaison-handoff",
                 "complete-reviewer-journey",
                 "accessibility-audit",
+                "officer-supersede-collection",
             ],
         )
         self.assertEqual(

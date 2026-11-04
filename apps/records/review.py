@@ -153,6 +153,18 @@ def bulk_review_records(record_item_ids, *, state, actor):
             "a time so that judgement is reconsidered deliberately: "
             + ", ".join(sorted(duplicates))
         )
+    # A superseded record left review when a Records Officer re-scoped its
+    # collection. Bringing it back is a deliberate, single-record decision.
+    superseded = [
+        str(item.pk)
+        for item in items
+        if item.review_state == RecordItem.ReviewState.SUPERSEDED
+    ]
+    if superseded:
+        raise ValidationError(
+            "These records were superseded with their collection and must be "
+            "reviewed one at a time: " + ", ".join(sorted(superseded))
+        )
     if state != RecordItem.ReviewState.RESPONSIVE:
         # One query rather than one per selected record, asked of the
         # redactions themselves. Asking RecordItem for

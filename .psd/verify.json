@@ -43,7 +43,8 @@
     "complete-officer-case-journey",
     "complete-liaison-handoff",
     "complete-reviewer-journey",
-    "accessibility-audit"
+    "accessibility-audit",
+    "officer-supersede-collection"
   ],
   "e2e_screenshots": {
     "staff-login-open-case": [
@@ -200,6 +201,10 @@
     ],
     "officer-case-table-fits-1280": [
       "officer-all-cases-table-1280.png"
+    ],
+    "officer-supersede-collection": [
+      "officer-supersede-collection-confirm.png",
+      "officer-supersede-collection-filter.png"
     ]
   },
   "strictness": "block",
