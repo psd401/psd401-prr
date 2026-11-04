@@ -194,9 +194,9 @@ const CASE_VIEWS: [InboxView] = [
 const ADMIN_VIEWS = OFFICER_VIEWS.filter((view) => view.value === 'delivery_exceptions')
 
 const LINK_CLASS =
-  'inline-flex font-heading text-sm font-semibold text-whulge underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-whulge'
+  'inline-flex font-heading text-sm font-semibold text-accent underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus'
 
-const ROW_CLASS = 'rounded-xl border border-driftwood/60 bg-white p-4 shadow-sm'
+const ROW_CLASS = 'rounded-xl border border-line bg-surface-raised p-4 shadow-sm'
 
 /** Views a role may select, most decision-shaped first. */
 function inboxViewsFor(roles: StaffRole[]): InboxView[] {
@@ -237,7 +237,7 @@ function dayLabel(value: string | null) {
  */
 function TableDate({ value }: { value: string | null }) {
   const full = dayLabel(value)
-  if (!value || !full) return <span className="text-pacific/80">—</span>
+  if (!value || !full) return <span className="text-ink-muted">—</span>
   const [year = NaN, month = NaN, day = NaN] = value.slice(0, 10).split('-').map(Number)
   const short = year === new Date().getFullYear()
     ? new Date(year, month - 1, day).toLocaleDateString('en-US', {
@@ -376,7 +376,7 @@ function NonRequestModal({
           onSubmit()
         }}
       >
-        <p className="text-sm text-pacific/80">
+        <p className="text-sm text-ink-muted">
           {`${requestNumber} was opened automatically from an unmatched email`}
           {subject ? ` (“${subject}”)` : ''}
           . Closing it keeps the message and every attachment as retained
@@ -396,7 +396,7 @@ function NonRequestModal({
           />
         </Field>
         {shortfall && (
-          <p aria-live="polite" className="text-sm text-pacific/80">
+          <p aria-live="polite" className="text-sm text-ink-muted">
             {shortfall}
           </p>
         )}
@@ -415,9 +415,9 @@ function NonRequestModal({
 }
 
 const OVERFLOW_ITEM_CLASS =
-  'block w-full rounded-lg px-2 py-1.5 text-left font-heading text-sm text-pacific '
-  + 'hover:bg-seafoam focus-visible:outline-2 focus-visible:outline-offset-2 '
-  + 'focus-visible:outline-whulge disabled:opacity-50'
+  'block w-full rounded-lg px-2 py-1.5 text-left font-heading text-sm text-ink '
+  + 'hover:bg-surface-canvas focus-visible:outline-2 focus-visible:outline-offset-2 '
+  + 'focus-visible:outline-focus disabled:opacity-50'
 
 /**
  * The row's secondary actions.
@@ -445,11 +445,11 @@ function RowOverflow({
         // <details> while announcing the control as something you can press.
         role="button"
         aria-label={`More actions: ${rowName}`}
-        className="inline-flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-lg border border-driftwood bg-white font-heading text-sm font-bold text-pacific hover:border-whulge focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-whulge [&::-webkit-details-marker]:hidden"
+        className="inline-flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-lg border border-line bg-surface-raised font-heading text-sm font-bold text-ink hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden"
       >
         <span aria-hidden="true">⋯</span>
       </summary>
-      <div className="absolute right-0 top-full z-20 mt-1 w-56 rounded-xl border border-driftwood bg-white p-1.5 shadow-lg">
+      <div className="absolute right-0 top-full z-20 mt-1 w-56 rounded-xl border border-line bg-surface-raised p-1.5 shadow-lg">
         {children}
       </div>
     </details>
@@ -619,7 +619,7 @@ function MessageRow({
           {body.isPending && <Spinner label="Loading message…" />}
           {body.isError && <ErrorNote error={body.error} />}
           {body.data && (
-            <p className="max-h-96 overflow-y-auto whitespace-pre-wrap text-sm text-pacific/90">
+            <p className="max-h-96 overflow-y-auto whitespace-pre-wrap text-sm text-ink">
               {correspondenceBody(body.data).trim() || '(No message body.)'}
             </p>
           )}
@@ -952,7 +952,7 @@ function CaseControls({
 /** Marks a cell whose text the model proposed and no human adopted. */
 function AdvisoryMark() {
   return (
-    <span className="ml-1.5 whitespace-nowrap rounded border border-driftwood bg-skylight px-1 py-px font-heading text-[0.625rem] font-bold uppercase tracking-[0.06em] text-pacific/80">
+    <span className="ml-1.5 whitespace-nowrap rounded border border-line bg-surface-sunken px-1 py-px font-heading text-[0.625rem] font-bold uppercase tracking-[0.06em] text-ink-muted">
       <span className="sr-only">Suggested by AI, advisory only: </span>
       <span aria-hidden="true">AI</span>
     </span>
@@ -976,7 +976,7 @@ function NewActivityDot({ waiting }: { waiting: number }) {
     <HoverNote full={label} className="inline-flex align-middle">
       <span
         aria-hidden="true"
-        className="block size-2 rounded-full bg-whulge"
+        className="block size-2 rounded-full bg-accent"
       />
       <span className="sr-only">{label}</span>
     </HoverNote>
@@ -1001,7 +1001,7 @@ function DueCell({ row }: { row: CaseListItem }) {
         </Badge>
       )}
       {basis === 'estimate' && (
-        <span className="whitespace-nowrap text-xs text-pacific/80">
+        <span className="whitespace-nowrap text-xs text-ink-muted">
           Estimate
         </span>
       )}
@@ -1010,13 +1010,13 @@ function DueCell({ row }: { row: CaseListItem }) {
         // this date and a row that implied otherwise would be teaching the
         // wrong thing to whoever reads it every day.
         <HoverNote full="District working target: 60 calendar days from the first response. Not a statutory deadline.">
-          <span className="whitespace-nowrap text-xs text-pacific/80">
+          <span className="whitespace-nowrap text-xs text-ink-muted">
             Target
           </span>
         </HoverNote>
       )}
       {basis === 'ferpa' && (
-        <span className="whitespace-nowrap text-xs text-pacific/80">
+        <span className="whitespace-nowrap text-xs text-ink-muted">
           FERPA access
         </span>
       )}
@@ -1026,7 +1026,7 @@ function DueCell({ row }: { row: CaseListItem }) {
 
 /** The latest internal note, one line of it. */
 function NoteCell({ note }: { note: CaseNoteSummary | null }) {
-  if (!note) return <span className="text-pacific/80">—</span>
+  if (!note) return <span className="text-ink-muted">—</span>
   const who = note.author_username ?? 'staff'
   const when = note.created_at ? dayLabel(note.created_at.slice(0, 10)) : ''
   return (
@@ -1097,7 +1097,7 @@ function CaseTable({
         <span className="inline-flex flex-col items-center gap-0.5">
           <input
             type="checkbox"
-            className="size-4 accent-whulge"
+            className="size-4 accent-action"
             // Select-all covers the rows on screen, which is exactly what a
             // batch acts on. A case under another filter, search, or page is
             // not selected by a control the officer cannot see the effect of.
@@ -1121,7 +1121,7 @@ function CaseTable({
       cell: (row) => (
         <input
           type="checkbox"
-          className="size-4 accent-whulge"
+          className="size-4 accent-action"
           aria-label={`Select case ${row.number} for a batch notice`}
           checked={selection.selected.has(row.number)}
           onChange={(event) =>
@@ -1404,8 +1404,8 @@ function BatchNoticeBar({
   if (selected.length === 0) return null
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-driftwood/60 bg-skylight/60 px-3 py-2">
-      <p className="text-sm text-pacific/90">
+    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface-sunken px-3 py-2">
+      <p className="text-sm text-ink">
         {selected.length} {selected.length === 1 ? 'case' : 'cases'} selected.
       </p>
       <Button type="button" onClick={() => setOpen(true)}>
@@ -1493,7 +1493,7 @@ function BatchNoticeBar({
             </form>
           ) : (
             <div className="space-y-4">
-              <p className="text-sm text-pacific/90">
+              <p className="text-sm text-ink">
                 {drafted.succeeded.length}{' '}
                 {drafted.succeeded.length === 1 ? 'draft' : 'drafts'} created.
                 Nothing has been sent yet.
@@ -1513,22 +1513,22 @@ function BatchNoticeBar({
                 {drafted.succeeded.map((row) => (
                   <li
                     key={row.correspondence_id}
-                    className="rounded-lg border border-driftwood/60 p-3"
+                    className="rounded-lg border border-line p-3"
                   >
-                    <p className="font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+                    <p className="font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                       {row.request_number}
                     </p>
-                    <p className="mt-1 text-sm font-semibold text-pacific">
+                    <p className="mt-1 text-sm font-semibold text-ink">
                       {row.subject}
                     </p>
-                    <p className="mt-2 whitespace-pre-wrap text-sm text-pacific/90">
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-ink">
                       {row.body}
                     </p>
                   </li>
                 ))}
               </ul>
               {drafted.succeeded.length > 0 && (
-                <label className="flex items-start gap-2 text-sm text-pacific">
+                <label className="flex items-start gap-2 text-sm text-ink">
                   <input
                     type="checkbox"
                     className="mt-0.5 size-4"
@@ -1648,10 +1648,10 @@ function QueueBar({
             onClick={() => setMenuOpen((open) => !open)}
             className={
               'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-heading text-sm font-semibold '
-              + 'transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-whulge '
+              + 'transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus '
               + (selectedInMenu
-                ? 'border-cedar bg-cedar text-white'
-                : 'border-driftwood bg-white text-pacific hover:border-whulge')
+                ? 'border-action bg-action text-on-action'
+                : 'border-line bg-surface-raised text-ink hover:border-accent')
             }
           >
             {selectedInMenu ? selected.label : 'More views'}
@@ -1659,7 +1659,7 @@ function QueueBar({
           </button>
           {menuOpen && (
             <div
-              className="absolute left-0 top-full z-20 mt-1 w-72 rounded-xl border border-driftwood bg-white p-2 shadow-lg"
+              className="absolute left-0 top-full z-20 mt-1 w-72 rounded-xl border border-line bg-surface-raised p-2 shadow-lg"
               role="group"
               aria-label="More Inbox views"
             >
@@ -1672,9 +1672,9 @@ function QueueBar({
                   aria-label={`Inbox views: ${group}`}
                   className="mb-2 last:mb-0"
                 >
-                  {/* Full-strength pacific: at 12px, text-pacific/70 on white
+                  {/* Full-strength ink: at 12px, the lighter ink tints on white
                       is below WCAG 2 AA. */}
-                  <p className="px-2 py-1 font-heading text-xs font-bold uppercase tracking-[0.08em] text-pacific">
+                  <p className="px-2 py-1 font-heading text-xs font-bold uppercase tracking-[0.08em] text-ink">
                     {group}
                   </p>
                   {overflow
@@ -1693,16 +1693,16 @@ function QueueBar({
                           className={
                             'flex w-full items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-left '
                             + 'font-heading text-sm focus-visible:outline-2 focus-visible:outline-offset-2 '
-                            + 'focus-visible:outline-whulge '
+                            + 'focus-visible:outline-focus '
                             + (candidate.value === selected.value
-                              ? 'bg-skylight font-bold text-pacific'
-                              : 'text-pacific hover:bg-seafoam')
+                              ? 'bg-surface-sunken font-bold text-ink'
+                              : 'text-ink hover:bg-surface-canvas')
                           }
                         >
                           <span>{candidate.label}</span>
                           {count !== undefined && (
                             <span
-                              className="rounded-full bg-driftwood/50 px-2 text-xs font-semibold text-pacific"
+                              className="rounded-full bg-line px-2 text-xs font-semibold text-ink"
                               aria-label={chipCountLabel(candidate)}
                             >
                               {count}
@@ -1736,7 +1736,7 @@ function BlindMessageRows({ rows }: { rows: CorrespondenceSummary[] }) {
               ? 'Review emailed request'
               : 'Review requester reply'}
           </p>
-          <p className="mt-1 text-sm text-pacific/80">{row.request_number}</p>
+          <p className="mt-1 text-sm text-ink-muted">{row.request_number}</p>
           <div className="mt-3 flex flex-wrap gap-4">
             <Link
               to={`/requests/${row.request_number}/messages?message=${row.id}`}
@@ -1898,7 +1898,7 @@ export function Inbox({ roles }: { roles: StaffRole[] }) {
       {/* One toolbar band: the queue chips and, on a case view, the case
           filters. They used to stack as three separate blocks with their own
           margins, which cost most of the fold before a row appeared. */}
-      <div className="mb-3 rounded-xl border border-driftwood/60 bg-white/60 px-3 pt-3">
+      <div className="mb-3 rounded-xl border border-line bg-surface-raised px-3 pt-3">
         <QueueBar
           views={views}
           selected={view}
@@ -1932,20 +1932,20 @@ export function Inbox({ roles }: { roles: StaffRole[] }) {
         // soonest due). A column sort replaces that order outright, so the
         // description would be false; say what order is on screen instead,
         // and keep the way back to "what is late" one click away.
-        <p className="mb-3 text-sm text-pacific/80">
+        <p className="mb-3 text-sm text-ink-muted">
           Sorted by {CASE_SORT_LABELS[caseSort.key]},{' '}
           {caseSort.direction === 'asc' ? 'ascending' : 'descending'}. This
           view's default order is off.{' '}
           <button
             type="button"
-            className="font-semibold text-whulge underline decoration-ocean/60 underline-offset-2 focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-whulge"
+            className="font-semibold text-accent underline decoration-line-strong underline-offset-2 focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             onClick={() => updateCaseParams({ sort: '' })}
           >
             Restore default order
           </button>
         </p>
       ) : view.description && (
-        <p className="mb-3 text-sm text-pacific/80">{view.description}</p>
+        <p className="mb-3 text-sm text-ink-muted">{view.description}</p>
       )}
       {view.source === 'work' && work.isPending && <Spinner label="Loading Inbox…" />}
       {view.source === 'work' && work.isError && <ErrorNote error={work.error} />}

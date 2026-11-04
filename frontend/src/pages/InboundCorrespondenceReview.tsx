@@ -613,7 +613,7 @@ export function InboundCorrespondenceReview({
       )}
       {page && page.count > 0 && (
         <p
-          className="mt-3 text-sm text-pacific/80"
+          className="mt-3 text-sm text-ink-muted"
           aria-live="polite"
         >
           Showing {rows.length} of {page.count} messages
@@ -655,17 +655,17 @@ export function InboundCorrespondenceReview({
                 <Badge tone={matchingTone(selected)}>
                   {selected.matching_status}
                 </Badge>
-                <span className="text-xs text-pacific/80">
+                <span className="text-xs text-ink-muted">
                   Receipt {selected.id}
                 </span>
               </div>
-              <h3 className="font-heading text-base font-bold text-pacific">
+              <h3 className="font-heading text-base font-bold text-ink">
                 {selected.received_subject || '(No subject)'}
               </h3>
-              <p className="text-xs text-pacific/80">
+              <p className="text-xs text-ink-muted">
                 From {selected.received_sender || selected.envelope_sender || 'unknown sender'}
               </p>
-              <div className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-md border border-driftwood/50 bg-white p-3 text-sm text-pacific">
+              <div className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-md border border-line bg-surface-raised p-3 text-sm text-ink">
                 {selected.received_body || '(No plain-text body)'}
               </div>
             </div>
@@ -676,120 +676,120 @@ export function InboundCorrespondenceReview({
             >
               <h3
                 id={`matching-evidence-${selected.id}`}
-                className="font-heading text-sm font-bold text-pacific"
+                className="font-heading text-sm font-bold text-ink"
               >
                 Matching evidence
               </h3>
-              <dl className="grid gap-3 rounded-md border border-driftwood/50 bg-white p-3 text-sm sm:grid-cols-2">
+              <dl className="grid gap-3 rounded-md border border-line bg-surface-raised p-3 text-sm sm:grid-cols-2">
                 <div>
-                  <dt className="font-heading text-xs font-bold text-pacific/80">
+                  <dt className="font-heading text-xs font-bold text-ink-muted">
                     Match method
                   </dt>
-                  <dd className="break-all text-pacific">
+                  <dd className="break-all text-ink">
                     {selected.match_method || 'No match evidence'}
                   </dd>
                 </div>
                 <div>
-                  <dt className="font-heading text-xs font-bold text-pacific/80">
+                  <dt className="font-heading text-xs font-bold text-ink-muted">
                     Current request
                   </dt>
-                  <dd className="break-all text-pacific">
+                  <dd className="break-all text-ink">
                     {selected.matched_request_number || 'No current match'}
                   </dd>
                 </div>
                 <div>
-                  <dt className="font-heading text-xs font-bold text-pacific/80">
+                  <dt className="font-heading text-xs font-bold text-ink-muted">
                     Candidate request
                   </dt>
-                  <dd className="break-all text-pacific">
+                  <dd className="break-all text-ink">
                     {selected.candidate_request_number || 'No candidate'}
                   </dd>
                 </div>
                 <div>
-                  <dt className="font-heading text-xs font-bold text-pacific/80">
+                  <dt className="font-heading text-xs font-bold text-ink-muted">
                     Provider
                   </dt>
-                  <dd className="break-all text-pacific">
+                  <dd className="break-all text-ink">
                     {selected.provider || 'Not supplied'}
                   </dd>
                 </div>
                 <div>
-                  <dt className="font-heading text-xs font-bold text-pacific/80">
+                  <dt className="font-heading text-xs font-bold text-ink-muted">
                     Provider account
                   </dt>
-                  <dd className="break-all text-pacific">
+                  <dd className="break-all text-ink">
                     {selected.provider_account || 'Not supplied'}
                   </dd>
                 </div>
                 <div>
-                  <dt className="font-heading text-xs font-bold text-pacific/80">
+                  <dt className="font-heading text-xs font-bold text-ink-muted">
                     Provider thread
                   </dt>
-                  <dd className="break-all text-pacific">
+                  <dd className="break-all text-ink">
                     {selected.provider_thread_id || 'Not supplied'}
                   </dd>
                 </div>
                 <div>
-                  <dt className="font-heading text-xs font-bold text-pacific/80">
+                  <dt className="font-heading text-xs font-bold text-ink-muted">
                     Message-ID
                   </dt>
-                  <dd className="break-all text-pacific">
+                  <dd className="break-all text-ink">
                     {selected.rfc_message_id || 'Not supplied'}
                   </dd>
                 </div>
                 <div>
-                  <dt className="font-heading text-xs font-bold text-pacific/80">
+                  <dt className="font-heading text-xs font-bold text-ink-muted">
                     In-Reply-To
                   </dt>
-                  <dd className="break-all text-pacific">
+                  <dd className="break-all text-ink">
                     {selected.in_reply_to || 'Not supplied'}
                   </dd>
                 </div>
                 <div>
-                  <dt className="font-heading text-xs font-bold text-pacific/80">
+                  <dt className="font-heading text-xs font-bold text-ink-muted">
                     References
                   </dt>
-                  <dd className="break-all whitespace-pre-wrap text-pacific">
+                  <dd className="break-all whitespace-pre-wrap text-ink">
                     {selected.references.length > 0
                       ? selected.references.join('\n')
                       : 'None'}
                   </dd>
                 </div>
                 <div>
-                  <dt className="font-heading text-xs font-bold text-pacific/80">
+                  <dt className="font-heading text-xs font-bold text-ink-muted">
                     Envelope recipients
                   </dt>
-                  <dd className="break-all whitespace-pre-wrap text-pacific">
+                  <dd className="break-all whitespace-pre-wrap text-ink">
                     {selected.envelope_recipients.length > 0
                       ? selected.envelope_recipients.join('\n')
                       : 'None'}
                   </dd>
                 </div>
                 <div>
-                  <dt className="font-heading text-xs font-bold text-pacific/80">
+                  <dt className="font-heading text-xs font-bold text-ink-muted">
                     Envelope sender
                   </dt>
-                  <dd className="break-all text-pacific">
+                  <dd className="break-all text-ink">
                     {selected.envelope_sender || 'Not supplied'}
                   </dd>
                 </div>
               </dl>
-              <div className="rounded-md border border-driftwood/50 bg-white p-3">
-                <h4 className="font-heading text-xs font-bold text-pacific/80">
+              <div className="rounded-md border border-line bg-surface-raised p-3">
+                <h4 className="font-heading text-xs font-bold text-ink-muted">
                   Safe received headers
                 </h4>
                 {Object.keys(selected.received_headers).length === 0 ? (
-                  <p className="mt-1 text-sm text-pacific">None retained.</p>
+                  <p className="mt-1 text-sm text-ink">None retained.</p>
                 ) : (
                   <dl className="mt-2 space-y-2 text-sm">
                     {Object.entries(selected.received_headers)
                       .sort(([left], [right]) => left.localeCompare(right))
                       .map(([name, value]) => (
                         <div key={name}>
-                          <dt className="font-heading text-xs font-bold text-pacific/80">
+                          <dt className="font-heading text-xs font-bold text-ink-muted">
                             {name}
                           </dt>
-                          <dd className="break-all text-pacific">{value}</dd>
+                          <dd className="break-all text-ink">{value}</dd>
                         </div>
                       ))}
                   </dl>
@@ -798,11 +798,11 @@ export function InboundCorrespondenceReview({
             </section>
 
             {isDeliveryStatus && (
-              <section className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-3">
-                <h3 className="font-heading text-sm font-bold text-pacific">
+              <section className="space-y-3 rounded-md border border-warning bg-warning-soft p-3">
+                <h3 className="font-heading text-sm font-bold text-ink">
                   Unverified delivery status report (advisory)
                 </h3>
-                <p className="text-sm text-pacific/80">
+                <p className="text-sm text-ink-muted">
                   This unverified, advisory report does not retry delivery or
                   change request status. Its reported original Message-ID is
                   retained as opaque evidence; any replacement correspondence
@@ -810,24 +810,24 @@ export function InboundCorrespondenceReview({
                 </p>
                 <dl className="grid gap-2 text-sm sm:grid-cols-2">
                   <div>
-                    <dt className="font-heading text-xs font-bold text-pacific/80">
+                    <dt className="font-heading text-xs font-bold text-ink-muted">
                       Reported original Message-ID
                     </dt>
-                    <dd className="break-all text-pacific">
+                    <dd className="break-all text-ink">
                       {selected.delivery_status_original_message_id || 'Not available'}
                     </dd>
                   </div>
                   <div>
-                    <dt className="font-heading text-xs font-bold text-pacific/80">
+                    <dt className="font-heading text-xs font-bold text-ink-muted">
                       Matched delivery
                     </dt>
-                    <dd className="break-all text-pacific">
+                    <dd className="break-all text-ink">
                       {selected.matched_delivery_id || 'No exact delivery match'}
                     </dd>
                   </div>
                 </dl>
                 {selected.delivery_notifications.length === 0 ? (
-                  <p className="text-sm text-pacific/80">
+                  <p className="text-sm text-ink-muted">
                     No normalized recipient outcome could be associated with a
                     stable delivery.
                   </p>
@@ -871,11 +871,11 @@ export function InboundCorrespondenceReview({
             )}
 
             <div>
-              <h3 className="mb-2 font-heading text-sm font-bold text-pacific">
+              <h3 className="mb-2 font-heading text-sm font-bold text-ink">
                 Attachments
               </h3>
               {selected.attachments.length === 0 ? (
-                <p className="text-sm text-pacific/80">No attachments.</p>
+                <p className="text-sm text-ink-muted">No attachments.</p>
               ) : (
                 <Table
                   columns={[
@@ -927,11 +927,11 @@ export function InboundCorrespondenceReview({
             {isRematch
               && selected.correspondence_kind === 'general'
               && (
-                <section className="space-y-3 rounded-md border border-seaglass/50 bg-seaglass/5 p-3">
-                  <h3 className="font-heading text-sm font-bold text-pacific">
+                <section className="space-y-3 rounded-md border border-flow bg-flow-soft p-3">
+                  <h3 className="font-heading text-sm font-bold text-ink">
                     Open clarification association
                   </h3>
-                  <p className="text-sm text-pacific/80">
+                  <p className="text-sm text-ink-muted">
                     Use this only after confirming that this matched message
                     answers a specific open clarification. It will not resolve
                     the cycle or change request status.
@@ -945,7 +945,7 @@ export function InboundCorrespondenceReview({
                   {clarificationCycles.isSuccess
                     && openClarificationCycles.length === 0
                     && (
-                      <p className="text-sm text-pacific/80">
+                      <p className="text-sm text-ink-muted">
                         No eligible open clarification cycle exists for this
                         request.
                       </p>
@@ -1060,7 +1060,7 @@ export function InboundCorrespondenceReview({
               </form>
             ) : (
               <div className="space-y-3">
-                <p className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
+                <p className="rounded-md border border-danger bg-danger-soft px-3 py-2 text-sm text-danger-ink">
                   This message cannot be matched until parsing and quarantine
                   checks complete successfully. Reason code:{' '}
                   {queueReasons(selected).join(', ')}

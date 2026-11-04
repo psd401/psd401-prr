@@ -1,4 +1,4 @@
-// ABOUTME: The per-row actions menu — Radix DropdownMenu in PSD clothing.
+// ABOUTME: The per-row actions menu — Radix DropdownMenu in Nexus nx-menu clothing.
 // ABOUTME: Keyboard, focus return, and dismissal come from the primitive.
 import type { ReactNode } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -35,7 +35,7 @@ export function RowMenu({
         <button
           type="button"
           aria-label={label}
-          className="inline-flex size-8 items-center justify-center rounded-lg border border-transparent text-pacific/80 transition-colors hover:border-driftwood hover:bg-skylight hover:text-pacific focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-whulge data-[state=open]:border-driftwood data-[state=open]:bg-skylight"
+          className="nx-icon-btn nx-icon-btn--sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus data-[state=open]:bg-surface-sunken"
         >
           <span aria-hidden="true" className="text-base leading-none">⋯</span>
         </button>
@@ -44,14 +44,14 @@ export function RowMenu({
         <DropdownMenu.Content
           align="end"
           sideOffset={4}
-          className="z-50 min-w-[11rem] rounded-lg border border-driftwood bg-white p-1 shadow-lg"
+          className="nx-menu z-50 min-w-44"
         >
           {items.map((item) => (
             <DropdownMenu.Item
               key={item.label}
               disabled={item.disabled}
               onSelect={item.onSelect}
-              className="cursor-pointer rounded px-2.5 py-1.5 text-sm text-pacific outline-none data-[highlighted]:bg-seaglass/15 data-[disabled]:cursor-default data-[disabled]:text-pacific/50"
+              className="nx-menu__item outline-none data-[disabled]:cursor-default data-[disabled]:text-ink-disabled"
             >
               {item.label}
             </DropdownMenu.Item>

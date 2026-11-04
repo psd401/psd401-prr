@@ -60,9 +60,9 @@ export interface InboxRowProps {
 }
 
 const PRIMARY_LINK_CLASS =
-  'inline-flex items-center rounded-lg bg-cedar px-3.5 py-2 font-heading text-sm '
-  + 'font-semibold text-white transition-colors hover:bg-pacific '
-  + 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-whulge'
+  'inline-flex items-center rounded-lg bg-action px-3.5 py-2 font-heading text-sm '
+  + 'font-semibold text-on-action transition-colors hover:bg-action-hover '
+  + 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus'
 
 export function InboxRow({
   title,
@@ -83,12 +83,12 @@ export function InboxRow({
   const indent = onToggleExpanded ? 'ml-6' : ''
 
   return (
-    <li className="rounded-lg border border-driftwood/60 bg-white px-3 py-2 shadow-sm">
+    <li className="rounded-lg border border-line bg-surface-raised px-3 py-2 shadow-sm">
       <div className="flex items-baseline gap-2">
         {selection && (
           <input
             type="checkbox"
-            className="mt-1 size-4 shrink-0 accent-cedar"
+            className="mt-1 size-4 shrink-0 accent-action"
             checked={selection.checked}
             aria-label={selection.ariaLabel}
             onChange={(event) => selection.onChange(event.target.checked)}
@@ -100,35 +100,35 @@ export function InboxRow({
             aria-expanded={expanded}
             aria-label={`${expanded ? 'Collapse' : 'Expand'}: ${title}`}
             onClick={onToggleExpanded}
-            className="shrink-0 rounded px-1 font-heading text-xs text-pacific/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-whulge"
+            className="shrink-0 rounded px-1 font-heading text-xs text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
             <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
           </button>
         )}
         <p
           className={
-            'min-w-0 flex-1 font-heading text-sm font-bold text-pacific '
+            'min-w-0 flex-1 font-heading text-sm font-bold text-ink '
             + (expanded ? '' : 'truncate')
           }
         >
           {title}
         </p>
-        {/* pacific/80, not /70: at 12px on white /70 is 4.44:1 and fails AA. */}
+        {/* ink-muted, not a lighter tint: lighter fails AA at 12px. */}
         {timestamp && (
-          <span className="shrink-0 text-xs text-pacific/80">{timestamp}</span>
+          <span className="shrink-0 text-xs text-ink-muted">{timestamp}</span>
         )}
       </div>
 
       {expanded && expandedContent ? (
         <div className={`${indent} mt-1`}>{expandedContent}</div>
       ) : (
-        detail && <p className={`${indent} truncate text-sm text-pacific/80`}>{detail}</p>
+        detail && <p className={`${indent} truncate text-sm text-ink-muted`}>{detail}</p>
       )}
 
       <div className={`${indent} mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1`}>
-        <p className="min-w-0 break-words text-xs text-pacific/80">
+        <p className="min-w-0 break-words text-xs text-ink-muted">
           {caseNumber && (
-            <span className="font-semibold text-pacific">{caseNumber}</span>
+            <span className="font-semibold text-ink">{caseNumber}</span>
           )}
           {shownTags.length > 0
             ? `${caseNumber ? ' · ' : ''}${shownTags.join(' · ')}`

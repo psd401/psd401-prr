@@ -193,10 +193,10 @@ export function Preservations({
             <Card key={p.id}>
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h3 className="font-heading text-lg font-bold text-pacific">
+                  <h3 className="font-heading text-lg font-bold text-ink">
                     Footage preservation
                   </h3>
-                  <p className="mt-1 text-sm text-pacific/80">
+                  <p className="mt-1 text-sm text-ink-muted">
                     {p.window_start} → {p.window_end}
                   </p>
                 </div>
@@ -204,12 +204,12 @@ export function Preservations({
               </div>
 
               {p.detected_dates_note && (
-                <p className="mb-4 rounded-md border border-driftwood/40 bg-skylight/60 px-3 py-2 text-sm text-pacific/80">
+                <p className="mb-4 rounded-md border border-line bg-surface-sunken px-3 py-2 text-sm text-ink-muted">
                   {p.detected_dates_note}
                 </p>
               )}
 
-              <p className="mb-2 font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+              <p className="mb-2 font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
                 Camera holds ({p.held_count})
               </p>
 
@@ -227,27 +227,27 @@ export function Preservations({
                     {
                       header: 'Clip',
                       cell: (h: CameraHold) =>
-                        h.clip_id ? h.clip_id : <span className="text-pacific/80">—</span>,
+                        h.clip_id ? h.clip_id : <span className="text-ink-muted">—</span>,
                     },
                     {
                       header: 'Error',
                       cell: (h: CameraHold) =>
                         h.error ? (
-                          <span className="text-red-800">{h.error}</span>
+                          <span className="text-danger-ink">{h.error}</span>
                         ) : (
-                          <span className="text-pacific/80">—</span>
+                          <span className="text-ink-muted">—</span>
                         ),
                     },
                     {
                       header: 'Excluded',
                       cell: (h: CameraHold) =>
                         h.excluded_at ? (
-                          <span className="block max-w-xs text-xs text-pacific/80">
+                          <span className="block max-w-xs text-xs text-ink-muted">
                             {h.excluded_at.slice(0, 10)} by {h.excluded_by ?? '—'}
                             {h.exclusion_reason && <> — {h.exclusion_reason}</>}
                           </span>
                         ) : (
-                          <span className="text-pacific/80">—</span>
+                          <span className="text-ink-muted">—</span>
                         ),
                     },
                     {
@@ -266,7 +266,7 @@ export function Preservations({
                 />
               )}
 
-              <p className="mt-3 text-xs text-pacific/80">
+              <p className="mt-3 text-xs text-ink-muted">
                 Exclusions are logged with your name and reason — RCW 42.56 audit trail.
               </p>
             </Card>
@@ -281,7 +281,7 @@ export function Preservations({
       >
         {excluding && (
           <form onSubmit={submitExclude} className="space-y-4">
-            <p className="text-sm text-pacific/80">
+            <p className="text-sm text-ink-muted">
               Camera <span className="font-heading font-bold">{excluding.hold.camera_name}</span> at{' '}
               {excluding.hold.site} will be excluded from this preservation hold.
             </p>

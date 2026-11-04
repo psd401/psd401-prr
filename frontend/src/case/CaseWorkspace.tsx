@@ -118,38 +118,38 @@ function CaseHeader({
       <Card className="mb-4" aria-label="Case summary">
         <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-3 xl:grid-cols-6">
           <div>
-            <dt className="text-pacific/80">Requester</dt>
-            <dd className="font-heading font-bold text-pacific">
+            <dt className="text-ink-muted">Requester</dt>
+            <dd className="font-heading font-bold text-ink">
               {requester?.name ?? 'Restricted'}
             </dd>
             {requester?.email && (
-              <dd className="break-all text-xs text-pacific/80">{requester.email}</dd>
+              <dd className="break-all text-xs text-ink-muted">{requester.email}</dd>
             )}
           </div>
           <div>
-            <dt className="text-pacific/80">Case owner</dt>
-            <dd className="font-heading font-bold text-pacific">
+            <dt className="text-ink-muted">Case owner</dt>
+            <dd className="font-heading font-bold text-ink">
               {summary.owner?.display_name ?? 'Unassigned'}
             </dd>
           </div>
           <div>
-            <dt className="text-pacific/80">Statutory response</dt>
-            <dd className="font-heading font-bold text-pacific">
+            <dt className="text-ink-muted">Statutory response</dt>
+            <dd className="font-heading font-bold text-ink">
               {STATUTORY_RESPONSE_LABELS[summary.statutory_response.state]
                 ?? summary.statutory_response.state}
             </dd>
-            <dd className="text-xs text-pacific/80">
+            <dd className="text-xs text-ink-muted">
               Due {summary.statutory_response.due_date ?? '—'}
             </dd>
           </div>
           <div>
-            <dt className="text-pacific/80">Estimate</dt>
-            <dd className="font-heading font-bold text-pacific">
+            <dt className="text-ink-muted">Estimate</dt>
+            <dd className="font-heading font-bold text-ink">
               {summary.estimated_completion ?? '—'}
             </dd>
           </div>
           <div>
-            <dt className="text-pacific/80">Work counts</dt>
+            <dt className="text-ink-muted">Work counts</dt>
             <dd className="flex flex-wrap gap-2 pt-1">
               <Badge tone={summary.counts.new ? 'blue' : 'neutral'}>
                 {summary.counts.new} new
@@ -160,21 +160,21 @@ function CaseHeader({
             </dd>
           </div>
           <div>
-            <dt className="text-pacific/80">Next action</dt>
+            <dt className="text-ink-muted">Next action</dt>
             {summary.next_action ? (
               <dd>
                 <Link
-                  className="font-heading font-bold text-whulge underline-offset-2 hover:underline"
+                  className="font-heading font-bold text-accent underline-offset-2 hover:underline"
                   to={`/requests/${summary.number}/${summary.next_action.tab}`}
                 >
                   {summary.next_action.label}
                 </Link>
-                <p className="mt-1 text-xs text-pacific/80">
+                <p className="mt-1 text-xs text-ink-muted">
                   {summary.next_action.detail}
                 </p>
               </dd>
             ) : (
-              <dd className="font-heading font-bold text-pacific">No role-scoped action</dd>
+              <dd className="font-heading font-bold text-ink">No role-scoped action</dd>
             )}
           </div>
         </dl>
@@ -195,7 +195,7 @@ function ClosureReadinessCard({ number }: { number: string }) {
   if (readiness.isError) return <ErrorNote error={readiness.error} />
   return (
     <Card title="Closure readiness" className="mb-5">
-      <p className="text-sm text-pacific/80">
+      <p className="text-sm text-ink-muted">
         Read-only blocker report. Closing a case still requires the existing
         correspondence, delivery, and lifecycle services and accountable human action.
       </p>
@@ -204,14 +204,14 @@ function ClosureReadinessCard({ number }: { number: string }) {
       ) : (
         <ul className="mt-4 grid gap-3 sm:grid-cols-2">
           {readiness.data.blockers.map((blocker) => (
-            <li key={blocker.code} className="rounded-md border border-amber-300 bg-amber-50 p-3">
+            <li key={blocker.code} className="rounded-md border border-warning bg-warning-soft p-3">
               <Link
                 to={`/requests/${number}/${blocker.tab}`}
-                className="font-heading text-sm font-bold text-amber-950 underline-offset-2 hover:underline"
+                className="font-heading text-sm font-bold text-warning-ink underline-offset-2 hover:underline"
               >
                 {blocker.label}
               </Link>
-              <p className="mt-1 text-xs text-amber-900">{blocker.count} outstanding</p>
+              <p className="mt-1 text-xs text-warning-ink">{blocker.count} outstanding</p>
             </li>
           ))}
         </ul>
@@ -336,7 +336,7 @@ export function CaseWorkspace({ roles }: { roles: StaffRole[] }) {
   return (
     <>
       <CaseHeader summary={summary.data} roles={roles} />
-      <nav aria-label="Case tabs" className="mb-5 overflow-x-auto border-b border-driftwood/60">
+      <nav aria-label="Case tabs" className="mb-5 overflow-x-auto border-b border-line">
         <div className="flex min-w-max gap-1">
           {visibleTabs.map((candidate) => (
             <Link
@@ -345,8 +345,8 @@ export function CaseWorkspace({ roles }: { roles: StaffRole[] }) {
               aria-current={candidate.id === tab ? 'page' : undefined}
               className={`border-b-2 px-4 py-3 font-heading text-sm font-bold ${
                 candidate.id === tab
-                  ? 'border-seaglass text-pacific'
-                  : 'border-transparent text-pacific/80 hover:text-pacific'
+                  ? 'border-flow text-ink'
+                  : 'border-transparent text-ink-muted hover:text-ink'
               }`}
             >
               {candidate.label}

@@ -402,8 +402,8 @@ export function Tasks({
         <label
           className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 font-heading text-sm font-semibold transition-colors ${
             activeUrgentOnly
-              ? 'border-red-300 bg-red-100 text-red-900'
-              : 'border-driftwood bg-white text-pacific hover:bg-skylight'
+              ? 'border-danger bg-danger-soft text-danger-ink'
+              : 'border-line bg-surface-raised text-ink hover:bg-surface-sunken'
           }`}
         >
           <input
@@ -455,7 +455,7 @@ export function Tasks({
                 header: 'Due date',
                 cell: (r: CollectionTask) =>
                   r.due_date ? (
-                    <span className={isPastDue(r.due_date, r.state) ? 'font-bold text-red-800' : ''}>
+                    <span className={isPastDue(r.due_date, r.state) ? 'font-bold text-danger-ink' : ''}>
                       {r.due_date}
                     </span>
                   ) : (
@@ -584,35 +584,35 @@ export function Tasks({
             </div>
 
             <div>
-              <p className="font-heading text-sm font-bold text-pacific">Instructions</p>
-              <p className="mt-1 whitespace-pre-wrap text-sm text-pacific">
+              <p className="font-heading text-sm font-bold text-ink">Instructions</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-ink">
                 {selected.instructions || '—'}
               </p>
             </div>
 
             <div>
-              <p className="font-heading text-sm font-bold text-pacific">Custodian emails</p>
-              <p className="mt-1 text-sm text-pacific">
+              <p className="font-heading text-sm font-bold text-ink">Custodian emails</p>
+              <p className="mt-1 text-sm text-ink">
                 {selected.custodian_emails.length ? selected.custodian_emails.join(', ') : '—'}
               </p>
             </div>
 
             <div>
-              <p className="font-heading text-sm font-bold text-pacific">Search terms</p>
-              <p className="mt-1 text-sm text-pacific">{selected.search_terms || '—'}</p>
+              <p className="font-heading text-sm font-bold text-ink">Search terms</p>
+              <p className="mt-1 text-sm text-ink">{selected.search_terms || '—'}</p>
             </div>
 
             {selected.vault_ingest && (
-              <section className="rounded-xl border border-driftwood bg-skylight/40 p-4">
+              <section className="rounded-xl border border-line bg-surface-sunken p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-heading text-sm font-bold text-pacific">
+                  <p className="font-heading text-sm font-bold text-ink">
                     Vault ingest progress
                   </p>
                   <Badge tone={selected.vault_ingest.state === 'failed' ? 'red' : 'blue'}>
                     {selected.vault_ingest.state}
                   </Badge>
                 </div>
-                <div className="mt-3 grid gap-2 text-sm text-pacific sm:grid-cols-2">
+                <div className="mt-3 grid gap-2 text-sm text-ink sm:grid-cols-2">
                   <p>
                     {selected.vault_ingest.files_processed} of {selected.vault_ingest.files_total}{' '}
                     files processed
@@ -623,7 +623,7 @@ export function Tasks({
                     {selected.vault_ingest.duplicates_skipped} duplicates retained as evidence
                   </p>
                 </div>
-                <p className="mt-3 text-xs text-pacific/80">
+                <p className="mt-3 text-xs text-ink-muted">
                   Attempt {selected.vault_ingest.attempt_count}
                   {selected.vault_ingest.last_error_code
                     ? ` · ${selected.vault_ingest.last_error_code}`
@@ -633,11 +633,11 @@ export function Tasks({
             )}
 
             {canManageTask && selected.kind === 'vault_mail' && selected.state === 'complete' && (
-              <section className="rounded-xl border border-driftwood p-4">
-                <p className="font-heading text-sm font-bold text-pacific">
+              <section className="rounded-xl border border-line p-4">
+                <p className="font-heading text-sm font-bold text-ink">
                   Supersede this collection
                 </p>
-                <p className="mt-1 text-sm text-pacific/80">
+                <p className="mt-1 text-sm text-ink-muted">
                   Takes every unreviewed record from this export out of review. Nothing is
                   deleted, and records already decided are not changed. A later collection
                   that finds the same message puts it back in review.
@@ -650,7 +650,7 @@ export function Tasks({
                   </div>
                 ) : (
                   <div className="mt-3 space-y-3">
-                    <p className="text-sm text-pacific/80">
+                    <p className="text-sm text-ink-muted">
                       The reason is kept in the audit log and case timeline. Describe the
                       scope problem; do not name students or include record contents.
                     </p>
@@ -722,7 +722,7 @@ export function Tasks({
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-pacific/80">
+              <p className="text-sm text-ink-muted">
                 Due {selected.due_date ?? '—'} · Assigned {selected.assigned_to_username ?? '—'}
               </p>
             )}

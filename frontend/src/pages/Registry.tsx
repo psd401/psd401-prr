@@ -250,18 +250,18 @@ export function Registry({ roles }: { roles: StaffRole[] }) {
       />
 
       {punchList.length > 0 && (
-        <Card title="Verification punch list" className="mb-6 border-amber-300">
-          <ul className="divide-y divide-seafoam">
+        <Card title="Verification punch list" className="mb-6 border-warning">
+          <ul className="divide-y divide-line">
             {punchList.map((sys) => (
               <li
                 key={sys.id}
                 className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
               >
                 <div>
-                  <p className="font-heading font-bold text-pacific">{sys.name}</p>
-                  <p className="text-sm text-pacific/80">{sys.custodian_title || '—'}</p>
+                  <p className="font-heading font-bold text-ink">{sys.name}</p>
+                  <p className="text-sm text-ink-muted">{sys.custodian_title || '—'}</p>
                   {sys.retention_note && (
-                    <p className="text-xs text-pacific/80">{sys.retention_note}</p>
+                    <p className="text-xs text-ink-muted">{sys.retention_note}</p>
                   )}
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -288,8 +288,8 @@ export function Registry({ roles }: { roles: StaffRole[] }) {
                 header: 'System',
                 cell: (r: RecordSystem) => (
                   <div>
-                    <p className="font-heading font-bold text-pacific">{r.name}</p>
-                    <p className="text-xs text-pacific/80">{r.vendor || '—'}</p>
+                    <p className="font-heading font-bold text-ink">{r.name}</p>
+                    <p className="text-xs text-ink-muted">{r.vendor || '—'}</p>
                   </div>
                 ),
               },
@@ -341,19 +341,19 @@ export function Registry({ roles }: { roles: StaffRole[] }) {
       <Modal open={canEdit && editing !== null} title={editing?.name ?? ''} onClose={closeEdit}>
         {editing && (
           <form onSubmit={submitEdit} className="space-y-4">
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-pacific/80">
-              <dt className="font-heading font-bold text-pacific/80 uppercase text-xs">Category</dt>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-ink-muted">
+              <dt className="font-heading font-bold text-ink-muted uppercase text-xs">Category</dt>
               <dd>{editing.category}</dd>
-              <dt className="font-heading font-bold text-pacific/80 uppercase text-xs">Vendor</dt>
+              <dt className="font-heading font-bold text-ink-muted uppercase text-xs">Vendor</dt>
               <dd>{editing.vendor || '—'}</dd>
-              <dt className="font-heading font-bold text-pacific/80 uppercase text-xs">Integration</dt>
+              <dt className="font-heading font-bold text-ink-muted uppercase text-xs">Integration</dt>
               <dd>{editing.integration || '—'}</dd>
-              <dt className="font-heading font-bold text-pacific/80 uppercase text-xs">Slug</dt>
+              <dt className="font-heading font-bold text-ink-muted uppercase text-xs">Slug</dt>
               <dd>{editing.slug}</dd>
             </dl>
 
             <div>
-              <span className="font-heading text-sm font-bold text-pacific">Triage keywords</span>
+              <span className="font-heading text-sm font-bold text-ink">Triage keywords</span>
               <div className="mt-1 flex flex-wrap gap-1.5">
                 {editing.triage_keywords.length > 0 ? (
                   editing.triage_keywords.map((k) => (
@@ -362,14 +362,14 @@ export function Registry({ roles }: { roles: StaffRole[] }) {
                     </Badge>
                   ))
                 ) : (
-                  <span className="text-sm text-pacific/80">None set.</span>
+                  <span className="text-sm text-ink-muted">None set.</span>
                 )}
               </div>
             </div>
 
             <div>
-              <span className="font-heading text-sm font-bold text-pacific">Search checklist</span>
-              <pre className="whitespace-pre-wrap mt-1 rounded-md border border-driftwood/60 bg-skylight/60 p-3 text-sm text-pacific">
+              <span className="font-heading text-sm font-bold text-ink">Search checklist</span>
+              <pre className="whitespace-pre-wrap mt-1 rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink">
                 {editing.search_checklist || 'No checklist recorded.'}
               </pre>
             </div>

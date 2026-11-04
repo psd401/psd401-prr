@@ -132,11 +132,11 @@ export function TimeEntries({
             ref={headingRef}
             id="case-time-entries"
             tabIndex={-1}
-            className="font-heading text-xl font-bold text-pacific outline-none"
+            className="font-heading text-xl font-bold text-ink outline-none"
           >
             Time entries
           </h3>
-          <p className="mt-1 text-sm text-pacific/80">
+          <p className="mt-1 text-sm text-ink-muted">
             Staff hours logged against this case.
           </p>
         </div>
@@ -183,12 +183,12 @@ export function TimeEntries({
         <form onSubmit={submit} className="space-y-4">
           <Field label="Case">
             {requestNumber ? (
-              <p className="rounded-md border border-driftwood/60 bg-skylight px-3 py-2 text-sm font-semibold text-pacific">
+              <p className="rounded-md border border-line bg-surface-sunken px-3 py-2 text-sm font-semibold text-ink">
                 {requestNumber}
               </p>
             ) : (
               <select
-                className="w-full rounded-md border border-driftwood bg-white px-3 py-2 text-sm text-pacific"
+                className="w-full rounded-md border border-line bg-surface-raised px-3 py-2 text-sm text-ink"
                 value={form.request}
                 onChange={(e) => setForm({ ...form, request: e.target.value })}
                 disabled={requests.isPending || requests.isError}
@@ -246,7 +246,7 @@ export function TimeEntries({
 
       <Modal open={canDelete && deleting !== null} title="Delete time entry" onClose={() => setDeleting(null)}>
         <div className="space-y-4">
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             Delete this {deleting ? formatHours(deleting.minutes) : ''} entry for{' '}
             <span className="font-heading font-bold">{deleting?.request_number}</span> on{' '}
             {deleting?.date}? This cannot be undone.

@@ -18,19 +18,19 @@ export function Login() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-pacific p-4">
-      <div className="w-full max-w-sm rounded-2xl border border-skylight/20 bg-skylight p-8 shadow-2xl">
+    <main className="flex min-h-screen items-center justify-center bg-surface-header p-4">
+      <div className="w-full max-w-sm rounded-2xl border border-line bg-surface-raised p-8 shadow-(--shadow-overlay)">
         <img
           src={appAsset('brand/psd_logo-2color-emblem.png')}
           alt="Peninsula School District"
           className="mx-auto mb-4 w-28"
         />
-        <h1 className="text-center text-3xl font-bold tracking-tight text-pacific">Public Records</h1>
-        <p className="mb-6 mt-1 text-center font-editorial text-base text-pacific/80">
+        <h1 className="text-center text-3xl font-bold tracking-tight text-ink">Public Records</h1>
+        <p className="mb-6 mt-1 text-center font-editorial text-base text-ink-muted">
           Staff workspace sign-in
         </p>
         {auth.mode === 'google' && googleDenied && (
-          <p role="alert" className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-900">
+          <p role="alert" className="mb-4 rounded-md bg-danger-soft p-3 text-sm text-danger-ink">
             Google sign-in could not authorize this account. Confirm that it belongs to the
             district domain and is a direct member of a configured PRR role group.
           </p>
@@ -38,7 +38,7 @@ export function Login() {
         {auth.mode === 'google' ? (
           <a
             href={googleLoginHref(auth.googleLoginUrl, window.location)}
-            className="block w-full rounded-md bg-cedar px-3.5 py-2 text-center font-heading text-sm font-bold tracking-wide text-white transition-colors hover:bg-pacific"
+            className="block w-full rounded-md bg-action px-3.5 py-2 text-center font-heading text-sm font-bold tracking-wide text-on-action transition-colors hover:bg-action-hover"
           >
             Sign in with Google
           </a>

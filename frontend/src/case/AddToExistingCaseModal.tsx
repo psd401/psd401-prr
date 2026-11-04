@@ -114,7 +114,7 @@ export function AddToExistingCaseModal({
           redirect.mutate()
         }}
       >
-        <p className="text-sm text-pacific/80">
+        <p className="text-sm text-ink-muted">
           {`${sourceNumber} was opened automatically from an emailed message`}
           {subject ? ` (“${subject}”)` : ''}
           . Moving it keeps the message and every attachment as retained
@@ -147,7 +147,7 @@ export function AddToExistingCaseModal({
           />
         </Field>
         {shortfall && (
-          <p aria-live="polite" className="text-sm text-pacific/80">
+          <p aria-live="polite" className="text-sm text-ink-muted">
             {shortfall}
           </p>
         )}
