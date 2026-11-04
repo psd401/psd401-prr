@@ -48,7 +48,9 @@
     "reviewer-bulk-review-by-filter",
     "officer-ai-evaluation-report",
     "officer-knowledge-pack-edit",
-    "officer-approve-estimate-letter"
+    "officer-approve-estimate-letter",
+    "reviewer-cluster-approve-sampled",
+    "reviewer-elusion-signoff"
   ],
   "e2e_screenshots": {
     "staff-login-open-case": [
@@ -226,6 +228,14 @@
     "officer-approve-estimate-letter": [
       "officer-approve-estimate-letter.png",
       "officer-approve-estimate-letter-sent.png"
+    ],
+    "reviewer-cluster-approve-sampled": [
+      "reviewer-cluster-approve-sample.png",
+      "reviewer-cluster-approve-applied.png"
+    ],
+    "reviewer-elusion-signoff": [
+      "reviewer-elusion-sample.png",
+      "reviewer-elusion-signed-off.png"
     ]
   },
   "strictness": "block",

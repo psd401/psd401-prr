@@ -276,6 +276,81 @@ SETTINGS: tuple[SettingSpec, ...] = (
         requires=("PRR_AI_ADVISORY_ENABLED",),
     ),
     SettingSpec(
+        key="PRR_TRUST_RESPONSIVE_MODE",
+        type=values.CHOICE,
+        default="suggest",
+        choices=("suggest", "batch"),
+        category=CATEGORY_ADVISORY_AI,
+        label="Trust ladder: responsive",
+        consequence=(
+            "Suggest: a reviewer decides each record. Batch: a reviewer may "
+            "approve a whole cluster as responsive after judging a random "
+            "sample; one disagreement blocks the batch. There is no automatic "
+            "mode for responsive: a responsive decision always stays with a "
+            "person."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_NON_RESPONSIVE_MODE",
+        type=values.CHOICE,
+        default="suggest",
+        choices=("suggest", "batch", "auto"),
+        category=CATEGORY_ADVISORY_AI,
+        label="Trust ladder: non-responsive",
+        consequence=(
+            "Suggest: a reviewer decides each record. Batch: a reviewer may "
+            "approve a cluster as non-responsive after a sampled check. Auto: "
+            "records the AI calls non-responsive at or above the confidence "
+            "below are staged as Ready to discard, and nothing is applied "
+            "until a reviewer finds no responsive record in a random elusion "
+            "sample of that pile and signs off."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_NON_RESPONSIVE_AUTO_MIN_CONFIDENCE",
+        type=values.INTEGER,
+        default=95,
+        minimum=50,
+        maximum=100,
+        unit="percent",
+        category=CATEGORY_ADVISORY_AI,
+        label="Ready-to-discard confidence floor",
+        consequence=(
+            "In auto mode, only records the AI calls non-responsive with at "
+            "least this confidence are staged for discard."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_BATCH_SAMPLE_SIZE",
+        type=values.INTEGER,
+        default=10,
+        minimum=1,
+        maximum=200,
+        unit="records",
+        category=CATEGORY_ADVISORY_AI,
+        label="Cluster approval sample size",
+        consequence=(
+            "How many records, chosen at random, a reviewer judges before a "
+            "cluster can be approved. A smaller cluster is judged in full."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_ELUSION_SAMPLE_SIZE",
+        type=values.INTEGER,
+        default=30,
+        minimum=1,
+        maximum=500,
+        unit="records",
+        category=CATEGORY_ADVISORY_AI,
+        label="Elusion sample size",
+        consequence=(
+            "How many records, chosen at random from the Ready to discard "
+            "pile, a reviewer checks for missed responsive records. Larger "
+            "samples catch rarer misses: with no finding in 30 records the "
+            "pile's miss rate is below about 10% at 95% confidence."
+        ),
+    ),
+    SettingSpec(
         key="PRR_AI_AUTOMATIC_ESTIMATE_LETTER_ENABLED",
         type=values.BOOLEAN,
         default=False,

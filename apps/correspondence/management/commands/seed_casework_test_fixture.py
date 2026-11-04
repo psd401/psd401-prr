@@ -111,6 +111,14 @@ FIXTURE_SUPERSEDE_RECORD_COUNT = 3
 #: A case whose interpretation-and-estimate letter the system has drafted
 #: (#42). Isolated so sending it changes no count another flow reads.
 FIXTURE_ESTIMATE_LETTER_REQUEST_NUMBER = "PRR-E2E-0010"
+#: A case whose records carry AI suggestions for the trust-ladder flows (#39):
+#: a newsletter cluster below the discard floor, for sampled cluster approval,
+#: and a high-confidence non-responsive pile, for the elusion sign-off.
+FIXTURE_TRUST_REQUEST_NUMBER = "PRR-E2E-0011"
+FIXTURE_TRUST_CLUSTER_DOMAIN = "newsletter.example"
+FIXTURE_TRUST_CLUSTER_COUNT = 4
+FIXTURE_TRUST_DISCARD_DOMAIN = "vendor-ads.example"
+FIXTURE_TRUST_DISCARD_COUNT = 5
 FIXTURE_ESTIMATE_LETTER_INTENT = (
     "Route 12 bus video from March 3, 2026, between 3 and 4 p.m."
 )
@@ -1023,6 +1031,65 @@ def _seed_estimate_letter_case(officer):
         },
     )
     create_interpretation_estimate_draft(request, estimate=estimate)
+    return request
+
+
+def _seed_trust_ladder_case(officer):
+    """Seed the case the sampled-batch and elusion flows decide.
+
+    AI is off in acceptance runs, so the suggestions are written as completed
+    runs. Nothing here reviews a record; the flows do, in a reviewer's name.
+    """
+    requester, _ = Requester.objects.get_or_create(
+        email="trust-ladder@example.org",
+        defaults={"id": _fixture_uuid("trust-requester"), "name": "Trust Ladder Requester"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_TRUST_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("trust-request"),
+            "requester": requester,
+            "description": "Email about the spring enrollment plan, March 2026.",
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    if not created:
+        return request
+    sets = (
+        ("trust-newsletter", FIXTURE_TRUST_CLUSTER_DOMAIN, FIXTURE_TRUST_CLUSTER_COUNT, 0.6),
+        ("trust-ad", FIXTURE_TRUST_DISCARD_DOMAIN, FIXTURE_TRUST_DISCARD_COUNT, 0.97),
+    )
+    for prefix, domain, count, confidence in sets:
+        for index in range(count):
+            label = f"{prefix}-{index}"
+            item = RecordItem.objects.create(
+                pk=_fixture_uuid(label),
+                request=request,
+                source_system="fixture",
+                original_filename=f"synthetic-{label}.eml",
+                storage_key=f"fixtures/synthetic-{label}.eml",
+                content_length=128,
+                content_type="application/octet-stream",
+                sha256=hashlib.sha256(label.encode()).hexdigest(),
+                email_message_id=f"<{label}@{domain}>",
+                email_from=f"news@{domain}",
+                email_sender_domain=domain,
+                email_sent_at=_BASE_TIME,
+            )
+            AdvisoryRun.objects.create(
+                kind=AdvisoryRun.Kind.RECORD_RESPONSIVENESS,
+                request=request,
+                record_item=item,
+                model_identifier="synthetic-review-model",
+                input_sha256=hashlib.sha256(f"{label}-run".encode()).hexdigest(),
+                state=AdvisoryRun.State.COMPLETE,
+                requested_by=officer,
+                proposal={"suggested_state": "non_responsive", "confidence": confidence,
+                          "matched_terms": [], "rationale": "Synthetic newsletter."},
+            )
     return request
 
 
@@ -2594,6 +2661,7 @@ class Command(BaseCommand):
             _seed_evaluation_run(officer, supersede_request)
             _seed_knowledge_pack()
             _seed_estimate_letter_case(officer)
+            _seed_trust_ladder_case(officer)
             _seed_email_intake_redirect_cases(officer, inbound_transport)
             _reconcile_fixture_inbound_work(request)
             _seed_role_work(

@@ -1044,6 +1044,51 @@ CAPABILITIES = (
         ["/requests/:number/records"],
     ),
     _capability(
+        "review_batches.policy",
+        "Read the trust-ladder policy for responsiveness (suggest, batch, or "
+        "auto per outcome; sample sizes; the discard confidence floor) and "
+        "how many records a case has staged as Ready to discard.",
+        "GET",
+        "/api/staff/review-batches/policy/",
+        ["/requests/:number/records"],
+    ),
+    _capability(
+        "review_batches.create",
+        "Open a cluster batch: one proposed responsiveness outcome over a "
+        "cluster's unreviewed records, with a random sample drawn for the "
+        "reviewer to judge. Opening decides nothing.",
+        "POST",
+        "/api/staff/review-batches/",
+        ["/requests/:number/records"],
+        risk="low",
+    ),
+    _capability(
+        "review_batches.discard",
+        "Open the Ready to discard batch of records the AI calls "
+        "non-responsive above the auto floor, with a random elusion sample. "
+        "Opening decides nothing.",
+        "POST",
+        "/api/staff/review-batches/discard/",
+        ["/requests/:number/records"],
+        risk="low",
+    ),
+    _capability(
+        "review_batches.decide",
+        "Record the reviewer's judgment of every sampled record; apply the "
+        "batch's outcome to the rest only if every judgment agrees, "
+        "otherwise block it and leave the rest for per-record review.",
+        "POST",
+        "/api/staff/review-batches/{id}/decide/",
+        ["/requests/:number/records"],
+        execution="human_only",
+        risk="high",
+        constraints=[
+            "human_legal_judgment",
+            "interactive_staff_session",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
         "record_items.clusters",
         "Group the filtered records into clusters -- email thread, sender or "
         "mailing list, tag, or AI label and confidence band -- with each "

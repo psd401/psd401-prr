@@ -103,6 +103,8 @@ class CaseworkVerificationFoundationTests(SimpleTestCase):
                 "officer-ai-evaluation-report",
                 "officer-knowledge-pack-edit",
                 "officer-approve-estimate-letter",
+                "reviewer-cluster-approve-sampled",
+                "reviewer-elusion-signoff",
             ],
         )
         self.assertEqual(

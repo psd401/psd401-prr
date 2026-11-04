@@ -10,6 +10,7 @@ import {
 import { useSearchParams } from 'react-router'
 import { api, unwrap, type Page } from '../api/client'
 import type { StaffRole } from '../api/auth'
+import { DiscardBatchCard } from '../case/BatchReview'
 import { RecordClusters } from '../case/RecordClusters'
 import { RecordHandlingPanel } from '../case/RecordHandlingPanel'
 import {
@@ -1479,6 +1480,9 @@ export function RecordItems({
       {list.isPending && <Spinner />}
       {list.isError && <ErrorNote error={list.error} />}
       {targetedItem.isError && <ErrorNote error={targetedItem.error} />}
+      {canReview && request !== '' && (
+        <DiscardBatchCard request={request} onOpen={(id) => updateListParams({ item: id })} />
+      )}
       {activeGroup === 'cluster' && request !== '' && (
         <RecordClusters
           filters={filterParams()}
