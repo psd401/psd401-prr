@@ -10,6 +10,7 @@ export const CASE_TAB_ROLES = {
   messages: ['records_officer', 'liaison'],
   collection: ['records_officer', 'liaison', 'admin'],
   records: ['records_officer', 'reviewer', 'admin'],
+  review: ['records_officer', 'reviewer'],
   releases: ['records_officer', 'reviewer', 'admin'],
   activity: WORKFLOW_ROLES,
 } satisfies Record<string, StaffRole[]>

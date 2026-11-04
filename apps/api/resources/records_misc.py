@@ -106,6 +106,7 @@ from apps.records.review import (
     create_redaction,
     render_redacted_record,
     review_record,
+    undo_review,
     void_redaction,
 )
 
@@ -464,6 +465,7 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         "preview_metadata": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
         "preview_page": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
         "review": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
+        "undo_review": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
         # Any review role may bulk-review; the cap and the per-item audit row
         # are what bound the action, not a narrower role.
         "bulk_review": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
@@ -888,6 +890,17 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                     "withholding_exemption_ids"
                 ],
             )
+        except DjangoValidationError as exc:
+            _raise_api_validation(exc)
+        return Response(self.get_serializer(item).data)
+
+    @extend_schema(request=None, responses=RecordItemSerializer)
+    @action(detail=True, methods=["post"], url_path="undo-review")
+    def undo_review(self, request, pk=None):
+        """Undo the caller's own latest review decision on this record."""
+        item = self.get_object()
+        try:
+            item = undo_review(item.pk, actor=request.user)
         except DjangoValidationError as exc:
             _raise_api_validation(exc)
         return Response(self.get_serializer(item).data)

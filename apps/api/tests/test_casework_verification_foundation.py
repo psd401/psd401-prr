@@ -106,6 +106,7 @@ class CaseworkVerificationFoundationTests(SimpleTestCase):
                 "reviewer-cluster-approve-sampled",
                 "reviewer-elusion-signoff",
                 "reviewer-redaction-group-accept",
+                "reviewer-keyboard-flight",
             ],
         )
         self.assertEqual(

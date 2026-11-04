@@ -23,6 +23,7 @@ import { statusLabel, statusTone, TERMINAL_STATUSES } from '../caseStatus'
 import { CaseActivityFeed } from './CaseActivityFeed'
 import { EstimateLetterCard } from './EstimateLetterCard'
 import { RecordUploadPanel } from './RecordUploadPanel'
+import { ReviewFlight } from './ReviewFlight'
 
 
 export type CaseTab =
@@ -30,6 +31,7 @@ export type CaseTab =
   | 'messages'
   | 'collection'
   | 'records'
+  | 'review'
   | 'releases'
 
 interface CaseTabDefinition {
@@ -58,6 +60,11 @@ const CASE_TABS: CaseTabDefinition[] = [
     id: 'records',
     label: 'Records',
     roles: CASE_TAB_ROLES.records,
+  },
+  {
+    id: 'review',
+    label: 'Review',
+    roles: CASE_TAB_ROLES.review,
   },
   {
     id: 'releases',
@@ -279,6 +286,9 @@ function TabContent({
         <RecordItems roles={roles} requestNumber={number} />
       </div>
     )
+  }
+  if (tab === 'review') {
+    return <ReviewFlight number={number} />
   }
   if (tab === 'releases') {
     return (

@@ -51,7 +51,8 @@
     "officer-approve-estimate-letter",
     "reviewer-cluster-approve-sampled",
     "reviewer-elusion-signoff",
-    "reviewer-redaction-group-accept"
+    "reviewer-redaction-group-accept",
+    "reviewer-keyboard-flight"
   ],
   "e2e_screenshots": {
     "staff-login-open-case": [
@@ -242,6 +243,10 @@
       "reviewer-redaction-groups.png",
       "reviewer-redaction-group-sample.png",
       "reviewer-redaction-group-built.png"
+    ],
+    "reviewer-keyboard-flight": [
+      "reviewer-keyboard-flight.png",
+      "reviewer-keyboard-flight-decided.png"
     ]
   },
   "strictness": "block",

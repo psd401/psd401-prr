@@ -1144,6 +1144,23 @@ CAPABILITIES = (
         ],
     ),
     _capability(
+        "record_items.undo_review",
+        "Undo the caller's own latest review decision on one record, back to "
+        "unreviewed or the earlier responsive, non-responsive, or duplicate "
+        "decision. Never undoes a withholding or a record with active "
+        "redactions.",
+        "POST",
+        "/api/staff/record-items/{id}/undo-review/",
+        ["/requests/:number/review"],
+        execution="human_confirmation",
+        risk="moderate",
+        constraints=[
+            "accountable_human_actor",
+            "human_legal_judgment",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
         "record_items.clusters",
         "Group the filtered records into clusters -- email thread, sender or "
         "mailing list, tag, or AI label and confidence band -- with each "
