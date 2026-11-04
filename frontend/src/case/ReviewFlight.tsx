@@ -140,6 +140,10 @@ export function ReviewFlight({ number }: { number: string }) {
     placeholderData: (previous) => previous,
   })
   const rows = useMemo(() => (list.data ? unwrap(list.data) : []), [list.data])
+  // While the list is loading another page, or refetching after a decision,
+  // the rows on screen are the old ones and the highlighted record may be one
+  // already decided. No decision is taken until the list has settled.
+  const listSettled = list.isSuccess && !list.isFetching && !list.isPlaceholderData
   const total = list.data && !Array.isArray(list.data) ? list.data.count : rows.length
   const hasNext = Boolean(list.data && !Array.isArray(list.data) && list.data.next)
   const pageStart = (page - 1) * PAGE_SIZE
@@ -166,6 +170,15 @@ export function ReviewFlight({ number }: { number: string }) {
     enabled: current !== null,
   })
 
+  // In the unreviewed view the list shrinks as records are decided, so a
+  // later page can come back empty while earlier ones still hold records.
+  useEffect(() => {
+    if (listSettled && rows.length === 0 && page > 1) {
+      setPage(1)
+      setIndex(0)
+    }
+  }, [listSettled, rows.length, page])
+
   // Keep the index inside the list as decided records leave it.
   useEffect(() => {
     if (index > 0 && index >= rows.length) setIndex(Math.max(rows.length - 1, 0))
@@ -189,6 +202,10 @@ export function ReviewFlight({ number }: { number: string }) {
   const busy = single.isPending || bulk.isPending || undo.isPending
   const decide = useCallback((state: Decision) => {
     if (busy) return
+    if (!listSettled) {
+      setStatus('Loading the next records; decide again in a moment.')
+      return
+    }
     if (selection.length > 0) {
       if (state === 'duplicate') {
         setStatus('A duplicate is decided one record at a time.')
@@ -198,7 +215,7 @@ export function ReviewFlight({ number }: { number: string }) {
     } else if (current) {
       single.mutate({ id: current.id, state })
     }
-  }, [busy, selection, current, bulk, single])
+  }, [busy, listSettled, selection, current, bulk, single])
   const undoLast = useCallback(() => {
     const last = undoStack.at(-1)
     if (!busy && last) undo.mutate(last)
@@ -300,7 +317,7 @@ export function ReviewFlight({ number }: { number: string }) {
       {list.isSuccess && rows.length === 0 && (
         <Card><EmptyState>No records to review here.</EmptyState></Card>
       )}
-      {rows.length > 0 && (
+      {rows.length > 0 && !list.isPlaceholderData && (
         <p className="text-sm text-ink-muted">
           Records {pageStart + 1}–{pageStart + rows.length} of {total}
           {(page > 1 || hasNext) && '; j and k continue onto the next or previous page.'}
@@ -358,9 +375,9 @@ export function ReviewFlight({ number }: { number: string }) {
               <EmptyState>No preview for this file type. Open it from the Records tab.</EmptyState>
             )}
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button type="button" disabled={busy} onClick={() => decide('responsive')}>Responsive (r)</Button>
-              <Button type="button" variant="secondary" disabled={busy} onClick={() => decide('non_responsive')}>Non-responsive (n)</Button>
-              <Button type="button" variant="secondary" disabled={busy} onClick={() => decide('duplicate')}>Duplicate (d)</Button>
+              <Button type="button" disabled={busy || !listSettled} onClick={() => decide('responsive')}>Responsive (r)</Button>
+              <Button type="button" variant="secondary" disabled={busy || !listSettled} onClick={() => decide('non_responsive')}>Non-responsive (n)</Button>
+              <Button type="button" variant="secondary" disabled={busy || !listSettled} onClick={() => decide('duplicate')}>Duplicate (d)</Button>
               <Button type="button" variant="ghost" disabled={busy || undoStack.length === 0} onClick={undoLast}>Undo (u)</Button>
             </div>
           </Card>

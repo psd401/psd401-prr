@@ -173,18 +173,67 @@ it('pages through all records with j and clears the selection when the filter ch
   const page2 = [{ ...ROWS[2], id: 'p2', original_filename: 'page-two.pdf' }]
   const { user } = stubWith((url) => {
     if (url.includes('/advisory-responsiveness/')) return { body: ADVISORY }
-    if (url.includes('page=2')) return { body: { count: 3, next: null, previous: 'p1', results: page2 } }
-    return { body: { count: 3, next: 'p2', previous: null, results: ROWS.slice(0, 2) } }
+    if (url.includes('page=2')) return { body: { count: 51, next: null, previous: 'p1', results: page2 } }
+    return { body: { count: 51, next: 'p2', previous: null, results: ROWS.slice(0, 2) } }
   })
-  await screen.findByText(/Records 1–2 of 3/)
+  await screen.findByText(/Records 1–2 of 51/)
   await user.keyboard('x')
   expect(screen.getByText(/1 selected/)).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'All records' }))
   expect(screen.queryByText(/1 selected/)).not.toBeInTheDocument()
-  await screen.findByText(/Records 1–2 of 3/)
+  await screen.findByText(/Records 1–2 of 51/)
   await user.keyboard('jj')
   expect(await screen.findByRole('option', { name: /page-two\.pdf/ })).toHaveAttribute('aria-selected', 'true')
-  expect(screen.getByText(/Records 51–51 of 3/)).toBeInTheDocument()
+  expect(await screen.findByText(/Records 51–51 of 51/)).toBeInTheDocument()
   await user.keyboard('k')
-  await waitFor(() => expect(screen.getByText(/Records 1–2 of 3/)).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText(/Records 1–2 of 51/)).toBeInTheDocument())
+})
+
+it('takes no decision while the next page is still loading', async () => {
+  let releasePage2: () => void = () => {}
+  const page2Ready = new Promise<void>((resolve) => { releasePage2 = resolve })
+  const posts: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (init?.method === 'POST') posts.push(url)
+    let body: unknown = { count: 51, next: 'p2', previous: null, results: ROWS.slice(0, 2) }
+    if (url.includes('/advisory-responsiveness/')) body = ADVISORY
+    if (url.includes('page=2')) {
+      await page2Ready
+      body = { count: 51, next: null, previous: 'p1', results: [{ ...ROWS[2], id: 'p2', original_filename: 'page-two.pdf' }] }
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify(body) } as Response
+  }))
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter><ReviewFlight number="PRR-2026-0001" /></MemoryRouter>
+    </QueryClientProvider>,
+  )
+  const user = userEvent.setup()
+  await screen.findByText(/Records 1–2 of 51/)
+  await user.keyboard('jj')
+  await user.keyboard('r')
+  expect(screen.getByText(/Loading the next records/)).toBeInTheDocument()
+  expect(posts).toEqual([])
+  releasePage2()
+  expect(await screen.findByRole('option', { name: /page-two\.pdf/ })).toHaveAttribute('aria-selected', 'true')
+})
+
+it('returns to the first page when a later unreviewed page comes back empty', async () => {
+  let page2Empty = false
+  const { user } = stubWith((url) => {
+    if (url.includes('/advisory-responsiveness/')) return { body: ADVISORY }
+    if (url.includes('page=2')) {
+      return { body: page2Empty
+        ? { count: 2, next: null, previous: 'p1', results: [] }
+        : { count: 51, next: null, previous: 'p1', results: [{ ...ROWS[2], id: 'p2', original_filename: 'page-two.pdf' }] } }
+    }
+    return { body: { count: 51, next: 'p2', previous: null, results: ROWS.slice(0, 2) } }
+  })
+  await screen.findByText(/Records 1–2 of 51/)
+  await user.keyboard('jj')
+  await screen.findByRole('option', { name: /page-two\.pdf/ })
+  page2Empty = true
+  await user.keyboard('n')
+  expect(await screen.findByRole('option', { name: /a\.pdf/ })).toBeInTheDocument()
 })
