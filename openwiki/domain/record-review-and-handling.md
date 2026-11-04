@@ -92,7 +92,10 @@ verified PDF for the converted or original copy.
 `apps/records/review.py` owns the reviewer's decisions:
 
 - `review_record` and `bulk_review_records` set a `RecordItem` review state. `_require_reviewer`
-  gates the actor.
+  gates the actor. `bulk_review_records` refuses records in the `superseded` state, which a
+  Records Officer sets when an over-broad collection is re-scoped. Those records are decided
+  one at a time through `review_record`. See
+  [collection and Vault](collection-and-vault.md#superseding-an-over-broad-collection).
 - `create_redaction` and `void_redaction` add or void a `Redaction`. Every redaction requires
   an `ExemptionCitation`; a voided redaction keeps its row.
 - `approve_second_review` records the second decision. `RecordItem.second_review_required`
