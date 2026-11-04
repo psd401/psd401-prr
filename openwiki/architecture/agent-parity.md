@@ -3,7 +3,7 @@ type: Architecture
 title: GUI and Agent Parity Contract
 description: The machine-readable capability catalog that maps every staff GUI operation to an agent-accessible REST primitive, classifies each by execution policy (anonymous, direct, human confirmation, human only), and drives the human-only handoff responses for token callers. Read before adding a staff action, an agent tool, or any path an API token can reach.
 tags: [architecture, agent, parity, capabilities, human-in-the-loop, authorization]
-timestamp: 2026-09-24T00:00:00Z
+timestamp: 2026-11-04T00:00:00Z
 openwiki:
   roles: [architecture, integration, workflow]
   change_kinds: [capability, agent-parity, human-handoff, public-api]
@@ -41,7 +41,7 @@ which MCP tool, if any, exposes the action.
 - `mcp_tool`, when a Model Context Protocol tool exposes the action. The value is the
   tool's wire name (`psd_prr_*`), the same string [MCP](../integrations/mcp.md) registers.
 
-The catalog holds about 176 rows, one per distinct operation the production
+The catalog holds about 178 rows, one per distinct operation the production
 React application calls. Query variations are inputs to one list operation, not
 separate powers. The live catalog is served by `AgentCapabilityCatalogView` at
 `/api/staff/capabilities/`. `capability_catalog()` returns a fresh copy on each
@@ -115,5 +115,8 @@ catch that.
 
 Related: [Compliance](../domain/compliance.md) (the statutory boundary this
 catalog enforces), [Work queue](../domain/work-queue.md) (work actions and
+their human-only decisions), [Advisory AI](../domain/advisory-ai.md) (proposal
+actions are human confirmation).
+es), [Work queue](../domain/work-queue.md) (work actions and
 their human-only decisions), [Advisory AI](../domain/advisory-ai.md) (proposal
 actions are human confirmation).
