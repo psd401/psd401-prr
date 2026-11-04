@@ -1,5 +1,5 @@
 // ABOUTME: Finds the host's psd-aws-infra subnet by its standard 08 tags at
-// ABOUTME: synth time, and fails synth unless exactly one subnet matches.
+// ABOUTME: synth time; synth fails unless exactly one matches, in the host's AZ.
 
 import * as cdk from "aws-cdk-lib";
 import * as cxschema from "aws-cdk-lib/cloud-assembly-schema";
@@ -43,6 +43,7 @@ export function lookupSharedSubnet(
   scope: Construct,
   vpcId: string,
   name: string,
+  availabilityZone: string,
 ): SharedSubnet {
   const wanted: Record<string, string> = {
     [SHARED_NETWORK_TAG.key]: SHARED_NETWORK_TAG.value,
@@ -53,8 +54,7 @@ export function lookupSharedSubnet(
   // again with it.
   const dummy: SharedSubnetCandidate = {
     Identifier: "subnet-00000000000000000",
-    // Not Stack.availabilityZones, which would add a second lookup.
-    AvailabilityZone: `${cdk.Stack.of(scope).region}a`,
+    AvailabilityZone: availabilityZone,
     Tags: Object.entries(wanted).map(([Key, Value]) => ({ Key, Value })),
   };
   const candidates: SharedSubnetCandidate[] = cdk.ContextProvider.getValue(
@@ -78,6 +78,14 @@ export function lookupSharedSubnet(
         "student records and must stay in its own isolated subnet; fix the " +
         "tags in psd-aws-infra, then refresh the cached lookup with " +
         "`cdk context --reset`.",
+    );
+  }
+  // The VPC import and the host are both in this AZ; a tagged subnet
+  // elsewhere would move the host, so stop rather than follow it.
+  if (matches[0].AvailabilityZone !== availabilityZone) {
+    throw new Error(
+      `Subnet ${matches[0].Identifier} tagged ${JSON.stringify(wanted)} is ` +
+        `in ${matches[0].AvailabilityZone}, not ${availabilityZone}.`,
     );
   }
   return {

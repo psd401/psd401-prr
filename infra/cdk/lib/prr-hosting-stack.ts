@@ -85,6 +85,7 @@ export class PrrHostingStack extends cdk.Stack {
       this,
       config.vpcId,
       `psd401-prr-${config.envName}`,
+      config.availabilityZone,
     );
     const subnet = ec2.Subnet.fromSubnetAttributes(this, "Subnet", {
       subnetId: sharedSubnet.subnetId,

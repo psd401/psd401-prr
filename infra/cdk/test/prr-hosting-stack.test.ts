@@ -309,8 +309,7 @@ describe.each(environments)("psd401-prr-%s network", (envName, config) => {
 
   // psd-dev-standards 08 "Shared network": an app finds a shared network
   // resource by its psd:shared tag and stable Name, never by an ID in code.
-  test("finds the subnet by tag inside the configured VPC, not by ID", () => {
-    expect(config).not.toHaveProperty("subnetId");
+  test("queries every subnet in the configured VPC", () => {
     expect(sharedSubnetQuery(config.vpcId)).toEqual({
       typeName: "AWS::EC2::Subnet",
       propertyMatch: { VpcId: config.vpcId },
@@ -353,13 +352,29 @@ describe.each(environments)("psd401-prr-%s network", (envName, config) => {
     ).toThrow(/found 2/);
   });
 
+  // The VPC import names the configured AZ; a matching subnet anywhere else
+  // would move the host, so it stops synth too.
+  test("fails synth if the matching subnet is in another AZ", () => {
+    expect(() =>
+      stackFor(config, [
+        {
+          ...taggedSubnet(config, TEST_SUBNET_ID),
+          AvailabilityZone: "us-west-2c",
+        },
+      ]),
+    ).toThrow(/us-west-2c/);
+  });
+
   // The first `cdk synth` pass, before the CLI has done the lookup, sees
-  // CDK's dummy value. It must still build so the CLI can ask AWS.
+  // CDK's dummy value. It must still build so the CLI can ask AWS, and must
+  // never emit anything that looks like a real subnet.
   test("synthesizes with the dummy value before the lookup is cached", () => {
     const app = new App();
-    expect(
-      () => new PrrHostingStack(app, `psd401-prr-${envName}`, config),
-    ).not.toThrow();
+    const stack = new PrrHostingStack(app, `psd401-prr-${envName}`, config);
+    Template.fromStack(stack).hasResourceProperties("AWS::EC2::Instance", {
+      SubnetId: "subnet-00000000000000000",
+      AvailabilityZone: config.availabilityZone,
+    });
   });
 
   // Both left the stack and were imported back during the subnet handover.
@@ -1653,6 +1668,22 @@ describe.each(environments)("psd401-prr-%s backups", (envName, config) => {
         { Key: "psd401-prr-backup", Value: envName },
       ],
     });
+  });
+});
+
+// The instance's SubnetId is replace-on-change, and its root volume holds
+// PostgreSQL. The committed lookup cache is now the only source of that ID,
+// so pin what it resolves to: an edited or reset cache that picks any other
+// subnet fails here, not at deploy.
+test("the committed lookup cache resolves production to its subnet", () => {
+  const cached = JSON.parse(
+    readFileSync(join(__dirname, "../cdk.context.json"), "utf8"),
+  );
+  const app = new App({ context: cached });
+  const stack = new PrrHostingStack(app, "psd401-prr-prod", prodConfig);
+  Template.fromStack(stack).hasResourceProperties("AWS::EC2::Instance", {
+    SubnetId: "subnet-02ccab0368061c253",
+    AvailabilityZone: "us-west-2a",
   });
 });
 
