@@ -25,8 +25,11 @@ shares a route table that reaches on-prem over a VPN gateway and two VPC
 peerings. An internet-facing host holding FERPA-covered records must not have
 those paths, so the host sits in a subnet of its own with its own route table,
 and the stack never references the shared DMZ route table, NACL, or subnet.
-This stack built that subnet; psd-aws-infra now owns it, and the stack places
-the host in it by ID.
+This stack built that subnet; psd-aws-infra now owns it, and the stack finds
+it the psd-dev-standards 08 way: the one subnet in the VPC tagged
+`psd:shared = network` and `Name = psd401-prr-<env>`
+([`lib/shared-subnet.ts`](lib/shared-subnet.ts)). Synth fails unless exactly
+one subnet carries both tags.
 
 **Moved to psd-aws-infra (2026-11-03).** psd-dev-standards 08 gives every
 subnet in a shared VPC to psd-aws-infra, so this stack handed over the
@@ -74,8 +77,9 @@ bunx cdk deploy psd401-prr-terraform-state
 ```
 
 `bun test` and `bunx cdk synth` need no AWS credentials: the Ubuntu 24.04 AMI
-lookup is cached in the committed `cdk.context.json`. Refresh it deliberately,
-not routinely, and only alongside a maintenance window:
+lookup and the subnet tag lookup are cached in the committed
+`cdk.context.json`. Refresh the AMI deliberately, not routinely, and only
+alongside a maintenance window:
 
 ```text
 bunx cdk context --reset "ssm:account=338414773271:parameterName=/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id:region=us-west-2"
@@ -85,6 +89,11 @@ bunx cdk synth
 A new AMI id replaces the instance. The root volume has
 `DeleteOnTermination: false`, so the old volume survives, but the host is
 rebuilt and its Docker state is gone.
+
+The cached subnet lookup is the same kind of value: a different subnet ID
+replaces the instance and its PostgreSQL root volume. Reset its
+`cc-api-provider:...:typeName=AWS::EC2::Subnet` key only after a tag change in
+psd-aws-infra, and read the `cdk diff` before deploying.
 
 Termination protection is on for both the stack and the instance. Removing a
 stack means clearing both first, and the buckets and secret are retained
