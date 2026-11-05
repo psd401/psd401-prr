@@ -45,12 +45,20 @@ and cited from code, tests, and ADRs; never renumber them.
    but only a Records Officer approves and sends it. Guards:
    `test_compliance.test_no_automated_path_exists`, `receipt-ast-guard`,
    `scope-ast-guard`, `estimate-letter-ast-guard`.
-7. **Footage: auto-hold always, auto-deny never** — `apps/records/triage.py` holds
-   every camera inside retention via `apps/integrations/avigilon/client.py`;
-   outside retention a human completes the search and chooses the response. There
-   is no auto-denial code path and none may be added; exclusions need a human and
-   a reason through `triage.exclude_camera()`. If Alta is down or unconfigured,
-   holds degrade to URGENT manual instructions to facilities — never to silence.
+7. **Footage: auto-hold always, auto-deny never** — `apps/records/triage.py`
+   auto-holds every camera at each site the request names
+   (`apps/records/footage_sites.py`), or every camera district-wide when no site
+   is identified, with a no-expiry Aware bookmark per camera
+   (`apps/integrations/avigilon/client.py`). Retention is per camera, from
+   Aware's oldest retained footage. Zero cameras at a named site goes to human
+   adequate-search review (`NO_CAMERAS`), never "held". Where no camera retains
+   the window, a human completes the search and chooses the response. There is
+   no auto-denial code path and none may be added. Release and exclusion are
+   human-only with a reason: `triage.exclude_camera()` and
+   `triage.release_preservation()` (closed request, Records Officer, attestation
+   that no litigation hold applies), both AST-guarded against background
+   callers. If Aware is down or unconfigured, holds degrade to URGENT manual
+   instructions to facilities — never to silence.
 8. **The system registry routes collection** — `RecordSystem`, seeded by
    `manage.py seed_systems`; `triage.route_to_systems` opens a CollectionTask per
    match and urgent_hold systems (bus video!) fire a preservation email.

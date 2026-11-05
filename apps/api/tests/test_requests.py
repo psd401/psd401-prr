@@ -761,6 +761,8 @@ class RequestsDetailTests(StaffApiTestCase):
         preservations = body["footage_preservations"]
         self.assertEqual(len(preservations), 1)
         self.assertEqual(preservations[0]["state"], FootagePreservation.State.PENDING)
+        # Nothing is confirmed until Aware has bookmarked something.
+        self.assertIsNone(preservations[0]["confirmation_text"])
         self.assertEqual(body["initial_response_plan"]["state"], "delivered")
 
     @override_settings(

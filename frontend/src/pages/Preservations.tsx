@@ -1,5 +1,5 @@
 // ABOUTME: Footage preservation holds screen — the retention race dashboard.
-// ABOUTME: Cards per hold with nested camera-hold table and exclude workflow.
+// ABOUTME: Cards per Aware bookmark hold: cameras, exclusions, confirmation, release.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router'
@@ -16,6 +16,9 @@ import {
   Spinner,
   Table,
   Textarea,
+  reasonHint,
+  reasonShortfall,
+  reasonTooShort,
   useToast,
 } from '../ui'
 
@@ -27,6 +30,8 @@ interface CameraHold {
   clip_id: string | null
   state: string
   error: string
+  coverage_fraction: number | null
+  coverage_note: string
   excluded_at: string | null
   excluded_by: string | null
   exclusion_reason: string
@@ -39,8 +44,15 @@ interface Preservation {
   window_start: string
   window_end: string
   detected_dates_note: string
+  site_codes: string[]
+  site_resolution: string
   held_count: number
   camera_holds: CameraHold[]
+  confirmation_text: string | null
+  request_closed: boolean
+  released_at: string | null
+  released_by: string | null
+  release_reason: string
 }
 
 const PRESERVATION_STATES = [
@@ -48,29 +60,40 @@ const PRESERVATION_STATES = [
   'held',
   'partial',
   'manual',
+  'no_cameras',
   'expired',
   'released',
 ] as const
+
+const RELEASABLE_STATES = new Set(['held', 'partial'])
 
 const STATE_TONES: Record<string, 'green' | 'amber' | 'red' | 'neutral'> = {
   pending: 'amber',
   held: 'green',
   partial: 'amber',
   manual: 'amber',
+  no_cameras: 'amber',
   expired: 'red',
   released: 'neutral',
   excluded: 'neutral',
   error: 'red',
   failed: 'red',
+  gap: 'amber',
+  not_retained: 'neutral',
 }
 
 const STATE_LABELS: Record<string, string> = {
   pending: 'Pending — hold executing',
   held: 'Held',
-  partial: 'Held (some cameras failed)',
+  partial: 'Partly held — gaps or failures need review',
   manual: 'Manual hold required',
+  no_cameras: 'No cameras in Aware at the requested site',
   expired: 'Window outside retention',
   released: 'Released',
+  // Camera-level states
+  gap: 'Footage gap',
+  not_retained: 'No retained footage',
+  failed: 'Failed',
 }
 
 function StateBadge({ state }: { state: string }) {
@@ -80,6 +103,45 @@ function StateBadge({ state }: { state: string }) {
 interface ExcludeTarget {
   preservationId: number
   hold: CameraHold
+}
+
+function coverageLabel(fraction: number | null) {
+  return fraction === null ? '—' : `${Math.round(fraction * 100)}%`
+}
+
+/** Text a Records Officer may paste into a letter. Copy only: never sent. */
+function ConfirmationText({ text }: { text: string }) {
+  const toast = useToast()
+  const [copied, setCopied] = useState(false)
+
+  async function copy() {
+    try {
+      if (!navigator.clipboard) throw new Error('Clipboard API unavailable')
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+    } catch {
+      toast('error', 'Copy failed — select the text and copy it by hand.')
+    }
+  }
+
+  return (
+    <div className="mb-4 rounded-md border border-line bg-surface-sunken px-3 py-2">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="text-sm text-ink">{text}</p>
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={copy}
+          aria-label={copied ? 'Copied' : 'Copy confirmation'}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+      </div>
+      <p className="mt-1 text-xs text-ink-muted">
+        For correspondence you write. This text is never sent automatically.
+      </p>
+    </div>
+  )
 }
 
 export function Preservations({
@@ -96,6 +158,9 @@ export function Preservations({
   const activeStateFilter = searchParams.get('preservation_state') ?? ''
   const [excluding, setExcluding] = useState<ExcludeTarget | null>(null)
   const [reason, setReason] = useState('')
+  const [releasing, setReleasing] = useState<Preservation | null>(null)
+  const [releaseReason, setReleaseReason] = useState('')
+  const [attested, setAttested] = useState(false)
 
   const list = useQuery({
     queryKey: ['preservations', requestNumber ?? 'all', activeStateFilter],
@@ -124,6 +189,39 @@ export function Preservations({
       closeExclude()
     },
   })
+
+  const release = useMutation({
+    mutationFn: ({ preservationId, reason }: { preservationId: number; reason: string }) =>
+      api<Preservation>(`/api/staff/preservations/${preservationId}/release/`, {
+        method: 'POST',
+        body: { reason, attest_no_litigation_hold: true },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['preservations'] })
+      toast('success', 'Preservation hold released; Aware bookmarks are being deleted.')
+      closeRelease()
+    },
+  })
+
+  function openRelease(preservation: Preservation) {
+    setReleasing(preservation)
+    setReleaseReason('')
+    setAttested(false)
+    release.reset()
+  }
+
+  function closeRelease() {
+    setReleasing(null)
+    setReleaseReason('')
+    setAttested(false)
+    release.reset()
+  }
+
+  function submitRelease(e: FormEvent) {
+    e.preventDefault()
+    if (!releasing || reasonTooShort(releaseReason) || !attested) return
+    release.mutate({ preservationId: releasing.id, reason: releaseReason })
+  }
 
   function openExclude(preservationId: number, hold: CameraHold) {
     setExcluding({ preservationId, hold })
@@ -180,7 +278,7 @@ export function Preservations({
             onClick={() => changeStateFilter(s)}
             aria-pressed={activeStateFilter === s}
           >
-            {s}
+            {s.replace('_', ' ')}
           </Button>
         ))}
       </div>
@@ -199,9 +297,28 @@ export function Preservations({
                   <p className="mt-1 text-sm text-ink-muted">
                     {p.window_start} → {p.window_end}
                   </p>
+                  {p.site_resolution && (
+                    <p className="mt-1 text-sm text-ink-muted">{p.site_resolution}</p>
+                  )}
                 </div>
-                <StateBadge state={p.state} />
+                <div className="flex flex-wrap items-center gap-2">
+                  <StateBadge state={p.state} />
+                  {canExclude && p.request_closed && RELEASABLE_STATES.has(p.state) && (
+                    <Button variant="ghost" onClick={() => openRelease(p)}>
+                      Release hold
+                    </Button>
+                  )}
+                </div>
               </div>
+
+              {p.confirmation_text && <ConfirmationText text={p.confirmation_text} />}
+
+              {p.released_at && (
+                <p className="mb-4 text-sm text-ink-muted">
+                  Released {p.released_at.slice(0, 10)} by {p.released_by ?? '—'}
+                  {p.release_reason && <> — {p.release_reason}</>}
+                </p>
+              )}
 
               {p.detected_dates_note && (
                 <p className="mb-4 rounded-md border border-line bg-surface-sunken px-3 py-2 text-sm text-ink-muted">
@@ -225,9 +342,20 @@ export function Preservations({
                     { header: 'Site', cell: (h: CameraHold) => h.site },
                     { header: 'State', cell: (h: CameraHold) => <StateBadge state={h.state} /> },
                     {
-                      header: 'Clip',
+                      header: 'Aware bookmark',
                       cell: (h: CameraHold) =>
                         h.clip_id ? h.clip_id : <span className="text-ink-muted">—</span>,
+                    },
+                    {
+                      header: 'Coverage',
+                      cell: (h: CameraHold) => (
+                        <span className="block max-w-xs text-xs">
+                          <span>{coverageLabel(h.coverage_fraction)}</span>
+                          {h.coverage_note && (
+                            <span className="block text-ink-muted">{h.coverage_note}</span>
+                          )}
+                        </span>
+                      ),
                     },
                     {
                       header: 'Error',
@@ -254,7 +382,7 @@ export function Preservations({
                       header: '',
                       align: 'right',
                       cell: (h: CameraHold) =>
-                        h.excluded_at || !canExclude ? null : (
+                        h.excluded_at || h.state === 'released' || !canExclude ? null : (
                           <Button variant="ghost" onClick={() => openExclude(p.id, h)}>
                             Exclude
                           </Button>
@@ -267,7 +395,7 @@ export function Preservations({
               )}
 
               <p className="mt-3 text-xs text-ink-muted">
-                Exclusions are logged with your name and reason — RCW 42.56 audit trail.
+                Exclusions and releases are logged with your name and reason — RCW 42.56 audit trail.
               </p>
             </Card>
           ))}
@@ -295,6 +423,59 @@ export function Preservations({
               </Button>
               <Button type="submit" disabled={exclude.isPending || !reason.trim()}>
                 {exclude.isPending ? 'Excluding…' : 'Exclude camera'}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal
+        open={canExclude && releasing !== null}
+        title={releasing ? `Release preservation for ${releasing.request_number}` : ''}
+        onClose={closeRelease}
+      >
+        {releasing && (
+          <form onSubmit={submitRelease} className="space-y-4">
+            <p className="text-sm text-ink-muted">
+              Releasing deletes every Aware bookmark on this hold. The footage then
+              ages out on each camera's normal schedule and cannot be recovered.
+            </p>
+            <Field
+              label="Reason"
+              hint={reasonHint('say why the footage no longer needs to be kept')}
+            >
+              <Textarea
+                rows={3}
+                value={releaseReason}
+                onChange={(e) => setReleaseReason(e.target.value)}
+                required
+              />
+            </Field>
+            {reasonShortfall(releaseReason) && (
+              <p className="text-sm text-ink-muted">{reasonShortfall(releaseReason)}</p>
+            )}
+            <label className="flex items-start gap-2 text-sm text-ink">
+              <input
+                type="checkbox"
+                checked={attested}
+                onChange={(e) => setAttested(e.target.checked)}
+                required
+              />
+              <span>
+                I attest that no litigation hold, pending lawsuit, or reasonably
+                anticipated litigation covers this footage.
+              </span>
+            </label>
+            {release.isError && <ErrorNote error={release.error} />}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={closeRelease}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={release.isPending || reasonTooShort(releaseReason) || !attested}
+              >
+                {release.isPending ? 'Releasing…' : 'Release and delete bookmarks'}
               </Button>
             </div>
           </form>

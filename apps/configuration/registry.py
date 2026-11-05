@@ -1254,12 +1254,14 @@ SETTINGS: tuple[SettingSpec, ...] = (
         label="Camera retention window",
         consequence=(
             "How long the district's cameras are believed to keep footage. "
-            "A request landing inside this window puts an immediate hold on "
-            "every camera. Shortening it below the true retention means "
-            "footage that still exists is never held and can be overwritten "
-            "— a destroyed public record. Outside the window the request "
-            "still gets a human search and an adequate-search checklist; "
-            "nothing is ever denied automatically."
+            "Automatic holds read each camera's real retention from Aware; "
+            "this setting sizes the hold window when a request names no "
+            "date, and, while Aware is unreachable, decides whether a window "
+            "goes to adequate-search review instead of an urgent manual "
+            "hold. Shortening it below the true retention shrinks no-date "
+            "holds and can skip a manual hold on footage that still exists "
+            "— a destroyed public record. Either way the request still gets "
+            "a human search; nothing is ever denied automatically."
         ),
     ),
     SettingSpec(

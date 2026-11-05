@@ -14,6 +14,7 @@ from apps.records.models import (
     FootagePreservation,
     PublicRecordsRequest,
     Requester,
+    RequestStatus,
 )
 
 EXCLUDE_GATE_MESSAGE = (
@@ -85,6 +86,34 @@ class PreservationApiTests(TestCase):
         self.assertEqual(hold["state"], CameraHold.State.HELD)
         self.assertIsNone(hold["excluded_by"])
         self.assertEqual(hold["exclusion_reason"], "")
+        self.assertIn("coverage_fraction", hold)
+        self.assertEqual(hold["coverage_note"], "")
+        self.assertEqual(row["site_codes"], [])
+        self.assertEqual(row["site_resolution"], "")
+        self.assertFalse(row["request_closed"])
+        self.assertIsNone(row["released_at"])
+        self.assertIsNone(row["released_by"])
+        self.assertEqual(row["release_reason"], "")
+        self.assertTrue(
+            row["confirmation_text"].startswith(
+                "2 cameras across the district held from "
+            ),
+            row["confirmation_text"],
+        )
+
+    def test_confirmation_text_is_null_when_nothing_is_held(self):
+        FootagePreservation.objects.filter(pk=self.fp.pk).update(
+            state=FootagePreservation.State.MANUAL,
+        )
+        body = self.client.get(f"/api/staff/preservations/{self.fp.id}/").json()
+        self.assertIsNone(body["confirmation_text"])
+
+    def test_request_closed_reflects_the_request_status(self):
+        PublicRecordsRequest.objects.filter(pk=self.prr.pk).update(
+            status=RequestStatus.FULFILLED,
+        )
+        body = self.client.get(f"/api/staff/preservations/{self.fp.id}/").json()
+        self.assertTrue(body["request_closed"])
 
     def test_retrieve_shape(self):
         r = self.client.get(f"/api/staff/preservations/{self.fp.id}/")
@@ -151,8 +180,8 @@ class PreservationApiTests(TestCase):
         self.assertEqual(self.held.state, CameraHold.State.HELD)
 
     @override_settings(PRR_LOCAL_IMPLICIT_STAFF_ROLES=())
-    @mock.patch("apps.integrations.avigilon.client.delete_clip")
-    def test_exclude_camera_rechecks_current_role_after_dispatch(self, delete_clip):
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_exclude_camera_rechecks_current_role_after_dispatch(self, delete_bookmark):
         apply_staff_roles(self.officer, {StaffRole.RECORDS_OFFICER})
 
         def revoke_role_after_permission_check(*_args, **_kwargs):
@@ -175,7 +204,7 @@ class PreservationApiTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 403)
-        delete_clip.assert_not_called()
+        delete_bookmark.assert_not_called()
         self.other.refresh_from_db()
         self.assertEqual(self.other.state, CameraHold.State.HELD)
         self.assertIsNone(self.other.excluded_at)
@@ -204,10 +233,10 @@ class PreservationApiTests(TestCase):
         self.held.refresh_from_db()
         self.assertEqual(self.held.state, CameraHold.State.HELD)
 
-    @mock.patch("apps.integrations.avigilon.client.delete_clip")
-    def test_exclude_camera_oversized_reason_rejected_before_clip_delete(
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_exclude_camera_oversized_reason_rejected_before_bookmark_delete(
         self,
-        delete_clip,
+        delete_bookmark,
     ):
         response = self.client.post(
             f"/api/staff/preservations/{self.fp.id}/exclude-camera/",
@@ -223,7 +252,7 @@ class PreservationApiTests(TestCase):
             response.json()["detail"],
             "A camera-exclusion reason must contain at most 500 characters.",
         )
-        delete_clip.assert_not_called()
+        delete_bookmark.assert_not_called()
         self.held.refresh_from_db()
         self.assertEqual(self.held.state, CameraHold.State.HELD)
         self.assertIsNone(self.held.excluded_at)
@@ -238,6 +267,116 @@ class PreservationApiTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(r.status_code, 404)
+
+    # -- release action ----------------------------------------------------
+
+    def _close_request(self, status=RequestStatus.FULFILLED):
+        PublicRecordsRequest.objects.filter(pk=self.prr.pk).update(status=status)
+
+    def _release(self, **body):
+        payload = {
+            "reason": "Request fulfilled; the requester confirmed receipt.",
+            "attest_no_litigation_hold": True,
+        }
+        payload.update(body)
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.client.post(
+                f"/api/staff/preservations/{self.fp.id}/release/",
+                payload,
+                content_type="application/json",
+            )
+
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_release_happy_path(self, delete_bookmark):
+        self._close_request()
+
+        response = self._release()
+
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertEqual(body["state"], FootagePreservation.State.RELEASED)
+        self.assertEqual(body["released_by"], "officer")
+        self.assertEqual(
+            body["release_reason"],
+            "Request fulfilled; the requester confirmed receipt.",
+        )
+        self.assertIsNotNone(body["released_at"])
+        self.assertEqual(
+            sorted(c.args[0] for c in delete_bookmark.call_args_list),
+            ["clip-1", "clip-2"],
+        )
+        self.fp.refresh_from_db()
+        self.assertEqual(self.fp.state, FootagePreservation.State.RELEASED)
+        self.assertEqual(self.fp.released_by, self.officer)
+
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_release_refused_while_the_request_is_open(self, delete_bookmark):
+        response = self._release()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("still open", response.json()["detail"])
+        delete_bookmark.assert_not_called()
+        self.fp.refresh_from_db()
+        self.assertEqual(self.fp.state, FootagePreservation.State.HELD)
+
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_release_requires_a_json_true_attestation(self, delete_bookmark):
+        self._close_request()
+        for attestation in ("true", "yes", 1, False, None):
+            with self.subTest(attestation=attestation):
+                response = self._release(attest_no_litigation_hold=attestation)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("litigation hold", response.json()["detail"])
+        response = self.client.post(
+            f"/api/staff/preservations/{self.fp.id}/release/",
+            {"reason": "Request fulfilled; the requester confirmed receipt."},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        delete_bookmark.assert_not_called()
+        self.fp.refresh_from_db()
+        self.assertEqual(self.fp.state, FootagePreservation.State.HELD)
+
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_release_thin_reason_rejected(self, delete_bookmark):
+        self._close_request()
+        response = self._release(reason="done")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("substantive reason", response.json()["detail"])
+        delete_bookmark.assert_not_called()
+
+    @override_settings(PRR_LOCAL_IMPLICIT_STAFF_ROLES=())
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_release_is_records_officer_only(self, delete_bookmark):
+        self._close_request()
+        apply_staff_roles(self.officer, {StaffRole.ADMIN})
+
+        response = self._release()
+
+        self.assertEqual(response.status_code, 403)
+        delete_bookmark.assert_not_called()
+        self.fp.refresh_from_db()
+        self.assertEqual(self.fp.state, FootagePreservation.State.HELD)
+
+    @override_settings(PRR_LOCAL_IMPLICIT_STAFF_ROLES=())
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_release_rechecks_current_role_after_dispatch(self, delete_bookmark):
+        self._close_request()
+        apply_staff_roles(self.officer, {StaffRole.RECORDS_OFFICER})
+
+        def revoke_role_after_permission_check(*_args, **_kwargs):
+            apply_staff_roles(self.officer, set())
+
+        with mock.patch(
+            "apps.api.resources.preservations.human_only_handoff",
+            side_effect=revoke_role_after_permission_check,
+        ):
+            response = self._release()
+
+        self.assertEqual(response.status_code, 403)
+        delete_bookmark.assert_not_called()
+        self.fp.refresh_from_db()
+        self.assertEqual(self.fp.state, FootagePreservation.State.HELD)
 
     # -- read-only enforcement --------------------------------------------
 

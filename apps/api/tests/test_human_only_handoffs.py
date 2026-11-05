@@ -89,6 +89,32 @@ class HumanOnlyRuntimeBoundaryTests(TestCase):
         )
         self.assert_handoff(response)
 
+    def test_token_cannot_release_a_preservation(self):
+        PublicRecordsRequest.objects.filter(pk=self.prr.pk).update(
+            status=RequestStatus.FULFILLED,
+        )
+        preservation = FootagePreservation.objects.create(
+            request=self.prr,
+            window_start=timezone.now(),
+            window_end=timezone.now(),
+            state=FootagePreservation.State.HELD,
+        )
+        response = self.client.post(
+            f"/api/staff/preservations/{preservation.id}/release/",
+            {
+                "reason": "Request fulfilled and the requester confirmed receipt.",
+                "attest_no_litigation_hold": True,
+            },
+            content_type="application/json",
+            **self.auth,
+        )
+        self.assert_handoff(response)
+        self.assertEqual(
+            response.json()["handoff"]["capability_id"], "preservations.release",
+        )
+        preservation.refresh_from_db()
+        self.assertEqual(preservation.state, FootagePreservation.State.HELD)
+
     def test_token_must_handoff_before_clarification_receipt_lookup(self):
         missing_receipt_id = uuid.uuid4()
         response = self.client.post(

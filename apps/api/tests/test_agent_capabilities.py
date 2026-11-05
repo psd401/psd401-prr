@@ -260,6 +260,21 @@ class AgentCapabilityRegistryTests(SimpleTestCase):
             by_id["correspondence.draft_estimate_revision"]["constraints"],
         )
         self.assertEqual(by_id["preservations.exclude_camera"]["execution"], "human_only")
+        release = by_id["preservations.release"]
+        self.assertEqual(release["execution"], "human_only")
+        self.assertEqual(release["risk"], "high")
+        self.assertEqual(release["method"], "POST")
+        self.assertEqual(release["path"], "/api/staff/preservations/{id}/release/")
+        self.assertIsNone(release["mcp_tool"])
+        for constraint in (
+            "records_officer_authority",
+            "substantive_reason",
+            "accountable_human_actor",
+            "interactive_staff_session",
+            "destructive",
+            "append_only_audit",
+        ):
+            self.assertIn(constraint, release["constraints"])
         self.assertEqual(
             by_id["correspondence.approve"]["execution"],
             "human_only",

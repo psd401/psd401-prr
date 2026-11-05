@@ -103,22 +103,39 @@ service.
 
 ## Rule 7 — Footage: auto-hold always, auto-deny never
 
-Intake triage (`apps/records/triage.py`) detects camera-footage requests. Inside
-the retention window (`CAMERA_RETENTION_DAYS`): hold EVERY camera immediately via
-Avigilon Alta saved clips (`apps/integrations/avigilon/client.py` — endpoint
-paths carry VERIFY markers; run `manage.py verify_alta` with the district token
-first).
+Intake triage (`apps/records/triage.py`) detects camera-footage requests and
+auto-holds always: every camera at each site the request names
+(`apps/records/footage_sites.py` maps school names, abbreviations, and site
+codes to Aware camera groups), or every camera district-wide when no site is
+identified. Each in-scope camera gets an Avigilon Alta Aware bookmark with no
+expiry (`apps/integrations/avigilon/client.py`), starting at the later of the
+requested window's start and that camera's oldest retained footage. Requested
+dates are whole Pacific calendar days. Retention is per camera, read from
+Aware. `CAMERA_RETENTION_DAYS` only sizes the window when the request has no
+parseable date and, when Aware is unreachable, sends a window older than the
+setting to adequate-search review instead of a manual hold.
+A camera whose bookmark covers less than 95% of the window is recorded as a
+footage gap, and the preservation is then PARTIAL, never HELD.
 
-Outside retention: queue only a human-review + adequate-search checklist
-(Neighborhood Alliance standard) — no requester response is drafted or queued
-automatically. A human must complete the search, choose the legally supported
-response, draft, approve, and send; there is no auto-denial code path and none
-may be added.
+Zero cameras at a named site goes to human adequate-search review
+(`NO_CAMERAS`), never "held": footage may sit on another recorder. Where no
+in-scope camera retains the window: queue only a human-review +
+adequate-search checklist (Neighborhood Alliance standard) — no requester
+response is drafted or queued automatically. A human must complete the search,
+choose the legally supported response, draft, approve, and send; there is no
+auto-denial code path and none may be added. The preservation confirmation
+text (HELD/PARTIAL only) is shown to staff for correspondence they write; it is
+never sent automatically.
 
-Camera exclusions require a human + substantive reason via
-`triage.exclude_camera()` (AST-guarded like `revise_estimate`). If the Alta API
-is down/unconfigured, holds degrade to URGENT manual instructions to facilities
-— never to silence.
+Release and exclusion are human-only with a reason. Camera exclusions go
+through `triage.exclude_camera()`. Deleting a preservation's bookmarks goes
+through `triage.release_preservation()`, which requires a closed request (and,
+for a merged duplicate, a closed case of record), current Records Officer
+authority, a substantive reason, and an attestation that no litigation hold,
+pending lawsuit, or reasonably anticipated litigation covers the footage. Both
+are AST-guarded like `revise_estimate`. If the Aware API is down or
+unconfigured, holds degrade to URGENT manual instructions to facilities —
+never to silence.
 
 ## Rule 8 — The system registry routes collection
 

@@ -9,6 +9,7 @@ bounded retry for transport failures.
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import logging
@@ -549,8 +550,23 @@ def notify_stalled(
     )
 
 
-def notify_footage_manual_hold(preservation, *, error: str) -> bool | None:
+def _footage_sites(codes) -> str:
+    from .footage_sites import site_name
+
+    return ", ".join(f"{site_name(code)} ({code})" for code in codes)
+
+
+def notify_footage_manual_hold(
+    preservation,
+    *,
+    error: str,
+    site_codes=None,
+) -> bool | None:
+    """URGENT: a human must bookmark footage in Aware by hand. ``site_codes``
+    scopes the instructions; empty means every camera district-wide."""
     request = preservation.request
+    if site_codes is None:
+        site_codes = preservation.site_codes
     return enqueue_staff_notification(
         signal_type="footage.manual_hold_required",
         request=request,
@@ -564,6 +580,8 @@ def notify_footage_manual_hold(preservation, *, error: str) -> bool | None:
             "window_end": preservation.window_end,
             "camera_retention_days": runtime.get("CAMERA_RETENTION_DAYS"),
             "failure": str(error)[:500],
+            "sites": _footage_sites(site_codes or ()),
+            "held_count": preservation.held_count,
         },
         condition_key=(
             f"{preservation.pk}:{preservation.window_start.isoformat()}:"
@@ -577,23 +595,33 @@ def notify_footage_hold_complete(
     preservation,
     *,
     held: int,
-    failed: int,
+    gap: int = 0,
+    failed: int = 0,
+    not_retained: int = 0,
 ) -> bool | None:
     request = preservation.request
+    short = bool(gap or failed or not_retained)
     recipients = list(_records_officer_recipients())
-    if failed:
+    if short:
         recipients.append(runtime.get("PRA_SUPERVISOR_EMAIL"))
     return enqueue_staff_notification(
         signal_type="footage.hold_complete",
         request=request,
         recipients=recipients,
         subject=(
-            f"[FOOTAGE HOLD {'PARTIAL' if failed else 'COMPLETE'}] "
-            f"{request.number}: {held} held, {failed} failed"
+            f"[FOOTAGE HOLD {'PARTIAL' if short else 'COMPLETE'}] "
+            f"{request.number}: {held} held, {gap} gap, {failed} failed, "
+            f"{not_retained} not retained"
         ),
         template_name="notifications/footage_hold_complete.txt",
-        context={"held_count": held, "failed_count": failed},
-        condition_key=f"{preservation.pk}:{held}:{failed}",
+        context={
+            "held_count": held,
+            "gap_count": gap,
+            "failed_count": failed,
+            "not_retained_count": not_retained,
+            "sites": _footage_sites(preservation.site_codes),
+        },
+        condition_key=f"{preservation.pk}:{held}:{gap}:{failed}:{not_retained}",
     )
 
 
@@ -615,8 +643,16 @@ def notify_intake_auto_applied(applied) -> bool | None:
     )
 
 
-def notify_adequate_search_review(preservation) -> bool | None:
+def notify_adequate_search_review(
+    preservation,
+    *,
+    no_camera_sites=(),
+    note: str = "",
+) -> bool | None:
+    """Queue the human adequate-search review: either nothing is retained
+    for the window, or a named site has no cameras in Aware."""
     request = preservation.request
+    no_camera_sites = list(no_camera_sites)
     return enqueue_staff_notification(
         signal_type="footage.adequate_search_review_queued",
         request=request,
@@ -626,9 +662,16 @@ def notify_adequate_search_review(preservation) -> bool | None:
         context={
             "window_start": preservation.window_start,
             "window_end": preservation.window_end,
+            # The window ends at midnight after the last requested day.
+            "window_last_day": preservation.window_end - dt.timedelta(microseconds=1),
             "camera_retention_days": runtime.get("CAMERA_RETENTION_DAYS"),
+            "no_camera_sites": _footage_sites(no_camera_sites),
+            "note": str(note)[:500],
         },
-        condition_key=str(preservation.pk),
+        condition_key=(
+            f"{preservation.pk}:no-cameras:{','.join(no_camera_sites)}"
+            if no_camera_sites else str(preservation.pk)
+        ),
     )
 
 
