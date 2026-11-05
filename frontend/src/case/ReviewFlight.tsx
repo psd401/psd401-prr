@@ -295,7 +295,7 @@ export function ReviewFlight({ number }: { number: string }) {
           {showClusters ? 'Hide clusters' : 'Show clusters'}
         </Button>
         <Link
-          to={`/requests/${number}/records?record_state=unreviewed`}
+          to={`/requests/${number}/review?view=records&record_state=unreviewed`}
           className="text-sm font-semibold text-accent underline-offset-2 hover:underline"
         >
           Review all {total} matching in Records

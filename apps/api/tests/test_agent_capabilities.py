@@ -208,6 +208,35 @@ class AgentCapabilityRegistryTests(SimpleTestCase):
         )
         self.assertEqual(unserved, [])
 
+    def test_case_ui_routes_name_a_stage_of_the_rail(self):
+        """Parity for the stage rail (#45): every case action is reachable.
+
+        The case workspace serves the seven stages plus Messages and
+        Activity. The pre-rail tab names still resolve, but only as
+        redirects, so the catalog must hand a person the stage where the
+        action now lives. Each stage segment must be one the frontend's
+        route registry authorizes, or the handoff lands on "not found".
+        """
+        nav = (Path(settings.BASE_DIR) / "frontend" / "src" / "nav.ts").read_text(
+            encoding="utf-8"
+        )
+        stage_block = nav[nav.index("const STAGE_ROLES = {"):nav.index("} satisfies")]
+        stages = set(re.findall(r"^  ([a-z]+):", stage_block, re.MULTILINE))
+        self.assertEqual(
+            stages,
+            {"intake", "scope", "collect", "review", "redact", "release", "close"},
+        )
+        served = stages | {"messages", "activity"}
+        advertised = {
+            route.split("/")[3]
+            for capability in CAPABILITIES
+            for route in capability["ui_routes"]
+            if route.startswith("/requests/:number/")
+        }
+        self.assertEqual(advertised - served, set())
+        # Every stage hands off at least one action, so none is a dead end.
+        self.assertEqual(served - advertised, set())
+
     def test_agent_only_capabilities_are_registered_and_have_no_ui_route(self):
         """Named exceptions must stay real, so the list cannot rot silently."""
         by_id = {capability["id"]: capability for capability in CAPABILITIES}
@@ -462,7 +491,7 @@ class AgentCapabilityRegistryTests(SimpleTestCase):
         )
         self.assertEqual(
             by_id["collection_tasks.list"]["ui_routes"],
-            ["/requests/:number/collection"],
+            ["/requests/:number/scope", "/requests/:number/collect"],
         )
         for capability_id in (
             "requests.list",
@@ -480,15 +509,15 @@ class AgentCapabilityRegistryTests(SimpleTestCase):
         }
         self.assertEqual(
             by_id["time_entries.list"]["ui_routes"],
-            ["/requests/:number/overview"],
+            ["/requests/:number/intake"],
         )
         self.assertEqual(
             by_id["time_entries.create"]["ui_routes"],
-            ["/requests/:number/overview"],
+            ["/requests/:number/intake"],
         )
         self.assertEqual(
             by_id["time_entries.delete"]["ui_routes"],
-            ["/requests/:number/overview"],
+            ["/requests/:number/intake"],
         )
         self.assertEqual(
             by_id["inbound_correspondence.list"]["ui_routes"],
@@ -503,11 +532,11 @@ class AgentCapabilityRegistryTests(SimpleTestCase):
             by_id["correspondence.list"]["ui_routes"],
         )
         self.assertIn(
-            "/requests/:number/records",
+            "/requests/:number/redact",
             by_id["redaction_proposals.accept"]["ui_routes"],
         )
         self.assertIn(
-            "/requests/:number/records",
+            "/requests/:number/redact",
             by_id["redaction_proposals.reject"]["ui_routes"],
         )
         for capability in by_id.values():
@@ -553,7 +582,7 @@ class AgentCapabilityRegistryTests(SimpleTestCase):
             by_id["staff_users.list"]["ui_routes"],
         )
         self.assertIn(
-            "/requests/:number/records",
+            "/requests/:number/review",
             by_id["exemptions.list"]["ui_routes"],
         )
         self.assertIn(
@@ -561,7 +590,7 @@ class AgentCapabilityRegistryTests(SimpleTestCase):
             by_id["exemptions.list"]["ui_routes"],
         )
         self.assertIn(
-            "/requests/:number/releases",
+            "/requests/:number/release",
             by_id["fee_schedules.list"]["ui_routes"],
         )
 

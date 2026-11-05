@@ -151,10 +151,11 @@ test('keyboard-case-inbox', async ({ page }) => {
   await page.keyboard.press('Enter')
   await expect(page.getByText('Team: Needs attention')).toBeVisible()
 
-  const collectionTab = page.getByRole('link', { name: 'Collection', exact: true })
+  const collectionTab = page.getByRole('navigation', { name: 'Case stages' })
+    .getByRole('link', { name: /^Collect:/ })
   await collectionTab.focus()
   await page.keyboard.press('Enter')
-  await expect(page.getByRole('heading', { name: 'Collection', level: 2, exact: true })).toBeFocused()
+  await expect(page.getByRole('heading', { name: 'Collect', level: 2, exact: true })).toBeFocused()
   const liaisonRow = page.getByRole('row', { name: /e2e-liaison/ })
   await liaisonRow.focus()
   await page.keyboard.press('Enter')
@@ -198,11 +199,11 @@ test('keyboard-case-inbox', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Messages', level: 2, exact: true })).toBeFocused()
   await collectionTab.focus()
   await page.keyboard.press('Enter')
-  await expect(page.getByRole('heading', { name: 'Collection', level: 2, exact: true })).toBeFocused()
+  await expect(page.getByRole('heading', { name: 'Collect', level: 2, exact: true })).toBeFocused()
   await page.goBack()
   await expect(page).toHaveURL(/\/messages/)
   await page.goForward()
-  await expect(page).toHaveURL(/\/collection/)
+  await expect(page).toHaveURL(/\/collect/)
 
   await page.screenshot({
     path: path.resolve('../.verification/keyboard-case-inbox.png'),

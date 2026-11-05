@@ -189,7 +189,22 @@ class CaseWorkspaceReadModelTests(TestCase):
                 "estimated_completion",
                 "counts",
                 "next_action",
+                "stages",
             },
+        )
+        # The stage rail (#45) is server-derived: seven stages in order, each
+        # with a state, and exactly one current or blocked while the case is open.
+        self.assertEqual(
+            [stage["id"] for stage in payload["stages"]],
+            ["intake", "scope", "collect", "review", "redact", "release", "close"],
+        )
+        self.assertEqual(
+            set(payload["stages"][0]),
+            {"id", "label", "state", "open_count", "summary", "reason"},
+        )
+        self.assertEqual(
+            sum(stage["state"] in {"current", "blocked"} for stage in payload["stages"]),
+            1,
         )
         # The Messages tab renders this tracker, so a field silently dropped by
         # the summary serializer would remove its call to action.

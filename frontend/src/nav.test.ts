@@ -5,6 +5,7 @@ import type { StaffRole } from './api/auth'
 import {
   CONFIGURATION_NAV,
   PRIMARY_NAV,
+  caseTabPath,
   defaultLanding,
   routeIsAuthorized,
   visibleNav,
@@ -96,6 +97,24 @@ describe('role-aware shell contract', () => {
     expect(routeIsAuthorized('/requests/P000123-101426/unknown', ['admin'])).toBe(false)
     expect(routeIsAuthorized('/requests/P000123-101426/toString', ['admin'])).toBe(false)
     expect(routeIsAuthorized('/requests/P000123-101426/constructor', ['admin'])).toBe(false)
+  })
+
+  it('maps server tab names to stage URLs', () => {
+    expect(caseTabPath('P1', 'overview')).toBe('/requests/P1/intake')
+    expect(caseTabPath('P1', 'records')).toBe('/requests/P1/review?view=records')
+    expect(caseTabPath('P1', 'review')).toBe('/requests/P1/review')
+    expect(caseTabPath('P1', 'messages')).toBe('/requests/P1/messages')
+  })
+
+  it('authorizes the stage rail and keeps legacy tab URLs openable for redirect', () => {
+    expect(routeIsAuthorized('/requests/P000123-101426/scope', ['records_officer'])).toBe(true)
+    expect(routeIsAuthorized('/requests/P000123-101426/scope', ['liaison'])).toBe(false)
+    expect(routeIsAuthorized('/requests/P000123-101426/collect', ['liaison'])).toBe(true)
+    expect(routeIsAuthorized('/requests/P000123-101426/redact', ['admin'])).toBe(false)
+    expect(routeIsAuthorized('/requests/P000123-101426/close', ['liaison'])).toBe(true)
+    expect(routeIsAuthorized('/requests/P000123-101426/collection', ['liaison'])).toBe(true)
+    expect(routeIsAuthorized('/requests/P000123-101426/records', ['reviewer'])).toBe(true)
+    expect(routeIsAuthorized('/requests/P000123-101426/overview', ['admin'])).toBe(true)
   })
 
   it('keeps one work surface: Inbox absorbed My Work', () => {

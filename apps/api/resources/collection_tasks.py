@@ -3,7 +3,7 @@
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
-from django.db.models import F
+from django.db.models import Count, F, Q
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import mixins, serializers, viewsets
@@ -14,7 +14,12 @@ from apps.api.handoffs import human_only_handoff
 from apps.api.identity import StaffRole, has_staff_role
 from apps.records.collection_supersession import supersede_collection
 from apps.records.fees import assert_deposit_gate_clear
-from apps.records.models import CollectionTask, FeeDepositGate, VaultIngestRun
+from apps.records.models import (
+    CollectionTask,
+    FeeDepositGate,
+    RecordItem,
+    VaultIngestRun,
+)
 
 User = get_user_model()
 
@@ -40,6 +45,13 @@ class VaultIngestProgressSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+SOURCE_LABELS = {
+    CollectionTask.Kind.VAULT_MAIL: "Google Workspace (Gmail)",
+    CollectionTask.Kind.VAULT_DRIVE: "Google Workspace (Drive)",
+    CollectionTask.Kind.MANUAL: "Manual / department",
+}
+
+
 class CollectionTaskSerializer(serializers.ModelSerializer):
     request_number = serializers.CharField(source="request.number", read_only=True)
     system_name = serializers.SerializerMethodField()
@@ -54,6 +66,9 @@ class CollectionTaskSerializer(serializers.ModelSerializer):
     assigned_to_username = serializers.SerializerMethodField()
     source_vault_count_id = serializers.UUIDField(read_only=True)
     vault_ingest = serializers.SerializerMethodField()
+    source_label = serializers.SerializerMethodField()
+    records_created = serializers.SerializerMethodField()
+    records_unreviewed = serializers.SerializerMethodField()
 
     class Meta:
         model = CollectionTask
@@ -66,6 +81,7 @@ class CollectionTaskSerializer(serializers.ModelSerializer):
             "assigned_to_id", "assigned_to_username", "due_date",
             "vault_matter_id", "vault_hold_id", "vault_export_id",
             "vault_ingest", "created_at", "completed_at",
+            "source_label", "records_created", "records_unreviewed",
         ]
         read_only_fields = [
             "id", "source_vault_count_id",
@@ -88,6 +104,31 @@ class CollectionTaskSerializer(serializers.ModelSerializer):
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_assigned_to_username(self, obj):
         return obj.assigned_to.username if obj.assigned_to_id else None
+
+    @extend_schema_field(serializers.CharField())
+    def get_source_label(self, obj):
+        """Where the collection searched: its record system, else its kind.
+
+        A Vault task has no record system; naming it from its kind keeps the
+        Collect stage card from showing a dash (#45).
+        """
+        if obj.system_id:
+            return obj.system.name
+        return SOURCE_LABELS.get(obj.kind, obj.get_kind_display())
+
+    @extend_schema_field(serializers.IntegerField())
+    def get_records_created(self, obj):
+        counted = getattr(obj, "_records_created", None)
+        return counted if counted is not None else obj.recorditem_set.count()
+
+    @extend_schema_field(serializers.IntegerField())
+    def get_records_unreviewed(self, obj):
+        counted = getattr(obj, "_records_unreviewed", None)
+        if counted is not None:
+            return counted
+        return obj.recorditem_set.filter(
+            review_state=RecordItem.ReviewState.UNREVIEWED,
+        ).count()
 
     @extend_schema_field(VaultIngestProgressSerializer(allow_null=True))
     def get_vault_ingest(self, obj):
@@ -301,6 +342,13 @@ class CollectionTaskViewSet(mixins.ListModelMixin,
     def get_queryset(self):
         qs = CollectionTask.objects.select_related(
             "request", "system", "assigned_to", "vault_ingest_run"
+        ).annotate(
+            _records_created=Count("recorditem", distinct=True),
+            _records_unreviewed=Count(
+                "recorditem",
+                filter=Q(recorditem__review_state=RecordItem.ReviewState.UNREVIEWED),
+                distinct=True,
+            ),
         )
         if has_staff_role(self.request.user, StaffRole.LIAISON) and not has_staff_role(
             self.request.user, StaffRole.RECORDS_OFFICER

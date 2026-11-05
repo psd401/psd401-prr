@@ -29,7 +29,7 @@ test('staff-login-open-case', async ({ page }) => {
     .click()
 
   await expect(page).toHaveURL(
-    new RegExp(`/requests/${fixtureRequestNumber}/overview$`),
+    new RegExp(`/requests/${fixtureRequestNumber}/intake$`),
   )
   const requestHeader = page.locator('header').filter({
     has: page.getByRole('heading', { name: fixtureRequestNumber }),

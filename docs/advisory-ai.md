@@ -131,7 +131,7 @@ senders, and either stops or proposes a tighter query with its reason, which is
 counted next. Scoping stops at `PRR_INTENT_MAX_COUNT_ITERATIONS` (in-app,
 default 4), when the agent says stop, when a refinement is unusable or repeats
 an earlier scope, or when a count fails; the last completed count is the
-proposed scope. The Collection tab's **Scope iterations** card shows the trail
+proposed scope. The Scope stage's **Scope iterations** card shows the trail
 (`requests.scoping.read`); **Re-run scoping** (`requests.scoping.rerun`) starts
 a fresh session from the latest intent proposal, with the officer and a reason
 recorded, even when nothing changed. Scoping itself only counts: no hold,
@@ -314,7 +314,7 @@ Officers read it under **Oversight -> AI agreement**
 (#34, #39) are to be set from. The report covers every matter kind (rule 13):
 it measures the model, not a statutory obligation, and starts no clock.
 
-The Records tab's **Group by cluster** view (`record_items.clusters`) groups
+The Review stage's **Group by cluster** view (in the **Record list**) (`record_items.clusters`) groups
 every record the current filters match -- not just one page -- by email thread
 (`In-Reply-To` -> `Message-ID`), sender or mailing list (`List-Id` first, then
 sending domain), tag, or AI label and confidence band. Each cluster shows its
@@ -439,7 +439,7 @@ admin-only with a reason, and every change is audited:
 | `PRR_TRUST_ELUSION_SAMPLE_SIZE` | 1-500 records | 30 |
 
 - **Suggest** is per-record review, as before.
-- **Batch.** In the Records tab's cluster view, **Approve cluster as ...**
+- **Batch.** In the Review stage's cluster view, **Approve cluster as ...**
   opens a `ReviewBatch` over the cluster's unreviewed records and draws a
   random sample (`random.SystemRandom`). The reviewer judges each sampled
   record. If every judgment matches, the outcome is applied to the whole
@@ -468,7 +468,7 @@ nothing.
 
 Each redaction proposal now carries a `pattern` (phone, email, address,
 student identifier, government ID, financial account, medical, person's
-name, other); proposals made before that are `other`. The Records tab's
+name, other); proposals made before that are `other`. The Redact stage's
 **Redaction proposals** card groups a case's pending proposals by exemption
 and pattern (`redaction_batches.groups`). With `PRR_TRUST_REDACTION_MODE` set
 to `batch` (choices `suggest`, `batch`; no automatic mode), **Accept all in

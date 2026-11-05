@@ -5,17 +5,63 @@ import type { StaffRole } from './api/auth'
 const WORKFLOW_ROLES: StaffRole[] = ['records_officer', 'liaison', 'reviewer', 'admin']
 const ALL_ROLES: StaffRole[] = [...WORKFLOW_ROLES, 'intake_clerk']
 
+const STAGE_ROLES = {
+  intake: WORKFLOW_ROLES,
+  scope: ['records_officer'],
+  collect: ['records_officer', 'liaison', 'admin'],
+  review: ['records_officer', 'reviewer', 'admin'],
+  redact: ['records_officer', 'reviewer'],
+  release: ['records_officer', 'reviewer', 'admin'],
+  close: WORKFLOW_ROLES,
+} satisfies Record<string, StaffRole[]>
+
+/** The tab each pre-rail case URL now opens (#45); old links redirect. */
+export const LEGACY_CASE_TABS = {
+  overview: 'intake',
+  collection: 'collect',
+  records: 'review',
+  releases: 'release',
+} as const satisfies Record<string, keyof typeof STAGE_ROLES>
+
+/**
+ * Who may open each case URL segment: the seven stages, the Messages and
+ * Activity views beside the rail, and the legacy tab names, which carry the
+ * roles of the stage they redirect to.
+ */
 export const CASE_TAB_ROLES = {
-  overview: WORKFLOW_ROLES,
+  ...STAGE_ROLES,
   messages: ['records_officer', 'liaison'],
-  collection: ['records_officer', 'liaison', 'admin'],
-  records: ['records_officer', 'reviewer', 'admin'],
-  review: ['records_officer', 'reviewer'],
-  releases: ['records_officer', 'reviewer', 'admin'],
   activity: WORKFLOW_ROLES,
+  overview: STAGE_ROLES.intake,
+  collection: STAGE_ROLES.collect,
+  records: STAGE_ROLES.review,
+  releases: STAGE_ROLES.release,
 } satisfies Record<string, StaffRole[]>
 
 type CaseTabKey = keyof typeof CASE_TAB_ROLES
+
+function stageForTab(tab: string): string {
+  return Object.hasOwn(LEGACY_CASE_TABS, tab)
+    ? LEGACY_CASE_TABS[tab as keyof typeof LEGACY_CASE_TABS]
+    : tab
+}
+
+/** The rail's name for a stage, or for the stage a legacy tab now opens. */
+export function stageLabel(tab: string): string {
+  const id = stageForTab(tab)
+  return id.charAt(0).toUpperCase() + id.slice(1)
+}
+
+/**
+ * A case URL for a tab name the server sends (a next action, a closure or
+ * release blocker). The server still names the pre-rail tabs; this maps them
+ * to their stage so the link lands without a redirect.
+ */
+export function caseTabPath(number: string, tab: string): string {
+  const stage = stageForTab(tab)
+  const view = tab === 'records' ? '?view=records' : ''
+  return `/requests/${number}/${stage}${view}`
+}
 
 // hasOwn, not `in`: a path segment such as `toString` must not match a
 // prototype member.

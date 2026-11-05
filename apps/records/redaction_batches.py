@@ -62,6 +62,11 @@ def _pending(request: PublicRecordsRequest):
     )
 
 
+def pending_proposal_count(request: PublicRecordsRequest) -> int:
+    """Proposals on this case still waiting for a person's decision."""
+    return _pending(request).count()
+
+
 def proposal_groups(request: PublicRecordsRequest) -> list[dict[str, Any]]:
     """Pending proposals by exemption and pattern, largest group first."""
     groups: dict[tuple[int, str], dict[str, Any]] = {}

@@ -87,7 +87,7 @@ function fakeResponse(body: unknown, status = 200): Response {
 
 function renderPage(
   roles: StaffRole[] = ['records_officer'],
-  mode: 'overview' | 'collection' = 'overview',
+  mode: 'overview' | 'scope' | 'collection' | 'close' = 'overview',
 ) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -109,12 +109,12 @@ function renderPage(
   return { ...rendered, queryClient: qc }
 }
 
-// The advisory and Vault-scoping surfaces live on the Collection tab.
-function renderCollection(roles: StaffRole[] = ['records_officer']) {
-  return renderPage(roles, 'collection')
+// The advisory and Vault-scoping surfaces live on the Scope stage (#45).
+function renderScope(roles: StaffRole[] = ['records_officer']) {
+  return renderPage(roles, 'scope')
 }
 
-// A Collection tab with no advisory proposal and no recorded Vault count,
+// A Scope stage with no advisory proposal and no recorded Vault count,
 // where queueing a count is accepted. The end-date tests only differ in what
 // the officer does with the form.
 function vaultCountFetchMock(countId: string) {
@@ -323,7 +323,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
     expect(await screen.findByText(/permanently not applied/i)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Run advisory' }))
 
@@ -376,7 +376,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
     const query = await screen.findByLabelText('Vault search query')
     expect(query).toHaveValue(
       '"Jordan Sample" AND ("educational records" OR "counseling records")',
@@ -408,7 +408,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
 
     // Responsive records are those in existence when the request arrived, so
     // the officer should not have to retype the case's own receipt date.
@@ -439,7 +439,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
 
     // The default is a starting point, not a floor: clearing it must stick
     // rather than be refilled by the effect that supplied it.
@@ -504,7 +504,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
     await screen.findByLabelText('Vault search query')
     await user.click(screen.getByRole('radio', { name: 'All district accounts' }))
     const button = screen.getByRole('button', { name: 'Count possible messages' })
@@ -551,7 +551,7 @@ describe('RequestDetail', () => {
       return fakeResponse({ count: 0, next: null, previous: null, results: [] })
     }))
 
-    renderCollection()
+    renderScope()
 
     expect(await screen.findByText('1,842 possible Gmail messages')).toBeInTheDocument()
     expect(screen.getAllByText(/not a responsiveness determination/i)).toHaveLength(2)
@@ -598,7 +598,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
     await screen.findByText('1,842 possible Gmail messages')
     await user.click(screen.getByRole('button', { name: 'Start Vault collection' }))
 
@@ -651,7 +651,7 @@ describe('RequestDetail', () => {
       return fakeResponse({ count: 0, next: null, previous: null, results: [] })
     }))
 
-    renderCollection()
+    renderScope()
 
     expect(await screen.findByText(/failed before a Vault export was recorded/i))
       .toBeInTheDocument()

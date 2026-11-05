@@ -124,6 +124,7 @@ from apps.records.response_due import (
     annotate_next_response_due,
     next_response_due,
 )
+from apps.records.stages import STAGE_IDS, case_stages
 from apps.records.upload_handlers import (
     IntakeAttachmentLimitUploadHandler,
     RecordUploadLimitUploadHandler,
@@ -1157,6 +1158,15 @@ class CaseWorkspaceNextActionSerializer(serializers.Serializer):
     work_item_id = serializers.UUIDField()
 
 
+class CaseStageSerializer(serializers.Serializer):
+    id = serializers.ChoiceField(choices=list(STAGE_IDS))
+    label = serializers.CharField()  # pyright: ignore[reportAssignmentType]
+    state = serializers.ChoiceField(choices=["done", "current", "blocked", "upcoming"])
+    open_count = serializers.IntegerField(min_value=0)
+    summary = serializers.CharField(allow_blank=True)
+    reason = serializers.CharField(allow_blank=True)
+
+
 class CaseWorkspaceSummarySerializer(serializers.Serializer):
     number = serializers.CharField()
     legal_status = serializers.CharField()
@@ -1166,6 +1176,7 @@ class CaseWorkspaceSummarySerializer(serializers.Serializer):
     estimated_completion = serializers.DateField(allow_null=True)
     counts = CaseWorkspaceCountsSerializer()
     next_action = CaseWorkspaceNextActionSerializer(allow_null=True)
+    stages = CaseStageSerializer(many=True)
 
 
 class CaseActivityEntrySerializer(serializers.Serializer):
@@ -1877,6 +1888,7 @@ class RequestsViewSet(
                 if next_work is not None
                 else None
             ),
+            "stages": case_stages(prr),
         }
         return Response(CaseWorkspaceSummarySerializer(payload).data)
 

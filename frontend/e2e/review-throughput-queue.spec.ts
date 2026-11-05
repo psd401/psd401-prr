@@ -10,8 +10,8 @@ import { fixtureRequestNumber, login } from './message-workspace.helpers.js'
 test('review-throughput-queue', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page)
-  await page.goto(`/requests/${fixtureRequestNumber}/records`)
-  await expect(page.getByRole('heading', { name: 'Records', level: 2 })).toBeFocused()
+  await page.goto(`/requests/${fixtureRequestNumber}/review?view=records`)
+  await expect(page.getByRole('heading', { name: 'Review', level: 2, exact: true })).toBeFocused()
 
   // One record collected from two mailboxes appears once, naming both.
   const deduplicated = page
@@ -22,7 +22,7 @@ test('review-throughput-queue', async ({ page }) => {
 
   // The tag is a fact read off the message headers, and its facet count
   // describes the set the filter will return.
-  const tagFilter = page.getByLabel('Tag')
+  const tagFilter = page.getByLabel('Tag', { exact: true })
   await expect(tagFilter.getByRole('option', { name: /Automatic reply \(3\)/ })).toBeAttached()
   await tagFilter.selectOption('auto_reply')
   await expect(page).toHaveURL(/tag=auto_reply/)
