@@ -227,34 +227,43 @@ class AutoApplyTests(_Fixture):
         prr = self._case()
         applied = auto_apply_intake_label(self._run(prr).pk)
         assert applied is not None
-        with self.assertRaises(Exception):
+        with self.assertRaises(ValidationError):
             applied.delete()
 
-    def test_a_finished_automatic_run_triggers_auto_apply(self):
+    @override_settings(
+        PRR_AI_ADVISORY_ENABLED=True,
+        PRR_AI_AWS_REGION="us-west-2",
+        PRR_AI_MODEL="us.amazon.nova-2-lite-v1:0",
+        PRR_AI_MAX_INPUT_CHARACTERS=50_000,
+        PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED=True,
+    )
+    def test_a_finished_automatic_classification_closes_the_case(self):
+        from apps.records.advisory_ai import request_automatic_intake_classification
+
         prr = self._case()
-        run = AdvisoryRun.objects.create(
-            kind=KIND, request=prr, trigger=AdvisoryRun.Trigger.AUTOMATIC,
-            model_identifier="model-a", input_sha256="d" * 64,
-        )
-        with (
-            patch("apps.records.advisory_ai._build_advisory_input") as build,
-            patch("apps.records.advisory_ai.hashlib.sha256") as digest,
-            patch(
-                "apps.records.advisory_ai.invoke_advisory_model",
-                return_value={"label": "spam", "target_case_number": None,
-                              "confidence": 0.99, "evidence": "Advertising."},
-            ),
-            patch("apps.records.intake_trust.auto_apply_intake_label") as hook,
-            override_settings(PRR_AI_ADVISORY_ENABLED=True,
-                              PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED=True),
-        ):
-            build.return_value.fingerprint = {}
-            build.return_value.truncated = False
-            build.return_value.attachments = ()
-            build.return_value.payload = {"candidate_cases": []}
-            digest.return_value.hexdigest.return_value = "d" * 64
+        with patch("apps.records.tasks.execute_advisory_analysis.delay"):
+            run = request_automatic_intake_classification(prr.pk)
+        reply = {"label": "spam", "target_case_number": None,
+                 "confidence": 0.99, "evidence": "Advertising."}
+        with patch("apps.records.advisory_ai.invoke_advisory_model", return_value=reply):
             execute_advisory_run(run.pk)
-        hook.assert_called_once_with(run.pk)
+
+        prr.refresh_from_db()
+        self.assertEqual(prr.status, RequestStatus.CLOSED_NON_REQUEST)
+        self.assertTrue(IntakeAutoApplication.objects.filter(advisory_run=run).exists())
+
+    def test_a_refused_closure_leaves_the_case_with_a_person(self):
+        # Every closure refusal (an unresolved delivery, a closed case, ...)
+        # is a ValueError; none may escape into the advisory worker.
+        prr = self._case()
+        with patch(
+            "apps.records.intake_trust.services.auto_close_non_request",
+            side_effect=services.CorrespondenceDeliveryRequired("Unresolved delivery."),
+        ):
+            self.assertIsNone(auto_apply_intake_label(self._run(prr).pk))
+        self.assertFalse(IntakeAutoApplication.objects.filter(request=prr).exists())
+        self.assertFalse(AuditLog.objects.filter(action="intake.auto_applied").exists())
+        self.notify.assert_not_called()
 
 
 class SystemClosureGuardTests(_Fixture):

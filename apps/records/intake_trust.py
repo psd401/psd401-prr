@@ -67,6 +67,8 @@ def auto_apply_intake_label(run_id) -> IntakeAutoApplication | None:
         .values_list("pk", flat=True)
         .first()
     )
+    # Read without a lock: auto_close_non_request re-checks the status under
+    # select_for_update, and the one-to-one advisory_run refuses a second row.
     if (
         latest != run.pk
         or prr.status != RequestStatus.RECEIVED
@@ -99,8 +101,10 @@ def auto_apply_intake_label(run_id) -> IntakeAutoApplication | None:
                 confidence=confidence,
                 model_identifier=run.model_identifier,
             )
-    except (ValidationError, services.EmailIntakeClosureRequired):
-        # A web-form case, or one that changed under us: it stays with a person.
+    except (ValidationError, ValueError):
+        # Every closure refusal is one of these: a web-form case, an
+        # unresolved delivery, a case closed meanwhile. Nothing was written;
+        # the case stays with a person, and the advisory worker never fails.
         return None
     notify_intake_auto_applied(applied)
     return applied
