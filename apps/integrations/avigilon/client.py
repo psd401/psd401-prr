@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import requests
@@ -146,6 +147,76 @@ def delete_clip(clip_id: str) -> None:
     _reject_redirect(resp)
     if resp.status_code not in (200, 204, 404):
         resp.raise_for_status()
+
+
+# ---------------------------------------------------------------------------
+# Bookmark-hold interface (2026-11 rewrite). Shared contract between the client
+# rewrite and the hold/triage changes; the bodies land with the client rewrite,
+# which also removes list_cameras' old dict shape, create_clip_hold, and
+# delete_clip above. Every failure (transport, HTTP, decode, auth) raises
+# AltaError: an empty result never stands in for an error.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Camera:
+    id: str                       # Aware device guid
+    name: str
+    site: str                     # Aware device group name, e.g. "PHS"; "" if none
+    device_group_id: str
+    server_group_id: str
+    status: str                   # live.status, e.g. "CONNECTED", "COMMUNICATION_ERROR"
+    pruned_to: dt.datetime | None  # oldest retained footage (aware UTC); None if unknown
+    sources: tuple[str, ...]      # active head sids to bookmark (inactive heads skipped)
+
+
+@dataclass(frozen=True)
+class DeviceGroup:
+    id: str
+    name: str                     # PSD site code, e.g. "HHE"
+
+
+@dataclass(frozen=True)
+class HeadCoverage:
+    source: str
+    covered_fraction: float       # 0.0..1.0 of the requested window found in store
+    error: str = ""               # why coverage could not be confirmed, if it could not
+
+
+@dataclass(frozen=True)
+class BookmarkHold:
+    id: str                       # Aware bookmark id
+    coverage: tuple[HeadCoverage, ...]
+
+
+def list_device_cameras() -> list[Camera]:
+    """Every active device (plain GET /devices; never offset paging)."""
+    raise NotImplementedError
+
+
+def list_device_groups() -> list[DeviceGroup]:
+    """Every device group (site)."""
+    raise NotImplementedError
+
+
+def create_bookmark_hold(
+    camera: Camera,
+    start: dt.datetime,
+    end: dt.datetime,
+    *,
+    name: str,
+    description: str,
+) -> BookmarkHold:
+    """One bookmark for one camera, one device_infos entry per active head,
+    expiry_time null (kept until manually deleted). Then confirm per-head
+    coverage of [start, end); the caller decides HELD vs gap from it."""
+    raise NotImplementedError
+
+
+def delete_bookmark(bookmark_id: str) -> None:
+    """Remove a hold bookmark. ONLY called by human-gated release/exclusion.
+    A JSON NOT_FOUND means already gone; any other failure raises AltaError."""
+    raise NotImplementedError
 
 
 def checks() -> dict:
