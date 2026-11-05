@@ -23,6 +23,8 @@ from apps.records.models import (
 )
 
 CLIENT = "apps.integrations.avigilon.client"
+FAKE_BASE = "https://example.us4.aware.avasecurity.com"
+DEVICE_GUID = "00000000-0000-0000-0000-000000000001"
 # Older than every window these tests request, so the camera covers it.
 LONG_AGO = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
 
@@ -705,11 +707,65 @@ class HoldPathTests(TestCase):
 
         self.assertEqual(fp.state, FootagePreservation.State.PARTIAL)
         self.assertEqual(fp.held_count, 2)
-        self.assertEqual(fp.camera_holds.get(camera_id="cam-2").error, "bookmark rejected")
+        self.assertEqual(
+            fp.camera_holds.get(camera_id="cam-2").error,
+            "Aware bookmark failed (RuntimeError).",
+        )
         notify_manual_hold.assert_not_called()
         notify_complete.assert_called_once_with(
             fp, held=2, gap=0, failed=1, not_retained=0,
         )
+
+    def test_a_failed_hold_stores_no_address_or_device_id(self):
+        import requests
+
+        failures = {
+            "alta": (
+                alta.AltaError(
+                    f"Alta POST {FAKE_BASE}/api/v1/bookmarks returned HTTP 400 "
+                    f"BAD_REQUEST for device {DEVICE_GUID}."
+                ),
+                "Aware bookmark failed (AltaError, HTTP 400).",
+            ),
+            "transport": (
+                requests.ConnectionError(
+                    "HTTPSConnectionPool(host='example.us4.aware.avasecurity.com', "
+                    "port=443): Max retries exceeded with url: /api/v1/bookmarks"
+                ),
+                "Aware bookmark failed (ConnectionError).",
+            ),
+        }
+        for label, (failure, expected) in failures.items():
+            with self.subTest(case=label):
+                prr = make_request(f"video at Peninsula High School on {days_ago(2)}")
+                with aware([camera(DEVICE_GUID, "Gym", "PHS")], hold=failure), \
+                     mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold"):
+                    fp = preserve(prr)
+
+                hold = fp.camera_holds.get()
+                self.assertEqual(hold.state, CameraHold.State.FAILED)
+                self.assertEqual(hold.error, expected)
+                for leak in ("://", "example.us4", DEVICE_GUID, "/api/"):
+                    self.assertNotIn(leak, hold.error + hold.coverage_note)
+
+    def test_an_uncertain_create_says_a_bookmark_may_already_exist(self):
+        uncertain = alta.AltaWriteUncertain(
+            "Alta POST /bookmarks returned HTTP 503. A bookmark may exist anyway: "
+            f"check Alta device {DEVICE_GUID} for it before retrying."
+        )
+        prr = make_request(f"video at Peninsula High School on {days_ago(2)}")
+        with aware([camera(DEVICE_GUID, "Gym", "PHS")], hold=uncertain), \
+             mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold",
+                        return_value=True) as manual:
+            fp = preserve(prr)
+
+        hold = fp.camera_holds.get()
+        self.assertEqual(hold.state, CameraHold.State.FAILED)
+        self.assertIn("HTTP 503", hold.error)
+        self.assertIn("may already exist", hold.error)
+        self.assertIn("may already exist", hold.coverage_note)
+        self.assertNotIn(DEVICE_GUID, hold.error + hold.coverage_note)
+        self.assertIn("may already exist", manual.call_args.kwargs["error"])
 
 
 @override_settings(

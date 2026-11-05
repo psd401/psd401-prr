@@ -5,6 +5,7 @@ acknowledgment is the district's most expensive possible bug.
 """
 import datetime as dt
 import logging
+import re
 from importlib import import_module
 
 from celery import shared_task
@@ -906,6 +907,30 @@ def _degrade_footage_hold_to_manual(fp, *, reason: str, error: str, site_codes=N
     )
 
 
+# Said on every camera whose create may have landed without confirming.
+BOOKMARK_MAY_EXIST = (
+    "a bookmark may already exist on this device; check it in Aware before retrying"
+)
+_HTTP_STATUS = re.compile(r"\bHTTP (\d{3})\b")
+_REDACT = re.compile(
+    r"https?://\S+|host='[^']*'|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
+)
+
+
+def _safe_alta_error(exc: BaseException, *, action: str = "bookmark") -> str:
+    """A short class-plus-status description of an Aware failure. Stored and
+    emailed, so it never carries a URL, a hostname, or a device id."""
+    from apps.integrations.avigilon import client as alta
+
+    status = _HTTP_STATUS.search(str(exc))
+    detail = type(exc).__name__ + (f", HTTP {status.group(1)}" if status else "")
+    logger.debug("Aware %s failed: %s", action, _REDACT.sub("<redacted>", str(exc)))
+    if isinstance(exc, alta.AltaWriteUncertain):
+        return f"Aware {action} uncertain ({detail}): {BOOKMARK_MAY_EXIST}."
+    return f"Aware {action} failed ({detail})."
+
+
 def _local_time(value) -> str:
     return f"{timezone.localtime(value):%Y-%m-%d %H:%M} Pacific"
 
@@ -993,7 +1018,9 @@ def _hold_one_camera(fp, cam, ch, *, now) -> None:
         )
     except Exception as exc:  # noqa: BLE001 — per-camera isolation
         ch.state = CameraHold.State.FAILED
-        ch.error = str(exc)[:500]
+        ch.error = _safe_alta_error(exc)[:500]
+        if isinstance(exc, alta.AltaWriteUncertain):
+            notes.append(BOOKMARK_MAY_EXIST[0].upper() + BOOKMARK_MAY_EXIST[1:] + ".")
         ch.coverage_note = " ".join(notes)[:500]
         ch.save()
         return
@@ -1054,9 +1081,7 @@ def execute_footage_hold(preservation_id: int):
     # Rule 7: transport, HTTP, and decode errors must degrade like AltaError
     # does; an escaping exception would leave the hold PENDING and nobody told.
     except Exception as exc:  # noqa: BLE001
-        error = str(exc) if isinstance(exc, alta.AltaError) else (
-            f"{type(exc).__name__}: {exc}"
-        )
+        error = _safe_alta_error(exc, action="camera list")
         if _window_predates_flat_retention(fp):
             triage.record_outside_retention_review(
                 fp,
@@ -1159,6 +1184,9 @@ def execute_footage_hold(preservation_id: int):
                 holds.filter(state=CameraHold.State.FAILED)
                 .exclude(error="").values_list("error", flat=True).first() or ""
             )
+            uncertain = holds.filter(
+                state=CameraHold.State.FAILED, error__contains=BOOKMARK_MAY_EXIST,
+            ).count()
             reason = (
                 f"every camera hold failed (0 of {failed} held)"
                 if not not_retained else
@@ -1168,7 +1196,10 @@ def execute_footage_hold(preservation_id: int):
             _degrade_footage_hold_to_manual(
                 fp,
                 reason=reason,
-                error=f"{reason}; first error: {first_error[:300]}",
+                error=f"{reason}; first error: {first_error[:300]}" + (
+                    f" On {uncertain} camera(s) {BOOKMARK_MAY_EXIST}."
+                    if uncertain else ""
+                ),
             )
         if empty:
             triage.record_no_cameras_review(fp, site_codes=empty)
