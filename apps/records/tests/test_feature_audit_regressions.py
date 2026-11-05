@@ -86,11 +86,25 @@ class FeatureAuditRegressionTests(TestCase):
     def test_expired_footage_routes_to_adequate_search_without_denial_language(
         self,
     ):
+        from apps.integrations.avigilon.client import Camera
+
         request = self.make_request(
             description="Bus camera footage from January 1, 2024"
         )
+        # Aware answers, and its one camera kept nothing that old. (Aware
+        # unreachable is an URGENT manual hold instead: it cannot show the
+        # footage is gone.)
+        pruned = Camera(
+            id="cam-1", name="Gym", site="PHS", device_group_id="group-PHS",
+            server_group_id="server-1", status="CONNECTED",
+            pruned_to=timezone.now() - timedelta(days=5), sources=("0",),
+        )
 
-        preservation = triage_footage(request)
+        with patch(
+            "apps.integrations.avigilon.client.list_device_cameras",
+            return_value=[pruned],
+        ):
+            preservation = triage_footage(request)
 
         self.assertEqual(preservation.state, FootagePreservation.State.EXPIRED)
         self.assertNotIn(
