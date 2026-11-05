@@ -277,19 +277,24 @@ def _unanswered_intake_labels(cases) -> dict:
             )
         )
         .order_by("request_id", "-created_at")
+        .values("request_id", "state", "proposal", "_answered")
     )
     for run in runs:
-        latest.setdefault(run.request_id, run)
-    return {
-        request_id: {
-            "label": run.proposal.get("label"),
-            "target_case_number": run.proposal.get("target_case_number"),
-            "confidence": run.proposal.get("confidence"),
-        }
-        for request_id, run in latest.items()
-        if run.state == AdvisoryRun.State.COMPLETE and not run._answered
-        and run.proposal.get("label")
-    }
+        latest.setdefault(run["request_id"], run)
+    suggestions = {}
+    for request_id, run in latest.items():
+        proposal = run["proposal"] or {}
+        if (
+            run["state"] == AdvisoryRun.State.COMPLETE
+            and not run["_answered"]
+            and proposal.get("label")
+        ):
+            suggestions[request_id] = {
+                "label": proposal.get("label"),
+                "target_case_number": proposal.get("target_case_number"),
+                "confidence": proposal.get("confidence"),
+            }
+    return suggestions
 
 
 class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
@@ -1770,7 +1775,7 @@ class RequestsViewSet(
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
         rows = page if page is not None else list(queryset)
-        context = self.get_serializer_context()
+        context = dict(self.get_serializer_context())
         if request.query_params.get("queue") == "inbox" and has_staff_role(
             request.user, StaffRole.RECORDS_OFFICER,
         ):
