@@ -13,7 +13,13 @@ from apps.integrations.vault import client as vault
 
 from .deadlines import add_business_days
 from .fees import assert_deposit_gate_clear, open_deposit_gate
-from .models import CollectionTask, FeeDepositGate, StatusEvent, VaultCountRun
+from .models import (
+    CollectionSupersession,
+    CollectionTask,
+    FeeDepositGate,
+    StatusEvent,
+    VaultCountRun,
+)
 from .services import _require_current_records_officer
 from .vault_counts import _rfc3339_boundary, vault_count_enabled
 
@@ -156,6 +162,17 @@ def _queue_vault_collection(
             source_vault_count=run,
         ).first()
         if existing is not None:
+            # Handing back a replaced collection, or one Vault failed after
+            # its export started, would be a silent no-op (#37): its records
+            # stay superseded, or nothing runs. A new count is a new task.
+            if CollectionSupersession.objects.filter(collection_task=existing).exists() or (
+                existing.state == CollectionTask.State.FAILED
+                and existing.vault_export_id
+            ):
+                raise ValidationError(
+                    "This count's collection was replaced or failed in Vault; "
+                    "run scoping again for a new count to collect."
+                )
             if (
                 existing.state == CollectionTask.State.FAILED
                 and not existing.vault_export_id

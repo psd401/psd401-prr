@@ -222,6 +222,33 @@ class RescopeTests(_Fixture):
 
         self.assertIsNone(current_collection(self.request))
 
+    def test_a_count_whose_collection_was_replaced_cannot_be_collected_again(self, delay):
+        # Collecting it would hand back the old task with its records still
+        # superseded: a silent no-op. The officer runs a new count instead.
+        old = self._collected()
+        _session, run = self._session(trigger=ScopingSession.Trigger.MANUAL, total=12)
+        new = rescope(self.request, count_run_id=run.pk, expected_input_sha256=run.input_sha256,
+                      actor=self.officer, reason="The new scope leaves out the newsletter.")
+        CollectionTask.objects.filter(pk=new.pk).update(state=CollectionTask.State.COMPLETE)
+        old_run = old.source_vault_count
+        assert old_run is not None
+
+        with self.assertRaisesMessage(ValidationError, "run scoping again"):
+            rescope(self.request, count_run_id=old_run.pk, expected_input_sha256=old_run.input_sha256,
+                    actor=self.officer, reason="Going back to the first scope after all.")
+        self.assertFalse(CollectionSupersession.objects.filter(collection_task=new).exists())
+        with self.assertRaisesMessage(ValidationError, "run scoping again"):
+            queue_vault_collection(old_run.pk, actor=self.officer, expected_input_sha256=old_run.input_sha256)
+
+    def test_a_count_whose_export_failed_in_vault_cannot_be_collected_again(self, delay):
+        _session, run = self._session()
+        task = queue_vault_collection(run.pk, actor=self.officer, expected_input_sha256=run.input_sha256).task
+        CollectionTask.objects.filter(pk=task.pk).update(
+            state=CollectionTask.State.FAILED, vault_export_id="export-1",
+        )
+        with self.assertRaisesMessage(ValidationError, "run scoping again"):
+            queue_vault_collection(run.pk, actor=self.officer, expected_input_sha256=run.input_sha256)
+
     def test_the_api_shows_the_diff_and_rescopes(self, delay):
         old = self._collected()
         _session, new_run = self._session(trigger=ScopingSession.Trigger.MANUAL, total=12)
