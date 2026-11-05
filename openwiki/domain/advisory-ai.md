@@ -57,7 +57,9 @@ closed.
   20 from the same requester, each with its immutable fields and a bounded
   description. Kinds never mix. `_validate_proposal` refuses a target number that
   was not among the candidates, and refuses a target on a label that names no
-  case. The label merges, closes, and sends nothing. The officer applies it
+  case. The label merges, closes, and sends nothing, with one exception: a `spam` or
+  `non_request` label in its `auto` trust mode closes an email-created case with no
+  officer, under the [trust ladder](trust-ladder.md#automatic-intake-closure). Otherwise the officer applies it
   through the ordinary merge, close, or add-to-case action in
   [requests](requests.md), then records the answer as an `AdvisoryFeedback` row
   (`confirmed` or `dismissed`, one per run). Only a Records Officer may request
@@ -91,7 +93,7 @@ sequenceDiagram
     O->>W: record confirmed or dismissed as feedback
 ```
 
-*Intake classification: the model proposes, the officer applies the label through the ordinary action and records the answer.*
+*Intake classification: the model proposes, the officer applies the label through the ordinary action and records the answer. The one exception is spam or non-request in `auto` mode, which the trust ladder applies instead.*
 
 ## Persistence and provenance
 
