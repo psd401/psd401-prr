@@ -98,6 +98,32 @@ ACKNOWLEDGMENT_DRAFT_CONFIRMATION_FIELDS = (
     "draft_metadata",
 )
 
+#: Triage fields a record-items row carries to an agent: nothing that is
+#: record text, a person's address, model rationale, or a filename. Unlike
+#: a request subject (signed off for MCP on 2026-10-19), a record's filename
+#: is an attachment name or email subject inside the collected records and can
+#: name a student, so it stays in the staff UI.
+RECORD_ITEM_FIELDS = (
+    "id",
+    "custodian",
+    "email_sender_domain",
+    "review_state",
+    "redaction_count",
+    "tags",
+    "advisory_suggested_state",
+    "advisory_confidence",
+)
+#: A cluster's label is a member's filename and a sender cluster's key is an
+#: address, so neither leaves; size, majority, and ids are what a batch needs.
+RECORD_CLUSTER_FIELDS = ("size", "ai_majority", "record_item_ids")
+DECISION_BATCH_KINDS = (
+    "review",
+    "supersede",
+    "scope_and_collect",
+    "redaction_group",
+    "intake_label",
+)
+
 #: Bounds for the overdue scan. The default is a triage-sized page a Records
 #: Officer can actually act on; the ceiling exists so a caller cannot ask for
 #: the whole backlog in one response. OVERDUE_MAX_PAGES bounds the *work*
@@ -272,6 +298,20 @@ def _validated_base_url(base_url: str) -> str:
     if port is not None:
         authority = f"{authority}:{port}"
     return f"{parsed.scheme.lower()}://{authority}{parsed.path.rstrip('/')}"
+
+
+def _without_record_filenames(batch):
+    """A decision batch as an agent sees it: its records by id and state only."""
+    if isinstance(batch, dict) and isinstance(batch.get("records"), list):
+        batch = {
+            **batch,
+            "records": [
+                {"id": record.get("id"), "review_state": record.get("review_state")}
+                for record in batch["records"]
+                if isinstance(record, dict)
+            ],
+        }
+    return batch
 
 
 class PRRClient:
@@ -648,6 +688,142 @@ class PRRClient:
             },
         }
 
+    def list_record_items(
+        self,
+        request_number: str,
+        review_state: str | None = None,
+        page: int | None = None,
+    ):
+        """List one request's records for proposing a decision batch -- GET
+        /api/staff/record-items/.
+
+        Rows carry triage fields only: id, custodian, sender domain, review
+        state, redaction count, tags, and the standing AI suggestion with its
+        confidence. No record text, filename, address, or model rationale
+        leaves through this tool.
+        """
+        params: dict[str, object] = {
+            "request": _validated_request_number(request_number, field="request_number"),
+        }
+        if review_state:
+            params["review_state"] = str(review_state)
+        if page is not None:
+            params["page"] = int(page)
+        listing = self._get("/api/staff/record-items/", params)
+        rows = listing.get("results", []) if isinstance(listing, dict) else listing
+        return {
+            "count": listing.get("count", len(rows)) if isinstance(listing, dict) else len(rows),
+            "next_page": (page or 1) + 1 if isinstance(listing, dict) and listing.get("next") else None,
+            "results": [{field: row.get(field) for field in RECORD_ITEM_FIELDS} for row in rows],
+        }
+
+    def list_record_clusters(self, request_number: str, group_by: str = "thread"):
+        """Group one request's records into clusters -- GET
+        /api/staff/record-items/clusters/. Each cluster gives its size, the
+        AI majority suggestion, and its record ids, ready for a review batch."""
+        params = {
+            "request": _validated_request_number(request_number, field="request_number"),
+            "group_by": str(group_by),
+        }
+        clusters = self._get("/api/staff/record-items/clusters/", params)
+        return {
+            "group_by": clusters.get("group_by"),
+            "cluster_count": clusters.get("cluster_count"),
+            "clusters": [
+                {key: cluster.get(key) for key in RECORD_CLUSTER_FIELDS}
+                for cluster in clusters.get("clusters", [])
+            ],
+        }
+
+    def get_advisories(self, record_item_id: str):
+        """The latest responsiveness and redaction advisories for one record,
+        as labels, confidences, and patterns -- never the model's rationale
+        or the record's text."""
+        try:
+            item_id = quote(str(uuid.UUID(str(record_item_id))), safe="")
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError("record_item_id must be a UUID.") from exc
+        responsiveness = self._get(f"/api/staff/record-items/{item_id}/advisory-responsiveness/").get("latest")
+        redactions = self._get(f"/api/staff/record-items/{item_id}/advisory-redactions/").get("latest")
+
+        def _run(run) -> dict:
+            return {"state": run.get("state"), "model_identifier": run.get("model_identifier"),
+                    "created_at": run.get("created_at")}
+
+        result = {"record_item_id": str(record_item_id), "responsiveness": None, "redactions": None}
+        if responsiveness:
+            proposal = responsiveness.get("proposal") or {}
+            result["responsiveness"] = {
+                **_run(responsiveness),
+                "suggested_state": proposal.get("suggested_state"),
+                "confidence": proposal.get("confidence"),
+                "matched_terms": proposal.get("matched_terms", []),
+            }
+        if redactions:
+            proposal = redactions.get("proposal") or {}
+            result["redactions"] = {
+                **_run(redactions),
+                "candidates": [
+                    {key: candidate.get(key) for key in ("exemption_id", "pattern", "confidence")}
+                    for candidate in proposal.get("candidates", [])
+                    if isinstance(candidate, dict)
+                ],
+            }
+        return result
+
+    def propose_decision_batch(self, kind: str, payload: dict, evidence_summary: str):
+        """Propose a decision batch for a person to approve -- POST
+        /api/staff/decision-batches/. Records the proposal only."""
+        self._require_attributed_personal_token()
+        if kind not in DECISION_BATCH_KINDS:
+            raise ValueError(f"kind must be one of {', '.join(DECISION_BATCH_KINDS)}.")
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be an object.")
+        evidence = str(evidence_summary or "").strip()
+        if not evidence:
+            raise ValueError("evidence_summary cannot be blank.")
+        batch = self._post(
+            "/api/staff/decision-batches/",
+            {"kind": kind, "payload": payload, "evidence_summary": evidence},
+        )
+        return {
+            "batch": _without_record_filenames(batch),
+            "applied": False,
+            "human_gate": {
+                "required": True,
+                "action": (
+                    "A person with the batch kind's role approves or rejects it in "
+                    "the staff application's Decisions queue; nothing changes until then."
+                ),
+            },
+        }
+
+    def get_decision_batch(
+        self,
+        batch_id: str | None = None,
+        request_number: str | None = None,
+        state: str | None = None,
+    ):
+        """One decision batch by id, or a list filtered by case and state --
+        GET /api/staff/decision-batches/."""
+        if batch_id:
+            try:
+                normalized = quote(str(uuid.UUID(str(batch_id))), safe="")
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise ValueError("batch_id must be a UUID.") from exc
+            return _without_record_filenames(self._get(f"/api/staff/decision-batches/{normalized}/"))
+        params = {}
+        if request_number:
+            params["request"] = _validated_request_number(request_number, field="request_number")
+        if state:
+            if state not in ("proposed", "approved", "rejected"):
+                raise ValueError("state must be proposed, approved, or rejected.")
+            params["state"] = state
+        listing = self._get("/api/staff/decision-batches/", params or None)
+        if isinstance(listing, dict) and isinstance(listing.get("results"), list):
+            listing["results"] = [_without_record_filenames(batch) for batch in listing["results"]]
+        return listing
+
     def suggest_exemption_citations(
         self,
         record_item_id: str,
@@ -699,10 +875,11 @@ class PRRClient:
         return {
             "proposal_type": "record_item_exemption_citations",
             "applied": False,
+            # No filename: it can name a student, and this result goes to the
+            # caller's model provider (see RECORD_ITEM_FIELDS).
             "record_item": {
                 "id": item["id"],
                 "request_number": item["request_number"],
-                "original_filename": item["original_filename"],
                 "review_state": item["review_state"],
             },
             "proposal": {

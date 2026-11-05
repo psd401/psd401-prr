@@ -136,6 +136,8 @@ FIXTURE_FLIGHT_RECORDS = (
 FIXTURE_RESCOPE_REQUEST_NUMBER = "PRR-E2E-0014"
 # One-step release (#47): reviewed records waiting for "Build package".
 FIXTURE_RELEASE_REQUEST_NUMBER = "PRR-E2E-0015"
+# Decision batches (#43): a review batch an agent proposed, waiting for a person.
+FIXTURE_DECISION_REQUEST_NUMBER = "PRR-E2E-0016"
 FIXTURE_ESTIMATE_LETTER_INTENT = (
     "Route 12 bus video from March 3, 2026, between 3 and 4 p.m."
 )
@@ -1416,6 +1418,55 @@ def _seed_release_case(officer):
             reviewed_by=officer,
             reviewed_at=_BASE_TIME,
         )
+    return request
+
+
+def _seed_decision_batch_case(officer):
+    """Seed a case whose two unreviewed records an agent proposed marking
+    non-responsive, waiting in the Decisions queue (#43)."""
+    from apps.records.decision_batches import propose_decision_batch
+    from apps.records.models import DecisionBatch
+
+    requester, _ = Requester.objects.get_or_create(
+        email="decisions@example.org",
+        defaults={"id": _fixture_uuid("decision-requester"), "name": "Decision Requester"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_DECISION_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("decision-request"),
+            "requester": requester,
+            "description": "Transportation committee minutes for spring 2026.",
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    if not created:
+        return request
+    items = []
+    for index in range(2):
+        label = f"decision-newsletter-{index}"
+        items.append(RecordItem.objects.create(
+            pk=_fixture_uuid(label),
+            request=request,
+            source_system="fixture",
+            original_filename=f"synthetic-{label}.eml",
+            storage_key=f"fixtures/synthetic-{label}.eml",
+            content_length=64,
+            content_type="message/rfc822",
+            sha256=hashlib.sha256(label.encode()).hexdigest(),
+        ))
+    propose_decision_batch(
+        DecisionBatch.Kind.REVIEW,
+        {"record_item_ids": [str(item.pk) for item in items], "state": "non_responsive"},
+        actor=officer,
+        evidence_summary=(
+            "Both messages are the district newsletter sent to every staff "
+            "mailbox; neither mentions the transportation committee."
+        ),
+    )
     return request
 
 
@@ -3063,6 +3114,7 @@ class Command(BaseCommand):
             _seed_review_flight_case(officer)
             _seed_rescope_case(officer)
             _seed_release_case(officer)
+            _seed_decision_batch_case(officer)
             _seed_email_intake_redirect_cases(officer, inbound_transport)
             _reconcile_fixture_inbound_work(request)
             _seed_role_work(

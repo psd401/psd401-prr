@@ -31,7 +31,11 @@ from apps.records.models import (
 )
 from apps.records.service_identities import provision_integration_identity
 from config.asgi import create_application
-from integrations.mcp.tools import READ_TOOL_NAMES, WRITE_TOOL_NAMES
+from integrations.mcp.tools import (
+    HOSTED_READ_TOOL_NAMES,
+    READ_TOOL_NAMES,
+    WRITE_TOOL_NAMES,
+)
 
 
 def issue_personal_token(user, *, suffix):
@@ -368,7 +372,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
 
         self.assertSetEqual(
             names,
-            set(READ_TOOL_NAMES).union(WRITE_TOOL_NAMES),
+            set(READ_TOOL_NAMES).union(HOSTED_READ_TOOL_NAMES, WRITE_TOOL_NAMES),
         )
         self.assertFalse(results[0].isError, rendered_result(results[0]))
         draft = Correspondence.objects.get(
@@ -472,7 +476,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
 
         self.assertSetEqual(
             names,
-            set(READ_TOOL_NAMES).union(WRITE_TOOL_NAMES),
+            set(READ_TOOL_NAMES).union(HOSTED_READ_TOOL_NAMES, WRITE_TOOL_NAMES),
         )
         self.assertTrue(all(not result.isError for result in results))
         task_proposal = rendered_result(results[0])
@@ -481,6 +485,8 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
         self.assertIn('"applied": false', task_proposal.lower())
         self.assertIn(self.student_citation.citation, citation_proposal)
         self.assertIn('"applied": false', citation_proposal.lower())
+        # The record's filename can name a student; it stays in the staff UI.
+        self.assertNotIn("student-record.pdf", citation_proposal)
 
         self.task.refresh_from_db()
         self.record_item.refresh_from_db()
@@ -550,6 +556,14 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
                     "rationale": "Candidate supplied for human review.",
                 },
             ),
+            (
+                "psd_prr_decision_batch_propose",
+                {
+                    "kind": "review",
+                    "payload": {"record_item_ids": [str(self.record_item.pk)], "state": "responsive"},
+                    "evidence_summary": "Proposed for human review.",
+                },
+            ),
         ]
 
         names, results = async_to_sync(self.call_tools)(
@@ -559,7 +573,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
 
         self.assertSetEqual(
             names,
-            set(READ_TOOL_NAMES).union(WRITE_TOOL_NAMES),
+            set(READ_TOOL_NAMES).union(HOSTED_READ_TOOL_NAMES, WRITE_TOOL_NAMES),
         )
         self.assertTrue(all(result.isError for result in results))
         for result in results:
@@ -587,6 +601,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
                 "psd_prr_clarification_letter_draft",
                 "psd_prr_collection_task_notes_propose",
                 "psd_prr_exemption_citations_suggest",
+                "psd_prr_decision_batch_propose",
             },
         )
         forbidden_fragments = {

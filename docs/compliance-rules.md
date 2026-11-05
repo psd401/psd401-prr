@@ -170,11 +170,23 @@ echo. Every other business/data API requires an explicit identity.
 Shared stdio MCP uses a separate nonstaff token with only
 `records.read_staff_api`; hosted MCP uses attributed personal staff tokens and
 never that shared identity for its gated tools. Hosted `/mcp` exposes exactly
-four attributed personal-token draft/proposal tools -- an acknowledgment draft,
-a clarification draft, and two proposals that apply nothing; standalone stdio
-and the shared nonstaff MCP identity remain read-only. Drafting is not
-delivery: every one of them stops short of approving, queueing, or sending, so
-the surface never widens rule 6's two automated requester-facing paths. Never put tokens in source or
+five attributed personal-token draft/proposal tools -- an acknowledgment draft,
+a clarification draft, two proposals that apply nothing, and a decision-batch
+proposal (#43, rule 11 amendment) that records a batch for a person to approve;
+standalone stdio and the shared nonstaff MCP identity remain read-only. Drafting
+is not delivery: every one of them stops short of approving, queueing, or
+sending, so the surface never widens rule 6's two automated requester-facing
+paths.
+
+Decision batches (#43): only a person with the batch kind's role approves or
+rejects a batch, in the staff application (`decision_batches.approve`/`reject`
+are human-only; a token gets `human_approval_required`), and approval runs the
+same service the staff UI runs. Proposal and decision are append-only rows. For
+token callers, the `human_confirmation` endpoints a batch replaces -- record
+review and id-list bulk review, collection supersede, Vault collection start and
+re-scope, case merge, and non-request closure -- now answer 403
+`human_approval_required`; browser sessions are unchanged, and other
+`human_confirmation` endpoints keep accepting tokens. Never put tokens in source or
 `.env.example`.
 
 The one unattended Vault action is authorized by district decision

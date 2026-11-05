@@ -10,6 +10,7 @@ from rest_framework import mixins, serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.api.handoffs import human_only_handoff
 from apps.api.identity import StaffRole, has_staff_role
 from apps.records.collection_supersession import supersede_collection
 from apps.records.fees import assert_deposit_gate_clear
@@ -327,6 +328,16 @@ class CollectionTaskViewSet(mixins.ListModelMixin,
         Nothing is deleted. Records a reviewer already decided are untouched;
         the rest leave the review and release queues with a recorded reason.
         """
+        # A decision batch replaces this for token callers (#43): an agent
+        # proposes, the accountable person approves in the staff application.
+        handoff = human_only_handoff(
+            request,
+            capability_id="collection_tasks.supersede",
+            action="Propose a supersede decision batch, or supersede in the staff application.",
+            required_role="records_officer",
+        )
+        if handoff is not None:
+            return handoff
         payload = SupersedeCollectionInputSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         task = self.get_object()

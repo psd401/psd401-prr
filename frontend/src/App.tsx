@@ -15,6 +15,7 @@ import { AiAgreement } from './pages/AiAgreement'
 import { AiEvaluation } from './pages/AiEvaluation'
 import { Audit } from './pages/Audit'
 import { Correspondence } from './pages/Correspondence'
+import { Decisions } from './pages/Decisions'
 import { Exemptions } from './pages/Exemptions'
 import { CounselDomains } from './pages/CounselDomains'
 import { DistrictSettings } from './pages/DistrictSettings'
@@ -83,6 +84,7 @@ function StaffApp() {
         />
         <Route path="inbox" element={guard(<Inbox roles={user.roles} />)} />
         <Route path="review" element={guard(<Review />)} />
+        <Route path="decisions" element={guard(<Decisions />)} />
         <Route path="staff-intake" element={guard(<StaffIntake />)} />
 
         <Route path="oversight" element={guard(<OversightIndex roles={user.roles} />)} />

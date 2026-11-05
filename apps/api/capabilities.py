@@ -1073,6 +1073,7 @@ CAPABILITIES = (
         "GET",
         "/api/staff/record-items/",
         ["/requests/:number/records", "/requests/:number/releases"],
+        mcp_tool="psd_prr_record_items_list",
     ),
     _capability(
         "record_items.retrieve",
@@ -1154,6 +1155,54 @@ CAPABILITIES = (
         ["/requests/:number/records"],
     ),
     _capability(
+        "decision_batches.list",
+        "List decision batches an agent or person proposed, by state and case.",
+        "GET",
+        "/api/staff/decision-batches/",
+        ["/decisions"],
+        mcp_tool="psd_prr_decision_batch_get",
+    ),
+    _capability(
+        "decision_batches.retrieve",
+        "Read one decision batch: its items, evidence, and decision.",
+        "GET",
+        "/api/staff/decision-batches/{id}/",
+        [],
+    ),
+    _capability(
+        "decision_batches.propose",
+        "Propose a batch of decisions (review, supersede, scope-and-collect, "
+        "redaction group, intake label) with its evidence for a person to "
+        "approve. Records the proposal only; nothing else changes.",
+        "POST",
+        "/api/staff/decision-batches/",
+        [],
+        risk="low",
+        mcp_tool="psd_prr_decision_batch_propose",
+        constraints=["append_only_audit", "accountable_human_actor"],
+    ),
+    _capability(
+        "decision_batches.approve",
+        "Approve a proposed decision batch; runs the same service the staff "
+        "UI runs for that outcome, as the approving person.",
+        "POST",
+        "/api/staff/decision-batches/{id}/approve/",
+        ["/decisions"],
+        execution="human_only",
+        risk="high",
+        constraints=["append_only_audit", "interactive_staff_session", "accountable_human_actor"],
+    ),
+    _capability(
+        "decision_batches.reject",
+        "Reject a proposed decision batch with a reason; nothing else changes.",
+        "POST",
+        "/api/staff/decision-batches/{id}/reject/",
+        ["/decisions"],
+        execution="human_only",
+        risk="moderate",
+        constraints=["append_only_audit", "interactive_staff_session"],
+    ),
+    _capability(
         "review_batches.create",
         "Open a cluster batch: one proposed responsiveness outcome over a "
         "cluster's unreviewed records, with a random sample drawn for the "
@@ -1214,6 +1263,7 @@ CAPABILITIES = (
         "GET",
         "/api/staff/record-items/clusters/",
         ["/requests/:number/records"],
+        mcp_tool="psd_prr_record_clusters_list",
     ),
     _capability(
         "record_items.bulk_selection",

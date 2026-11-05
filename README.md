@@ -12,7 +12,7 @@ district's [development standards](https://github.com/psd401/psd-dev-standards).
 
 **Status (verified 2026-08-02):** Phase 1, the React staff workspace, direct
 Google Workspace OIDC, group-mapped staff roles, the staff/agent API, and both
-MCP transports are implemented. Hosted `/mcp` adds exactly four personal-token
+MCP transports are implemented. Hosted `/mcp` adds exactly five personal-token
 draft/proposal tools; standalone stdio and the dedicated nonstaff MCP identity
 remain read-only. Durable requester correspondence now owns drafting, approval,
 queueing, delivery evidence, reconciliation, inbound MIME/DSN matching, and the
@@ -175,7 +175,7 @@ SPA and token-authenticated agents share the same API; `/api/staff/capabilities/
 publishes the machine-readable parity and risk contract, and a test scans the
 production frontend so new GUI operations cannot land without a registered
 agent path. The OpenAPI schema, management commands, and MCP transports provide
-additional agent surfaces. Hosted MCP adds only four gated
+additional agent surfaces. Hosted MCP adds only five gated
 personal-token draft/proposal tools to the shared reads; it does not erase legal
 accountability. Denials, estimate changes, and camera exclusions remain explicit
 handoffs to a human under the compliance rules below.
@@ -190,7 +190,7 @@ handoffs to a human under the compliance rules below.
 | `apps/audit/` | Append-only audit log |
 | `apps/integrations/` | Google Gmail, Vault, and Avigilon Alta clients |
 | `frontend/` | Staff SPA (bun + Vite + React + TypeScript) |
-| `integrations/mcp/` | Hosted and stdio MCP facades over the staff REST API; stdio is read-only, while hosted adds four gated personal-token draft/proposal tools |
+| `integrations/mcp/` | Hosted and stdio MCP facades over the staff REST API; stdio is read-only, while hosted adds four role-gated record and decision-batch reads plus five gated personal-token draft/proposal tools |
 | `templates/correspondence/` | Versioned requester correspondence templates (counsel review required) |
 | `templates/sops/` | SOP templates (personal-device search procedure) |
 | `docs/` | Architecture, build-vs-buy, custodian gap analysis, status ledger |
@@ -264,7 +264,7 @@ See [docs/aws-deploy.md](docs/aws-deploy.md).
 Beyond the staff SPA and public request form, this system exposes a staff REST
 API with OpenAPI docs and hosted plus stdio MCP transports for agents. Both
 transports share eight read tools; hosted
-`/mcp` adds exactly four gated draft/proposal tools for personal tokens. See
+`/mcp` adds exactly five gated draft/proposal tools for personal tokens. See
 [docs/agentic-integration.md](docs/agentic-integration.md) for the full
 reference: endpoints, the session vs. token auth model, and the guardrails
 section defining what an agent may and must never do against a live instance.
@@ -275,7 +275,7 @@ camera exclusions require the documented human authority by design
 
 Quick starts:
 
-- MCP server (hosted `/mcp` with eight reads and four personal-token
+- MCP server (hosted `/mcp` with eight reads, four role-gated reads, and five personal-token
   draft/proposal tools; read-only stdio and service identity):
   [integrations/mcp/README.md](integrations/mcp/README.md)
 - Coding agents working on this repository: [AGENTS.md](AGENTS.md)

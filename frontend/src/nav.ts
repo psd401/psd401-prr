@@ -58,6 +58,12 @@ export const PRIMARY_NAV: NavItem[] = [
     countKey: 'review',
   },
   {
+    // Batches an agent or colleague proposed (#43), approved or rejected here.
+    label: 'Decisions',
+    path: '/decisions',
+    roles: ['records_officer', 'reviewer'],
+  },
+  {
     label: 'Staff Intake',
     path: '/staff-intake',
     roles: ['records_officer', 'intake_clerk'],

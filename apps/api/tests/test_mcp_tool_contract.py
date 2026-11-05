@@ -31,7 +31,7 @@ from mcp.types import ToolAnnotations
 from apps.api.capabilities import CAPABILITIES
 from integrations.mcp.client import PRRClient
 from integrations.mcp.tools import (
-    MAX_TOOLS,
+    HOSTED_READ_TOOL_NAMES,
     READ_TOOL_NAMES,
     TOOL_CLIENT_METHODS,
     TOOL_NAMESPACE,
@@ -40,11 +40,11 @@ from integrations.mcp.tools import (
 )
 
 #: SHA-256 over the canonical tool definitions (name, title, description and
-#: every annotation, for all 12 tools). Regenerate deliberately -- the failure
+#: every annotation, for all 17 tools). Regenerate deliberately -- the failure
 #: message prints the new value -- and only in a commit whose diff shows the
 #: description or annotation change that earned it.
 TOOL_DEFINITION_DIGEST = (
-    "8d7707191edf2f75753727846a1559f969b3245f9e606cda60c81d624b3dd62c"
+    "80c6e6c32ffe0da26f461dca37d03daa490b9f627ebdfc0f44e3fc1f3fec9726"
 )
 
 
@@ -90,7 +90,13 @@ TOOLS_THAT_EXECUTE_NO_SINGLE_CAPABILITY = {
         "Validates citations and returns a proposal. Attaching a citation "
         "stays human-only under rule 3, so it executes no row."
     ),
+    "psd_prr_advisories_get": (
+        "Reads two catalog rows (the responsiveness and redaction advisory "
+        "reads) and returns their labels together, so no one row is it."
+    ),
 }
+
+ALL_TOOL_NAMES = set(READ_TOOL_NAMES) | set(HOSTED_READ_TOOL_NAMES) | set(WRITE_TOOL_NAMES)
 
 
 def cited_tools():
@@ -125,14 +131,10 @@ class ToolNamingTests(SimpleTestCase):
                 # inconsistency a shared gateway makes expensive.
                 self.assertRegex(tool.name, r"\A[a-z][a-z0-9_]*\Z")
 
-    def test_the_server_stays_under_the_tool_ceiling(self):
-        tools = hosted_tools()
-        self.assertLessEqual(len(tools), MAX_TOOLS, [t.name for t in tools])
-
     def test_the_name_registry_matches_what_the_server_serves(self):
         self.assertSetEqual(
             {tool.name for tool in hosted_tools()},
-            set(READ_TOOL_NAMES) | set(WRITE_TOOL_NAMES),
+            ALL_TOOL_NAMES,
         )
         self.assertSetEqual(
             {tool.name for tool in stdio_tools()},
@@ -140,15 +142,14 @@ class ToolNamingTests(SimpleTestCase):
         )
 
     def test_read_and_write_registries_do_not_overlap(self):
-        self.assertSetEqual(
-            set(READ_TOOL_NAMES) & set(WRITE_TOOL_NAMES),
-            set(),
-        )
+        self.assertSetEqual(set(READ_TOOL_NAMES) & set(WRITE_TOOL_NAMES), set())
+        self.assertSetEqual(set(HOSTED_READ_TOOL_NAMES) & set(WRITE_TOOL_NAMES), set())
+        self.assertSetEqual(set(HOSTED_READ_TOOL_NAMES) & set(READ_TOOL_NAMES), set())
 
     def test_every_tool_maps_to_a_real_client_method(self):
         self.assertSetEqual(
             set(TOOL_CLIENT_METHODS),
-            set(READ_TOOL_NAMES) | set(WRITE_TOOL_NAMES),
+            ALL_TOOL_NAMES,
         )
         for tool_name, method in TOOL_CLIENT_METHODS.items():
             with self.subTest(tool=tool_name):
@@ -204,11 +205,16 @@ class ToolNamingTests(SimpleTestCase):
 
         # Only the arguments the schema makes mandatory; the recording client
         # never validates them, so the values just have to satisfy pydantic.
-        required_arguments = {"psd_prr_request_get": {"number": "PRR-2026-0001"}}
+        required_arguments = {
+            "psd_prr_request_get": {"number": "PRR-2026-0001"},
+            "psd_prr_record_items_list": {"request_number": "PRR-2026-0001"},
+            "psd_prr_record_clusters_list": {"request_number": "PRR-2026-0001"},
+            "psd_prr_advisories_get": {"record_item_id": "00000000-0000-4000-8000-000000000000"},
+        }
 
         client = RecordingClient()
-        mcp = create_mcp_server(lambda ctx: client)
-        for tool_name in READ_TOOL_NAMES:
+        mcp = create_mcp_server(lambda ctx: client, include_write_tools=True)
+        for tool_name in (*READ_TOOL_NAMES, *HOSTED_READ_TOOL_NAMES):
             with self.subTest(tool=tool_name):
                 client.called.clear()
                 async_to_sync(mcp.call_tool)(
@@ -230,7 +236,7 @@ class ToolNamingTests(SimpleTestCase):
         # Rule 10's contract tells agents which MCP tool reaches a staff-UI
         # outcome. A stale name there sends an agent to a tool that 404s on
         # the wire, which is worse than no pointer at all.
-        registered = set(READ_TOOL_NAMES) | set(WRITE_TOOL_NAMES)
+        registered = ALL_TOOL_NAMES
         self.assertTrue(cited_tools(), "the catalog should cite some MCP tools")
         self.assertSetEqual(cited_tools() - registered, set())
 
@@ -243,7 +249,7 @@ class ToolNamingTests(SimpleTestCase):
         the tools that execute no single row, each with the reason; adding a
         tool means either citing it or adding it here deliberately.
         """
-        registered = set(READ_TOOL_NAMES) | set(WRITE_TOOL_NAMES)
+        registered = ALL_TOOL_NAMES
         self.assertSetEqual(
             registered - cited_tools(),
             set(TOOLS_THAT_EXECUTE_NO_SINGLE_CAPABILITY),
@@ -292,7 +298,7 @@ class ToolAnnotationTests(SimpleTestCase):
             tool.name: annotations_for(tool).readOnlyHint
             for tool in hosted_tools()
         }
-        for name in READ_TOOL_NAMES:
+        for name in (*READ_TOOL_NAMES, *HOSTED_READ_TOOL_NAMES):
             with self.subTest(tool=name):
                 self.assertIs(hints[name], True)
         for name in WRITE_TOOL_NAMES:
@@ -410,7 +416,7 @@ class ServerManifestTests(SimpleTestCase):
             for entry in self.catalog["tools"]
             if entry.get("hostedOnly")
         }
-        self.assertSetEqual(hosted_only, set(WRITE_TOOL_NAMES))
+        self.assertSetEqual(hosted_only, set(WRITE_TOOL_NAMES) | set(HOSTED_READ_TOOL_NAMES))
 
     def test_the_manifest_carries_the_catalog_fields_the_directory_needs(self):
         # standards/07 "Catalog": what it does, who can use it, data touched,

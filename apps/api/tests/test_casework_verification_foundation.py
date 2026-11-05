@@ -111,6 +111,7 @@ class CaseworkVerificationFoundationTests(SimpleTestCase):
                 "officer-approve-and-collect",
                 "officer-rescope",
                 "officer-one-step-release",
+                "officer-approve-decision-batch",
             ],
         )
         self.assertEqual(

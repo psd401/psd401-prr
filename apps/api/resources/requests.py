@@ -2471,6 +2471,16 @@ class RequestsViewSet(
         url_path="close-non-request",
     )
     def close_non_request(self, request, number=None):
+        # A decision batch replaces this for token callers (#43): an agent
+        # proposes, the accountable person approves in the staff application.
+        handoff = human_only_handoff(
+            request,
+            capability_id="requests.close_non_request",
+            action="Propose an intake-label decision batch, or close in the staff application.",
+            required_role="records_officer",
+        )
+        if handoff is not None:
+            return handoff
         prr = self.get_object()
         serializer = NonRequestClosureSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -2692,6 +2702,16 @@ class RequestsViewSet(
     @action(detail=True, methods=["post"], url_path="merge")
     def merge(self, request, number=None):
         """Merge this duplicate case into the case of record; returns the target."""
+        # A decision batch replaces this for token callers (#43): an agent
+        # proposes, the accountable person approves in the staff application.
+        handoff = human_only_handoff(
+            request,
+            capability_id="requests.merge",
+            action="Propose an intake-label decision batch, or merge in the staff application.",
+            required_role="records_officer",
+        )
+        if handoff is not None:
+            return handoff
         source = self.get_object()
         serializer = MergeRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -3028,6 +3048,16 @@ class RequestsViewSet(
     @action(detail=True, methods=["post"], url_path="rescope")
     def rescope(self, request, number=None):
         """Collect a new scope and supersede the previous collection (#37)."""
+        # A decision batch replaces this for token callers (#43): an agent
+        # proposes, the accountable person approves in the staff application.
+        handoff = human_only_handoff(
+            request,
+            capability_id="requests.rescope",
+            action="Propose a scope-and-collect decision batch, or re-scope in the staff application.",
+            required_role="records_officer",
+        )
+        if handoff is not None:
+            return handoff
         from apps.records.scoping import rescope as rescope_request
 
         prr = self.get_object()
@@ -3146,6 +3176,16 @@ class RequestsViewSet(
         url_path="vault-collection",
     )
     def vault_collection(self, request, number=None):
+        # A decision batch replaces this for token callers (#43): an agent
+        # proposes, the accountable person approves in the staff application.
+        handoff = human_only_handoff(
+            request,
+            capability_id="requests.vault_collection.start",
+            action="Propose a scope-and-collect decision batch, or collect in the staff application.",
+            required_role="records_officer",
+        )
+        if handoff is not None:
+            return handoff
         prr = self.get_object()
         serializer = VaultCollectionRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

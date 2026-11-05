@@ -749,6 +749,16 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         Withholding and duplicate outcomes are deliberately unavailable here
         because each needs its own citation or judgement.
         """
+        # A decision batch replaces this for token callers (#43): an agent
+        # proposes, the accountable person approves in the staff application.
+        handoff = human_only_handoff(
+            request,
+            capability_id="record_items.bulk_review",
+            action="Propose a review decision batch, or review in the staff application.",
+            required_role="reviewer",
+        )
+        if handoff is not None:
+            return handoff
         payload = BulkRecordReviewInputSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         data = payload.validated_data
@@ -878,6 +888,16 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
 
     @action(detail=True, methods=["post"])
     def review(self, request, pk=None):
+        # A decision batch replaces this for token callers (#43): an agent
+        # proposes, the accountable person approves in the staff application.
+        handoff = human_only_handoff(
+            request,
+            capability_id="record_items.review",
+            action="Propose a review decision batch, or review in the staff application.",
+            required_role="reviewer",
+        )
+        if handoff is not None:
+            return handoff
         item = self.get_object()
         payload = RecordReviewInputSerializer(data=request.data)
         payload.is_valid(raise_exception=True)

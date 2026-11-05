@@ -230,6 +230,9 @@ SPECTACULAR_SETTINGS = {
         "CollectionTaskKindEnum": (
             "apps.records.models.CollectionTask.Kind"
         ),
+        "DecisionBatchKindEnum": (
+            "apps.records.models.DecisionBatch.Kind"
+        ),
         "CorrespondenceKindEnum": (
             "apps.correspondence.models.Correspondence.Kind"
         ),
