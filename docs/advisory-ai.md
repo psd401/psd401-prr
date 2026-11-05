@@ -228,6 +228,17 @@ An automatic closure an officer has not answered is not a gold label: the
 evaluation set leaves it out, so the model is never scored against its own
 decisions.
 
+Accepted risks (district decision, 2026-11-05):
+
+- **No day-5 safety net.** `tasks.auto_acknowledge_safety_net` skips closed
+  cases, so a real request the model wrongly closes gets no automatic
+  acknowledgment. The safeguards are the officer email, the inbox item that
+  stays open, and Undo. `test_intake_trust` pins this behavior.
+- **Message text in the officer email.** Like the deadline and collection
+  emails, the `intake.auto_applied` email quotes up to 800 characters of the
+  request text to Records Officers, so they can judge it without opening the
+  case. The audit row carries no request text.
+
 ## Comparing models on past decisions
 
 Models are chosen per kind from evidence, not by trial and error in live

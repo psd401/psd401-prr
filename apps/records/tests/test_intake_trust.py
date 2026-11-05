@@ -266,6 +266,28 @@ class AutoApplyTests(_Fixture):
         self.notify.assert_not_called()
 
 
+    @override_settings(AUTO_ACK_SAFETY_NET=True)
+    def test_the_day_five_safety_net_does_not_reach_an_automatic_closure(self):
+        # Accepted by Hagel 2026-11-05: a case the system closed has no
+        # safety-net acknowledgment; the officer email, the open inbox item,
+        # and Undo are the safeguard against a misclassified real request.
+        from apps.records.tasks import auto_acknowledge_safety_net
+
+        closed, still_open = self._case(), self._case()
+        auto_apply_intake_label(self._run(closed).pk)
+        PublicRecordsRequest.objects.filter(pk__in=[closed.pk, still_open.pk]).update(
+            statutory_response_due=timezone.localdate(),
+        )
+
+        with patch(
+            "apps.correspondence.services.queue_automated_acknowledgment",
+        ) as queue:
+            auto_acknowledge_safety_net()
+
+        # The open case on its last day is queued; the auto-closed one is not.
+        self.assertEqual([call.args[0].pk for call in queue.call_args_list], [still_open.pk])
+
+
 class SystemClosureGuardTests(_Fixture):
     def test_the_system_closure_only_closes_as_non_request_from_received(self):
         prr = self._case(status=RequestStatus.GATHERING)
