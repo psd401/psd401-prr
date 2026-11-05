@@ -287,11 +287,3 @@ class DeviceGroupTests(fakes.TenantTestCase):
         with self.assertRaises(client.AltaError):
             client.list_device_groups()
 
-
-class LegacyCameraListTests(fakes.TenantTestCase):
-    def test_list_cameras_keeps_its_dict_shape(self):
-        self.tenant.on("GET", "/devices", [fakes.device("guid-1", "Gym", group=fakes.GROUP_A)])
-
-        self.assertEqual(
-            client.list_cameras(), [{"id": "guid-1", "name": "Gym", "site": "SITE-A"}]
-        )

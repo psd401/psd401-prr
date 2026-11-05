@@ -73,10 +73,6 @@ _TRANSIENT_STATUSES = frozenset({429, 500, 502, 503, 504})
 #: Aware refuses timeline windows near 30 days; 6 days is known to work.
 TIMELINE_CHUNK = dt.timedelta(days=6)
 BOOKMARK_ORIGIN = "ALTA Aware"
-HOLD_DESCRIPTION = (
-    "Public Records Act preservation hold. Do not delete. "
-    "Managed by the PRR system."
-)
 SKIPPED_HEAD_ERROR = "head reports no stream; not bookmarked, check by hand"
 SMOKE_NAME = "PRR smoke test — delete"
 SMOKE_DESCRIPTION = (
@@ -897,38 +893,6 @@ def delete_bookmark(bookmark_id: str) -> None:
     _bookmark_path(bookmark_id)  # refuse a blank id before signing in
     with _client() as api:
         _delete_bookmark(api, bookmark_id)
-
-
-# ---------------------------------------------------------------------------
-# The previous clip interface, kept for callers not yet moved to bookmarks.
-# ---------------------------------------------------------------------------
-
-
-def list_cameras() -> list[dict]:
-    """Return [{'id': ..., 'name': ..., 'site': ...}, ...] for all cameras."""
-    return [
-        {"id": camera.id, "name": camera.name, "site": camera.site}
-        for camera in list_device_cameras()
-    ]
-
-
-def create_clip_hold(camera_id: str, start: dt.datetime, end: dt.datetime, label: str) -> str:
-    """A bookmark hold on one camera by guid. Returns the bookmark id.
-
-    Lists the devices on every call to find the camera; callers holding many
-    cameras should list once and use :func:`create_bookmark_hold`.
-    """
-    camera = next((c for c in list_device_cameras() if c.id == str(camera_id)), None)
-    if camera is None:
-        raise AltaError(f"No active Alta device has guid {camera_id}.")
-    return create_bookmark_hold(
-        camera, start, end, name=label, description=HOLD_DESCRIPTION
-    ).id
-
-
-def delete_clip(clip_id: str) -> None:
-    """Remove a hold bookmark. ONLY called by the exclusion service (human+reason)."""
-    delete_bookmark(clip_id)
 
 
 # ---------------------------------------------------------------------------

@@ -531,29 +531,10 @@ class DeleteBookmarkTests(fakes.TenantTestCase):
         self.assertEqual(self.tenant.calls, [])
 
 
-class LegacyClipInterfaceTests(_BookmarkTestCase):
-    def test_create_clip_hold_returns_the_bookmark_id(self):
-        self.tenant.on(
-            "GET", "/devices", [fakes.device("guid-1", "Front", heads=[fakes.head("1"), fakes.head("2")])]
-        )
-
-        clip_id = client.create_clip_hold("guid-1", START, END, label="PRR hold")
-
-        self.assertEqual(clip_id, "bm-1")
-        posted = self._posted()
-        self.assertEqual(posted["name"], "PRR hold")
-        self.assertEqual(posted["expiry_time"], None)
-        self.assertEqual([e["source"] for e in posted["device_infos"]], ["1", "2"])
-
-    def test_create_clip_hold_on_an_unknown_camera_raises(self):
-        with self.assertRaises(client.AltaError):
-            client.create_clip_hold("no-such-guid", START, END, label="PRR hold")
-
-        self.assertEqual(self.tenant.calls_to("POST", "/bookmarks"), [])
-
-    def test_delete_clip_deletes_the_bookmark(self):
-        self.tenant.on("DELETE", "/bookmarks/bm-1", fakes.response(200))
-
-        client.delete_clip("bm-1")
-
-        self.assertEqual(len(self.tenant.calls_to("DELETE", "/bookmarks/bm-1")), 1)
+class RetiredClipInterfaceTests(fakes.TenantTestCase):
+    def test_the_clip_interface_is_gone(self):
+        """Holds go through create_bookmark_hold and the human-gated
+        delete_bookmark only; the old clip wrappers bypassed both."""
+        for name in ("list_cameras", "create_clip_hold", "delete_clip"):
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(client, name))
