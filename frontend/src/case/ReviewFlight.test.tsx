@@ -237,3 +237,19 @@ it('returns to the first page when a later unreviewed page comes back empty', as
   await user.keyboard('n')
   expect(await screen.findByRole('option', { name: /a\.pdf/ })).toBeInTheDocument()
 })
+
+it('wraps back to earlier unreviewed records after finishing a later page', async () => {
+  const { user } = stubWith((url) => {
+    if (url.includes('/advisory-responsiveness/')) return { body: ADVISORY }
+    if (url.includes('page=2')) {
+      return { body: { count: 51, next: null, previous: 'p1', results: [{ ...ROWS[2], id: 'p2', original_filename: 'page-two.pdf' }] } }
+    }
+    return { body: { count: 51, next: 'p2', previous: null, results: ROWS.slice(0, 2) } }
+  })
+  await screen.findByText(/Records 1–2 of 51/)
+  await user.keyboard('jj')
+  await screen.findByRole('option', { name: /page-two\.pdf/ })
+  await user.keyboard('j')
+  expect(await screen.findByText(/Back to the first page of what is left/)).toBeInTheDocument()
+  expect(await screen.findByRole('option', { name: /a\.pdf/ })).toHaveAttribute('aria-selected', 'true')
+})

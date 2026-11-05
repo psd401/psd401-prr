@@ -158,6 +158,13 @@ export function ReviewFlight({ number }: { number: string }) {
   const moveNext = () => {
     if (index < rows.length - 1) setIndex(index + 1)
     else if (hasNext) { setPage(page + 1); setIndex(0) }
+    else if (filter === 'unreviewed' && page > 1) {
+      // The unreviewed list shrinks as records are decided, so earlier pages
+      // can still hold records; the end of a later page wraps back to them.
+      setPage(1)
+      setIndex(0)
+      setStatus('Back to the first page of what is left to review.')
+    }
   }
   const movePrevious = () => {
     if (index > 0) setIndex(index - 1)
