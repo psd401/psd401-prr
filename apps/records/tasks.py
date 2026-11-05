@@ -3,6 +3,7 @@ Background jobs. The deadline watchdog is the single most important piece of
 Phase 1 — RCW 42.56.550 penalties accrue per day, so a missed 5-day
 acknowledgment is the district's most expensive possible bug.
 """
+import datetime as dt
 import logging
 from importlib import import_module
 
@@ -1007,7 +1008,7 @@ def _hold_one_camera(fp, cam, ch, *, now) -> None:
 
 
 def _window_predates_flat_retention(fp) -> bool:
-    floor = fp.created_at - timezone.timedelta(days=runtime.get("CAMERA_RETENTION_DAYS"))
+    floor = fp.created_at - dt.timedelta(days=runtime.get("CAMERA_RETENTION_DAYS"))
     return fp.window_end < floor
 
 

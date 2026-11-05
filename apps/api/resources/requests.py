@@ -67,7 +67,7 @@ from apps.correspondence.models import (
     CorrespondenceDeliveryAttempt,
     InboundCorrespondenceReceipt,
 )
-from apps.records import services
+from apps.records import services, triage
 from apps.records.advisory_ai import (
     INTAKE_LABELS,
     request_intake_classification,
@@ -193,9 +193,16 @@ class RequestsCollectionTaskSerializer(serializers.ModelSerializer):
 
 
 class RequestsFootagePreservationSerializer(serializers.ModelSerializer):
+    confirmation_text = serializers.SerializerMethodField()
+
     class Meta:
         model = FootagePreservation
-        fields = ["id", "state"]
+        fields = ["id", "state", "confirmation_text"]
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_confirmation_text(self, obj):
+        # Read-only: staff copy it into correspondence by hand, never sent.
+        return triage.preservation_confirmation_text(obj)
 
 
 #: How much of the description stands in for a subject when no advisory short

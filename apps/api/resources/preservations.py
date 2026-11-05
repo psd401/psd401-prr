@@ -1,5 +1,5 @@
-# ABOUTME: Staff read-only view of footage preservation holds plus the
-# ABOUTME: gated camera-exclusion action (triage.exclude_camera, human+reason).
+# ABOUTME: Staff read-only view of footage preservation holds plus the gated
+# ABOUTME: camera-exclusion and release actions (human + reason, triage.py).
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
@@ -9,6 +9,7 @@ from apps.api.handoffs import human_only_handoff
 from apps.api.identity import StaffRole
 from apps.records import triage
 from apps.records.models import CameraHold, FootagePreservation
+from apps.records.services import CLOSED_STATUSES
 
 
 class PreservationCameraHoldSerializer(serializers.ModelSerializer):
@@ -17,7 +18,8 @@ class PreservationCameraHoldSerializer(serializers.ModelSerializer):
     class Meta:
         model = CameraHold
         fields = ["id", "camera_id", "camera_name", "site", "clip_id", "state",
-                  "error", "excluded_at", "excluded_by", "exclusion_reason"]
+                  "error", "coverage_fraction", "coverage_note",
+                  "excluded_at", "excluded_by", "exclusion_reason"]
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_excluded_by(self, obj):
@@ -28,25 +30,45 @@ class PreservationSerializer(serializers.ModelSerializer):
     request_number = serializers.CharField(source="request.number", read_only=True)
     held_count = serializers.IntegerField(read_only=True)
     camera_holds = PreservationCameraHoldSerializer(many=True, read_only=True)
+    released_by = serializers.SerializerMethodField()
+    request_closed = serializers.SerializerMethodField()
+    confirmation_text = serializers.SerializerMethodField()
 
     class Meta:
         model = FootagePreservation
         fields = ["id", "request_number", "state", "window_start", "window_end",
-                  "detected_dates_note", "held_count", "camera_holds"]
+                  "detected_dates_note", "site_codes", "site_resolution",
+                  "held_count", "camera_holds", "confirmation_text",
+                  "request_closed", "released_at", "released_by",
+                  "release_reason"]
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_released_by(self, obj):
+        return obj.released_by.username if obj.released_by_id else None
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_request_closed(self, obj):
+        return obj.request.status in CLOSED_STATUSES
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_confirmation_text(self, obj):
+        # Read-only: staff copy it into correspondence by hand, never sent.
+        return triage.preservation_confirmation_text(obj)
 
 
 class PreservationViewSet(viewsets.ReadOnlyModelViewSet):
     """List/retrieve only — preservations are evidence records; no
     create/update/destroy routes exist for this resource."""
     queryset = (FootagePreservation.objects
-                .select_related("request")
-                .prefetch_related("camera_holds")
+                .select_related("request", "released_by")
+                .prefetch_related("camera_holds__excluded_by")
                 .order_by("-created_at"))
     serializer_class = PreservationSerializer
     role_permissions = {
         "list": {StaffRole.RECORDS_OFFICER, StaffRole.ADMIN},
         "retrieve": {StaffRole.RECORDS_OFFICER, StaffRole.ADMIN},
         "exclude_camera": {StaffRole.RECORDS_OFFICER},
+        "release": {StaffRole.RECORDS_OFFICER},
     }
 
     def get_queryset(self):
@@ -84,6 +106,36 @@ class PreservationViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(PreservationCameraHoldSerializer(camera_hold).data)
+
+    @action(detail=True, methods=["post"], url_path="release")
+    def release(self, request, pk=None):
+        handoff = human_only_handoff(
+            request,
+            capability_id="preservations.release",
+            action=(
+                "Release a closed request's preservation hold and delete its "
+                "Aware bookmarks."
+            ),
+        )
+        if handoff:
+            return handoff
+        preservation = self.get_object()
+        try:
+            triage.release_preservation(
+                preservation,
+                actor=request.user,
+                reason=request.data.get("reason", ""),
+                # Only a JSON true attests; triage refuses anything else.
+                attest_no_litigation_hold=request.data.get(
+                    "attest_no_litigation_hold"
+                ),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            PreservationSerializer(self.get_queryset().get(pk=preservation.pk)).data
+        )
 
 
 def register(router):

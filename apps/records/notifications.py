@@ -9,6 +9,7 @@ bounded retry for transport failures.
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import logging
@@ -662,7 +663,7 @@ def notify_adequate_search_review(
             "window_start": preservation.window_start,
             "window_end": preservation.window_end,
             # The window ends at midnight after the last requested day.
-            "window_last_day": preservation.window_end - timezone.timedelta(microseconds=1),
+            "window_last_day": preservation.window_end - dt.timedelta(microseconds=1),
             "camera_retention_days": runtime.get("CAMERA_RETENTION_DAYS"),
             "no_camera_sites": _footage_sites(no_camera_sites),
             "note": str(note)[:500],

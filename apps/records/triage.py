@@ -114,6 +114,69 @@ def bookmark_name(prr: PublicRecordsRequest, camera_name: str) -> str:
     return name[: BOOKMARK_NAME_MAX_LENGTH - 1].rstrip() + "…"
 
 
+def _cameras(count: int) -> str:
+    return f"{count} camera" if count == 1 else f"{count} cameras"
+
+
+def preservation_confirmation_text(fp: FootagePreservation) -> str | None:
+    """One sentence a Records Officer may copy into correspondence, e.g. "12
+    cameras at Peninsula High School held from 2026-09-22 00:00 to 2026-09-23
+    00:00 Pacific time (Aware bookmarks, no expiry); 1 camera has a footage
+    gap; 0 failed." Built from the hold rows, so it says only what Aware
+    confirmed. None unless the preservation is HELD or PARTIAL. Never sent
+    automatically: a human chooses whether and where to use it."""
+    from .models import CameraHold
+
+    if fp.state not in (
+        FootagePreservation.State.HELD,
+        FootagePreservation.State.PARTIAL,
+    ):
+        return None
+    rows = [hold for hold in fp.camera_holds.all() if hold.excluded_at is None]
+    bookmarked = [hold for hold in rows if hold.state in CameraHold.BOOKMARKED_STATES]
+    if not bookmarked:   # every bookmarked camera was excluded
+        return None
+    gaps = sum(hold.state == CameraHold.State.GAP for hold in rows)
+    not_retained = sum(hold.state == CameraHold.State.NOT_RETAINED for hold in rows)
+    failed = sum(
+        hold.state in (CameraHold.State.FAILED, CameraHold.State.PENDING)
+        for hold in rows
+    )
+
+    if fp.site_codes:
+        held_sites = {(hold.site or "").strip().upper() for hold in bookmarked}
+        held_codes = [code for code in fp.site_codes if code.upper() in held_sites]
+        unheld_codes = [code for code in fp.site_codes if code not in held_codes]
+        where = "at " + " and ".join(
+            footage_sites.site_name(code) for code in held_codes
+        )
+    else:
+        unheld_codes = []
+        where = "across the district"
+
+    start = timezone.localtime(fp.window_start)
+    end = timezone.localtime(fp.window_end)
+    parts = [
+        (
+            f"{_cameras(len(bookmarked))} {where} held from "
+            f"{start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M} Pacific time "
+            "(Aware bookmarks, no expiry)"
+        ),
+        f"{_cameras(gaps)} has a footage gap"
+        if gaps == 1
+        else f"{_cameras(gaps)} have footage gaps",
+    ]
+    if not_retained:
+        parts.append(f"{not_retained} with no retained footage for the window")
+    parts.append(f"{failed} failed")
+    if unheld_codes:
+        parts.append(
+            "none held at "
+            + " and ".join(footage_sites.site_name(code) for code in unheld_codes)
+        )
+    return "; ".join(parts) + "."
+
+
 def _local_dates(fp: FootagePreservation) -> str:
     start = timezone.localtime(fp.window_start).date()
     last = timezone.localtime(fp.window_end - dt.timedelta(microseconds=1)).date()
@@ -272,6 +335,141 @@ def exclude_camera(camera_hold, reason: str, *, actor=None):
 
         transaction.on_commit(delete_bookmark_after_evidence_commits)
     return camera_hold
+
+
+RELEASABLE_PRESERVATION_STATES = (
+    FootagePreservation.State.HELD,
+    FootagePreservation.State.PARTIAL,
+)
+
+
+@transaction.atomic
+def release_preservation(
+    preservation: FootagePreservation,
+    *,
+    actor,
+    reason: str,
+    attest_no_litigation_hold: bool,
+) -> FootagePreservation:
+    """End a preservation hold for good: Aware deletes every bookmark and the
+    footage then ages out. Human only, like exclude_camera: a current Records
+    Officer, a substantive reason, an attestation that no litigation hold
+    covers the footage, and a closed request. A duplicate's hold still holds
+    footage for its case of record, so that case must be closed too."""
+    from apps.integrations.avigilon import client as alta
+
+    from .models import CameraHold
+    from .services import CLOSED_STATUSES
+
+    actor = _require_current_records_officer(
+        actor=actor,
+        message=(
+            "Current Records Officer authority is required to release a "
+            "preservation hold."
+        ),
+    )
+    reason = (reason or "").strip()
+    if len(reason) < 10:
+        raise ValueError(
+            "Releasing a preservation hold requires a substantive reason (e.g. "
+            "'request fulfilled; installment produced and the requester "
+            "confirmed receipt'). The release record is part of the retention "
+            "documentation."
+        )
+    reason_max_length = FootagePreservation._meta.get_field(
+        "release_reason",
+    ).max_length
+    if reason_max_length is not None and len(reason) > reason_max_length:
+        raise ValueError(
+            "A preservation-release reason must contain at most "
+            f"{reason_max_length} characters."
+        )
+    if attest_no_litigation_hold is not True:
+        raise ValueError(
+            "Releasing a preservation hold requires attesting that no "
+            "litigation hold, pending lawsuit, or reasonably anticipated "
+            "litigation covers this footage."
+        )
+
+    fp = (
+        FootagePreservation.objects.select_for_update()
+        .select_related("request__merged_into")
+        .get(pk=preservation.pk)
+    )
+    if fp.state not in RELEASABLE_PRESERVATION_STATES:
+        raise ValueError(
+            "Only a held or partly held preservation can be released; this "
+            f"one is {fp.get_state_display().lower()}."
+        )
+    prr = fp.request
+    if prr.status not in CLOSED_STATUSES:
+        raise ValueError(
+            f"{prr.number} is still open ({prr.get_status_display()}). A "
+            "preservation hold is released only after the request closes."
+        )
+    target = prr.merged_into
+    if target is not None and target.status not in CLOSED_STATUSES:
+        raise ValueError(
+            f"{prr.number} was merged into {target.number}, which is still "
+            "open. This hold preserves the footage that case answers for."
+        )
+
+    holds = list(
+        fp.camera_holds.select_for_update().filter(
+            state__in=CameraHold.BOOKMARKED_STATES,
+            excluded_at__isnull=True,
+        )
+    )
+    bookmarks = [
+        (hold.camera_name or hold.camera_id, hold.clip_id)
+        for hold in holds
+        if hold.clip_id
+    ]
+    audit(
+        "footage.preservation_released",
+        target=prr.number,
+        actor=actor,
+        reason=reason,
+        attest_no_litigation_hold=True,
+        bookmarks=len(bookmarks),
+    )
+    fp.state = FootagePreservation.State.RELEASED
+    fp.released_at = timezone.now()
+    fp.released_by = actor
+    fp.release_reason = reason
+    fp.save(update_fields=["state", "released_at", "released_by", "release_reason"])
+    CameraHold.objects.filter(pk__in=[hold.pk for hold in holds]).update(
+        state=CameraHold.State.RELEASED,
+    )
+    StatusEvent.objects.create(
+        request=prr,
+        actor=actor,
+        note=(
+            f"Footage preservation released: {len(bookmarks)} Aware "
+            "bookmark(s) queued for deletion after the request closed. The "
+            "Records Officer attested that no litigation hold, pending "
+            "lawsuit, or reasonably anticipated litigation covers this "
+            f"footage. Reason: {reason}"
+        ),
+    )
+
+    if bookmarks:
+        def delete_bookmarks_after_release_commits():
+            for camera, bookmark_id in bookmarks:
+                try:
+                    alta.delete_bookmark(bookmark_id)
+                except alta.AltaError as exc:
+                    audit(
+                        "footage.bookmark_release_failed",
+                        target=prr.number,
+                        actor=actor,
+                        camera=camera,
+                        bookmark=bookmark_id,
+                        error=str(exc)[:500],
+                    )
+
+        transaction.on_commit(delete_bookmarks_after_release_commits)
+    return fp
 
 
 def route_to_systems(prr: PublicRecordsRequest) -> list:

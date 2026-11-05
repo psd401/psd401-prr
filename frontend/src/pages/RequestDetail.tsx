@@ -81,6 +81,8 @@ interface CollectionTask {
 interface FootagePreservation {
   id: number
   state: string
+  /** What Aware confirmed held, for a human to copy; never sent. */
+  confirmation_text: string | null
 }
 
 interface RequestDetail {
@@ -287,13 +289,18 @@ const TASK_STATE_LABELS: Record<string, string> = {
 const PRESERVATION_STATE_LABELS: Record<string, string> = {
   pending: 'Pending — hold executing',
   held: 'Held',
-  partial: 'Held (some cameras failed)',
+  partial: 'Partly held — gaps or failures need review',
   manual: 'Manual hold required',
+  no_cameras: 'No cameras in Aware at the requested site',
   expired: 'Window outside retention',
   released: 'Released',
 }
 
-const ACTIVE_PRESERVATION_STATES = new Set(['pending', 'partial', 'manual'])
+// States where footage may still be lost and a human must act now.
+// no_cameras belongs here: Aware bookmarked nothing, but a standalone
+// recorder at the site may still be overwriting footage until the
+// adequate-search review finds it.
+const ACTIVE_PRESERVATION_STATES = new Set(['pending', 'partial', 'manual', 'no_cameras'])
 
 const ATTACHMENT_STATUS: Record<
   IntakeAttachment['scan_status'],
@@ -1771,6 +1778,9 @@ export function RequestDetail({
                     <Badge tone={p.state === 'held' ? 'green' : 'neutral'}>
                       {PRESERVATION_STATE_LABELS[p.state] ?? p.state}
                     </Badge>
+                  )}
+                  {p.confirmation_text && (
+                    <p className="w-full text-sm text-ink">{p.confirmation_text}</p>
                   )}
                   {(
                     roles.includes('records_officer')

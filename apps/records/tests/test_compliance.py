@@ -648,6 +648,10 @@ class EstimateRevisionTests(TestCase):
                 self.assertNotIn("approve_draft", calls)
                 self.assertNotIn("queue_approved", calls)
                 self.assertNotIn("exclude_camera", calls)
+                # Releasing a hold deletes the Aware bookmarks and lets the
+                # footage age out: an officer's call, never a schedule's.
+                self.assertNotIn("release_preservation", calls)
+                self.assertNotIn("delete_bookmark", calls)
                 self.assertNotIn("create_no_records_closure_draft", calls)
                 # Closing a case and telling a third party their records are
                 # about to be disclosed are decisions with consequences no
@@ -750,6 +754,8 @@ class EstimateRevisionTests(TestCase):
                     "create_estimate_revision_draft",
                     "create_authored_draft",
                     "exclude_camera",
+                    "release_preservation",
+                    "delete_bookmark",
                 }
             )
         )
