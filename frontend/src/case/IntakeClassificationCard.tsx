@@ -1,5 +1,5 @@
 // ABOUTME: The model's suggested intake label for a new case, for a Records
-// ABOUTME: Officer to confirm (opening the ordinary action) or correct.
+// ABOUTME: Officer to confirm, correct, or undo when the system applied it.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router'
@@ -20,10 +20,18 @@ interface IntakeRun {
   failure_detail: string
 }
 
+interface AutoApplied {
+  label: IntakeLabel
+  confidence: number
+  applied_at: string
+  in_effect: boolean
+}
+
 interface IntakeLatest {
   enabled: boolean
   latest: IntakeRun | null
   feedback: { outcome: 'confirmed' | 'dismissed'; final_label: IntakeLabel } | null
+  auto_applied: AutoApplied | null
 }
 
 /**
@@ -31,15 +39,22 @@ interface IntakeLatest {
  * label to `onConfirm`, which opens the ordinary merge, close, or add-to-case
  * dialog prefilled -- nothing is merged or closed from here. "Not correct"
  * records what the officer judged it to be instead.
+ *
+ * Under the trust ladder (#34) the system may itself close a spam or
+ * non-request email case. The card then says so and offers Undo, which is the
+ * ordinary reopen (back to received), and Keep, which records agreement.
+ * On a closed case the card shows only that.
  */
 export function IntakeClassificationCard({
   number,
   emailAutoCreated,
   onConfirm,
+  closed = false,
 }: {
   number: string
   emailAutoCreated: boolean
   onConfirm: (label: IntakeLabel, target: string | null) => void
+  closed?: boolean
 }) {
   const qc = useQueryClient()
   const [correcting, setCorrecting] = useState(false)
@@ -69,9 +84,72 @@ export function IntakeClassificationCard({
       qc.invalidateQueries({ queryKey: ['advisory-intake', number] })
     },
   })
+  const undo = useMutation({
+    mutationFn: (label: IntakeLabel) => api(`/api/staff/requests/${number}/reopen/`, {
+      method: 'POST',
+      body: {
+        to_status: 'received',
+        reason: `Undid the automatic closure as ${INTAKE_LABEL_TEXT[label].toLowerCase()}.`,
+      },
+    }),
+    // The same refreshes as the case page's own Reopen.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['advisory-intake', number] })
+      qc.invalidateQueries({ queryKey: ['request', number] })
+      qc.invalidateQueries({ queryKey: ['case-workspace-summary', number] })
+      qc.invalidateQueries({ queryKey: ['case-activity', number] })
+    },
+  })
 
   if (latest.isPending) return <Spinner />
   if (latest.isError) return <ErrorNote error={latest.error} />
+
+  // A closure the system already made is shown even with advisory AI off now.
+  const auto = latest.data.auto_applied
+  if (closed && !auto?.in_effect) return null
+  if (auto?.in_effect) {
+    return (
+      <Card title="Closed automatically">
+        <div className="space-y-3 text-sm text-pacific">
+          <p className="flex flex-wrap items-center gap-2">
+            <Badge tone="amber">Auto</Badge>
+            <strong>{INTAKE_LABEL_TEXT[auto.label]}</strong>
+            <span className="text-pacific/80">
+              {Math.round(auto.confidence * 100)}% confidence
+            </span>
+          </p>
+          <p>
+            The system closed this case as not a records request because the
+            label met the district&apos;s automatic closure floor. Nothing was sent
+            to the sender. Undo reopens it as received.
+          </p>
+          {latest.data.feedback?.outcome === 'confirmed' ? (
+            <p>You kept this closure.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => undo.mutate(auto.label)} disabled={undo.isPending}>
+                Undo
+              </Button>
+              {!latest.data.feedback && (
+                <Button
+                  variant="ghost"
+                  onClick={() => answer.mutate({
+                    outcome: 'confirmed', final_label: auto.label, reason: '',
+                  })}
+                  disabled={answer.isPending}
+                >
+                  Keep
+                </Button>
+              )}
+            </div>
+          )}
+          {undo.isError && <ErrorNote error={undo.error} />}
+          {answer.isError && <ErrorNote error={answer.error} />}
+        </div>
+      </Card>
+    )
+  }
+
   if (!latest.data.enabled) return null
 
   const current = latest.data.latest

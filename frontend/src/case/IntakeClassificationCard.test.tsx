@@ -33,7 +33,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function setup(latest: unknown = COMPLETE) {
+function setup(latest: unknown = COMPLETE, closed = false) {
   const posts: { url: string; body: unknown }[] = []
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
@@ -52,6 +52,7 @@ function setup(latest: unknown = COMPLETE) {
           number="PRR-2026-0002"
           emailAutoCreated={false}
           onConfirm={onConfirm}
+          closed={closed}
         />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -121,4 +122,53 @@ it('offers no action after agreeing to a label that has none', async () => {
 
   expect(await screen.findByText(/You agreed with this label/)).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Open the action' })).not.toBeInTheDocument()
+})
+
+const AUTO_CLOSED = {
+  ...COMPLETE,
+  latest: {
+    ...COMPLETE.latest,
+    proposal: { label: 'spam', target_case_number: null, confidence: 0.98, evidence: 'Advertising.' },
+  },
+  auto_applied: { label: 'spam', confidence: 0.98, applied_at: '2026-11-05T10:00:00Z', in_effect: true },
+}
+
+it('says the system closed the case and undoes it with one reopen', async () => {
+  const { posts, user } = setup(AUTO_CLOSED, true)
+
+  expect(await screen.findByText('Closed automatically')).toBeInTheDocument()
+  expect(screen.getByText('98% confidence')).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'Undo' }))
+
+  await waitFor(() => expect(posts).toEqual([{
+    url: '/api/staff/requests/PRR-2026-0002/reopen/',
+    body: { to_status: 'received', reason: 'Undid the automatic closure as spam.' },
+  }]))
+})
+
+it('records agreement when the officer keeps the automatic closure', async () => {
+  const { posts, user } = setup(AUTO_CLOSED, true)
+
+  await user.click(await screen.findByRole('button', { name: 'Keep' }))
+
+  await waitFor(() => expect(posts).toEqual([{
+    url: '/api/staff/requests/PRR-2026-0002/advisory-intake/feedback/',
+    body: { outcome: 'confirmed', final_label: 'spam', reason: '' },
+  }]))
+})
+
+it('shows nothing on a case a person closed', async () => {
+  setup({ ...COMPLETE, auto_applied: null }, true)
+
+  await waitFor(() => expect(fetch).toHaveBeenCalled())
+  expect(screen.queryByText('Suggested intake label')).not.toBeInTheDocument()
+  expect(screen.queryByText('Closed automatically')).not.toBeInTheDocument()
+})
+
+it('shows an automatic closure even after advisory AI is turned off', async () => {
+  setup({ ...AUTO_CLOSED, enabled: false }, true)
+
+  expect(await screen.findByText('Closed automatically')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
 })

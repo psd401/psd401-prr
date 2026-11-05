@@ -54,6 +54,7 @@ from .models import (
     AdvisoryRun,
     EvaluationRun,
     EvaluationSet,
+    IntakeAutoApplication,
     PublicRecordsRequest,
     RecordItem,
     RequestStatus,
@@ -116,8 +117,17 @@ def _intake_examples(limit: int) -> list[dict[str, Any]]:
             detail__source_request__in=closed_numbers,
         )
     }
+    # A case the system closed on its own is the model's answer, not a
+    # person's: it is a gold label only once an officer has answered it (#34).
+    auto_closed = {
+        str(pk) for pk in IntakeAutoApplication.objects.filter(
+            request__in=cases,
+        ).values_list("request_id", flat=True)
+    }
     examples = []
     for case in cases:
+        if str(case.pk) in auto_closed and str(case.pk) not in answered:
+            continue
         if str(case.pk) in answered:
             label, target = answered[str(case.pk)]
         elif case.status == RequestStatus.CLOSED_DUPLICATE and case.merged_into:
@@ -309,3 +319,33 @@ def evaluate_models(
         examples=len(evaluation_set.examples),
     )
     return run
+
+
+def latest_not_request_metrics(model: str) -> dict[str, Any] | None:
+    """Precision and recall on "not a request" for ``model`` (#34).
+
+    From the newest intake evaluation run that scored ``model``. Spam and
+    non-request are one coarse class in the evaluation, so both trust settings
+    show the same figures. None when the model has never been evaluated or
+    neither figure can be computed.
+    """
+    for run in EvaluationRun.objects.filter(
+        evaluation_set__kind=EvaluationSet.Kind.INTAKE,
+    ).order_by("-created_at"):
+        result = (run.results or {}).get(model)
+        if result is None:
+            continue
+        confusion = result.get("confusion") or {}
+        caught = confusion.get("not_request", {}).get("not_request", 0)
+        actual = sum(confusion.get("not_request", {}).values())
+        called = sum(row.get("not_request", 0) for row in confusion.values())
+        if not actual and not called:
+            return None
+        return {
+            "model": model,
+            "evaluated_at": run.created_at,
+            "items": result.get("items"),
+            "precision": round(caught / called, 4) if called else None,
+            "recall": round(caught / actual, 4) if actual else None,
+        }
+    return None

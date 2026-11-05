@@ -340,6 +340,54 @@ SETTINGS: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key="PRR_TRUST_INTAKE_SPAM_MODE",
+        type=values.CHOICE,
+        default="suggest",
+        choices=("suggest", "auto"),
+        category=CATEGORY_ADVISORY_AI,
+        label="Trust ladder: spam",
+        consequence=(
+            "Suggest: a Records Officer confirms a spam label and closes the "
+            "case. Auto: when the automatic intake classification calls a new "
+            "email-created case spam at or above the confidence floor below, "
+            "the system closes it as not a records request with no officer. "
+            "Nothing is sent to the sender, Records Officers are emailed, and "
+            "one click on the case reopens it. Web-form cases are never closed "
+            "automatically."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_INTAKE_NON_REQUEST_MODE",
+        type=values.CHOICE,
+        default="suggest",
+        choices=("suggest", "auto"),
+        category=CATEGORY_ADVISORY_AI,
+        label="Trust ladder: not a records request",
+        consequence=(
+            "Suggest: a Records Officer confirms a not-a-request label and "
+            "closes the case. Auto: when the automatic intake classification "
+            "calls a new email-created case not a records request at or above "
+            "the confidence floor below, the system closes it with no officer. "
+            "Nothing is sent to the sender, Records Officers are emailed, and "
+            "one click on the case reopens it. A real request closed this way "
+            "has no response until someone reopens it."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_INTAKE_AUTO_MIN_CONFIDENCE",
+        type=values.INTEGER,
+        default=95,
+        minimum=50,
+        maximum=100,
+        unit="percent",
+        category=CATEGORY_ADVISORY_AI,
+        label="Automatic intake closure confidence floor",
+        consequence=(
+            "In auto mode, only spam or not-a-request labels with at least "
+            "this confidence close a case."
+        ),
+    ),
+    SettingSpec(
         key="PRR_TRUST_NON_RESPONSIVE_AUTO_MIN_CONFIDENCE",
         type=values.INTEGER,
         default=95,

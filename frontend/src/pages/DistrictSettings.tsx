@@ -76,6 +76,16 @@ interface DistrictSetting {
   required_by: string[]
   last_change: SettingChange | null
   verification: VerificationState | null
+  evaluation: EvaluationState | null
+}
+
+/** How the live model scored on its latest evaluation (#34). */
+interface EvaluationState {
+  model: string
+  evaluated_at: string
+  items: number | null
+  precision: number | null
+  recall: number | null
 }
 
 interface SettingsPage {
@@ -83,6 +93,11 @@ interface SettingsPage {
   reason_min_length: number
   results: DistrictSetting[]
 }
+
+const INTAKE_TRUST_KEYS = new Set([
+  'PRR_TRUST_INTAKE_SPAM_MODE',
+  'PRR_TRUST_INTAKE_NON_REQUEST_MODE',
+])
 
 const LIST_TYPES = ['domain_list', 'email_list', 'date_list']
 
@@ -305,6 +320,31 @@ function VerificationNote({ setting }: { setting: DistrictSetting }) {
       {`Saved, but it did not authenticate when it was last checked on `}
       {formatWhen(check.checked_at)}
       {`. ${check.detail}`}
+    </p>
+  )
+}
+
+function percent(value: number | null): string {
+  return value === null ? 'not measured' : `${Math.round(value * 100)}%`
+}
+
+/** The evidence for a setting that lets the system act without a person. */
+function EvaluationNote({ setting }: { setting: DistrictSetting }) {
+  const result = setting.evaluation
+  if (!result) {
+    return (
+      <p className="mt-2 text-xs text-warning-ink">
+        The live intake model has not been evaluated yet. Run an evaluation
+        before choosing Auto.
+      </p>
+    )
+  }
+  return (
+    <p className="mt-2 text-xs text-ink-muted">
+      {`Latest evaluation of ${result.model} on ${formatWhen(result.evaluated_at)}`}
+      {result.items !== null ? ` (${result.items} cases)` : ''}
+      {`: “not a request” precision ${percent(result.precision)}, `}
+      {`recall ${percent(result.recall)}. Spam and not-a-request are scored together.`}
     </p>
   )
 }
@@ -557,6 +597,7 @@ export function DistrictSettings() {
                     </p>
                     {isSecret(setting) && <SecretSummary setting={setting} />}
                     <VerificationNote setting={setting} />
+                    {INTAKE_TRUST_KEYS.has(setting.key) && <EvaluationNote setting={setting} />}
                     <p className="mt-2 text-xs text-ink-muted">
                       {setting.last_change
                         ? `Last changed by ${changedBy(setting.last_change)} on `

@@ -57,7 +57,8 @@
     "officer-approve-and-collect",
     "officer-rescope",
     "officer-one-step-release",
-    "officer-approve-decision-batch"
+    "officer-approve-decision-batch",
+    "officer-intake-auto-apply-undo"
   ],
   "e2e_screenshots": {
     "staff-login-open-case": [
@@ -272,6 +273,10 @@
     "officer-approve-decision-batch": [
       "officer-approve-decision-batch-queue.png",
       "officer-approve-decision-batch-approved.png"
+    ],
+    "officer-intake-auto-apply-undo": [
+      "officer-intake-auto-apply-undo-closed.png",
+      "officer-intake-auto-apply-undo-reopened.png"
     ]
   },
   "strictness": "block",

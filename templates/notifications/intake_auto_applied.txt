@@ -1,0 +1,10 @@
+The system closed request {{ request_number }} as not a records request, with no officer.
+
+The intake classification labelled it {% if label == "spam" %}spam{% else %}not a records request{% endif %} with {{ confidence_percent }}% confidence, at or above the district's automatic closure floor. Nothing was sent to the sender.
+
+If this is wrong, open the case and choose Undo on its intake label card. The case reopens as received.
+
+Message:
+{{ request_description|truncatechars:800 }}
+
+Open the case: {{ status_url }}

@@ -1057,6 +1057,17 @@ export function RequestDetail({
             </Button>
           </div>
         )}
+        {/* A case the system closed on its own (#34) says so, with Undo. */}
+        {showOverview && canManageRequest && r.status === 'closed_non_request' && (
+          <div className="lg:col-span-2">
+            <IntakeClassificationCard
+              number={r.number}
+              emailAutoCreated={Boolean(r.email_intake_auto_created)}
+              onConfirm={applyIntakeLabel}
+              closed
+            />
+          </div>
+        )}
 
         {showCollection && canManageRequest && (
           <Card title="Request-intent advisory" className="lg:col-span-2">

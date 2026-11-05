@@ -44,6 +44,7 @@ SIGNAL_TYPES: Final = frozenset(
         "footage.hold_complete",
         "footage.adequate_search_review_queued",
         "collection.task_created",
+        "intake.auto_applied",
         "correspondence.delivery_effects_failed",
         "inbound.message_failed",
         "inbound.messages_recovered",
@@ -593,6 +594,24 @@ def notify_footage_hold_complete(
         template_name="notifications/footage_hold_complete.txt",
         context={"held_count": held, "failed_count": failed},
         condition_key=f"{preservation.pk}:{held}:{failed}",
+    )
+
+
+def notify_intake_auto_applied(applied) -> bool | None:
+    """Tell Records Officers the system closed a case on its own (#34)."""
+    request = applied.request
+    label = "SPAM" if applied.label == "spam" else "NOT A REQUEST"
+    return enqueue_staff_notification(
+        signal_type="intake.auto_applied",
+        request=request,
+        recipients=_records_officer_recipients(),
+        subject=f"[AUTO-CLOSED {label}] {request.number}",
+        template_name="notifications/intake_auto_applied.txt",
+        context={
+            "label": applied.label,
+            "confidence_percent": round(applied.confidence * 100),
+        },
+        condition_key=str(applied.pk),
     )
 
 

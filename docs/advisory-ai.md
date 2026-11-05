@@ -175,7 +175,8 @@ sent, so the input does not change while the run waits. Kinds never mix
 It returns one label -- `new_request`, `follow_up`, `duplicate_of`,
 `related_to`, `non_request`, or `spam` -- with a confidence and the evidence it
 relied on. The three labels that point at a case must name one of the cases it
-was shown; an invented number fails the run. The proposal is never applied.
+was shown; an invented number fails the run. The proposal is not applied,
+except for spam and non-request under the intake trust ladder below.
 
 The case Overview shows the label to Records Officers. **Correct** records the
 officer's agreement (`AdvisoryFeedback`, append-only, one per run) and opens
@@ -190,6 +191,42 @@ it to be instead. Web-form cases have no non-request closure, so a
 `non_request` or `spam` label there is shown but has no one-click action.
 Every answer is audited (`advisory.feedback_recorded`) with the proposed and
 final label, which is the agreement data the evaluation work (#32) reads.
+
+### Trust ladder: automatic spam and non-request closure (#34)
+
+Two labels, and only two, may be applied with no officer: `spam` and
+`non_request` (district decision, 2026-11-05). Each has its own in-app mode,
+`PRR_TRUST_INTAKE_SPAM_MODE` and `PRR_TRUST_INTAKE_NON_REQUEST_MODE`
+(`suggest` or `auto`, default `suggest`), and they share one floor,
+`PRR_TRUST_INTAKE_AUTO_MIN_CONFIDENCE` (default 95%). Like every setting, a
+change is admin-only, needs a reason, and is kept in its history. The
+Settings page shows, beside each mode, the live intake model's latest
+evaluated precision and recall on "not a request"; spam and non-request are
+one class in the evaluation, so both rows show the same figures.
+
+In `auto` mode, `apps/records/intake_trust.auto_apply_intake_label` runs when
+an automatic classification completes. It closes the case as non-request
+(`services.auto_close_non_request`) only when all of these hold: the run was
+automatic, not asked for by an officer; it is the case's latest
+classification and has no officer answer; the label is in `auto` mode at or
+above the floor; the case is still `received`; and the case was auto-created
+from email. A web-form request is never closed this way, and no other label
+-- merge, follow-up, related, new -- is ever applied (merges stay with an
+officer or an approved decision batch).
+
+The closure has no human actor. Its status event says it was automatic and
+why, an `IntakeAutoApplication` row (append-only) ties it to the
+classification, and `intake.auto_applied` is audited. Nothing is sent to the
+requester (rule 6). Records Officers get an email
+(`intake.auto_applied`), and the case keeps its open inbox item, since no
+officer handled it. On the case, **Undo** is the ordinary reopen back to
+`received`, which appends a new event and leaves the closure on the timeline;
+**Keep** records the officer's agreement. `test_compliance` pins
+`intake_trust` as the only caller of the system closure.
+
+An automatic closure an officer has not answered is not a gold label: the
+evaluation set leaves it out, so the model is never scored against its own
+decisions.
 
 ## Comparing models on past decisions
 
@@ -368,10 +405,13 @@ than a matter of wording:
   duplicate is left out of a bulk selection for the same reason, and the
   service refuses a batch that carries one rather than overturning it.
 
-There is still no path by which a model result becomes an applied legal
-outcome on its own. The trust ladder below lets a named reviewer decide a set
-after checking a random sample of it; that is the Records Officer's chosen
-policy, and the reviewer's decision, not the model's, is what applies.
+For records, there is still no path by which a model result becomes an
+applied legal outcome on its own. The trust ladder below lets a named
+reviewer decide a set after checking a random sample of it; that is the
+Records Officer's chosen policy, and the reviewer's decision, not the
+model's, is what applies. The one exception anywhere is the intake trust
+ladder above: in `auto` mode, a spam or non-request label closes a new email
+case, with officer notice and one-click undo.
 
 ## Trust ladder: sampled batch approval and the elusion test
 
