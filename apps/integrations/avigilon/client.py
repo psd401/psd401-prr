@@ -527,6 +527,12 @@ def _active_heads(device: dict, live: dict) -> tuple[tuple[str, ...], tuple[str,
         config = _as_dict(_as_dict(configs.get(sid)).get("config"))
         if config.get("inactive") is True:
             continue
+        # An Axis "quad" source is a composite view stitched from the
+        # device's other heads, which are bookmarked on their own, and no
+        # bookmark on the tenant includes one (2026-11-05). Holding it would
+        # add storage and nothing the real heads do not already preserve.
+        if config.get("source_name") == "quad":
+            continue
         if storing.get(sid) == "no_stream_available":
             skipped.append(sid)
             continue

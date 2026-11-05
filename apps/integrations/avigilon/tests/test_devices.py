@@ -117,6 +117,24 @@ class DeviceListTests(fakes.TenantTestCase):
         self.assertEqual(camera.sources, ("1",))
         self.assertEqual(camera.skipped_sources, ("2", "3"))
 
+    def test_an_axis_quad_composite_is_neither_bookmarked_nor_skipped(self):
+        """The quad source is a composite view of the other heads."""
+        (camera,) = self._devices(
+            fakes.device(
+                "axis",
+                "Axis multisensor",
+                heads=[
+                    fakes.head("1"),
+                    fakes.head("2"),
+                    fakes.head("5", source_name="quad"),
+                    fakes.head("6", source_name="quad", storing="no_stream_available"),
+                ],
+            )
+        )
+
+        self.assertEqual(camera.sources, ("1", "2"))
+        self.assertEqual(camera.skipped_sources, ())
+
     def test_a_camera_built_without_skipped_sources_has_none(self):
         camera = client.Camera(
             id="g", name="n", site="", device_group_id="", server_group_id="s",
