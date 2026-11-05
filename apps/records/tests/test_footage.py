@@ -30,6 +30,37 @@ def make_request(description: str):
     return PublicRecordsRequest.objects.create(requester=r, description=description)
 
 
+class PreservationModelTests(TestCase):
+    def test_states_name_what_actually_happened(self):
+        State = FootagePreservation.State
+        self.assertEqual(State.NO_CAMERAS.label, "No cameras in Aware at the requested site")
+        self.assertEqual(State.MANUAL.label, "Manual hold required")
+        self.assertIn("gap", CameraHold.State.GAP.label.lower())
+        self.assertEqual(CameraHold.State.NOT_RETAINED, "not_retained")
+        self.assertEqual(
+            CameraHold._meta.get_field("clip_id").verbose_name, "Aware bookmark id"
+        )
+
+    def test_held_count_counts_every_bookmarked_camera_not_excluded(self):
+        prr = make_request("camera footage")
+        now = timezone.now()
+        fp = FootagePreservation.objects.create(
+            request=prr, window_start=now - dt.timedelta(days=1), window_end=now,
+            site_codes=["PHS"], site_resolution="Named: Peninsula High School",
+        )
+        for camera_id, state in (
+            ("a", CameraHold.State.HELD),
+            ("b", CameraHold.State.GAP),
+            ("c", CameraHold.State.NOT_RETAINED),
+            ("d", CameraHold.State.FAILED),
+        ):
+            CameraHold.objects.create(preservation=fp, camera_id=camera_id, state=state)
+        self.assertEqual(fp.held_count, 2)
+        fp.refresh_from_db()
+        self.assertEqual(fp.site_codes, ["PHS"])
+        self.assertIsNone(fp.released_at)
+
+
 class DetectionTests(TestCase):
     def test_footage_keywords(self):
         self.assertTrue(triage.is_footage_request("security camera footage from the gym"))
