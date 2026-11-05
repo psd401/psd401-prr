@@ -48,6 +48,10 @@ AGENT_ONLY_CAPABILITIES = frozenset({
     "requesters.update",
     "correspondence.approve",
     "installments.release",
+    # Agents propose decision batches and read one by id (#43); people
+    # decide them from the /decisions list, which already carries the batch.
+    "decision_batches.propose",
+    "decision_batches.retrieve",
 })
 
 def _normalize_frontend_path(raw_path: str) -> str:

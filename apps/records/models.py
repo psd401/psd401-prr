@@ -3593,3 +3593,63 @@ class EvaluationRun(models.Model):
 
     def __str__(self):
         return f"evaluation run {self.pk}"
+
+
+class DecisionBatch(AppendOnlyModelMixin, models.Model):
+    """A set of decisions an agent (or a person) proposes for a human to approve (#43).
+
+    The proposal is append-only: what was proposed, by whom, and on what
+    evidence never changes. The decision is a separate append-only
+    ``DecisionBatchDecision`` row, so a batch with no decision is proposed and
+    a decided batch can never be rewritten. Approval runs the kind's existing
+    service in ``apps/records/decision_batches.py``.
+    """
+
+    class Kind(models.TextChoices):
+        REVIEW = "review", "Review records"
+        SUPERSEDE = "supersede", "Supersede a collection"
+        SCOPE_AND_COLLECT = "scope_and_collect", "Collect a scope"
+        REDACTION_GROUP = "redaction_group", "Redaction group"
+        INTAKE_LABEL = "intake_label", "Intake label"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    kind = models.CharField(max_length=30, choices=Kind.choices)
+    request = models.ForeignKey(
+        PublicRecordsRequest, on_delete=models.PROTECT, related_name="decision_batches",
+    )
+    payload = models.JSONField()
+    evidence_summary = models.TextField(max_length=4000)
+    proposed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.kind} batch {self.pk}"
+
+
+class DecisionBatchDecision(AppendOnlyModelMixin, models.Model):
+    """The one human decision on a ``DecisionBatch``: approved or rejected."""
+
+    class Outcome(models.TextChoices):
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    batch = models.OneToOneField(DecisionBatch, on_delete=models.PROTECT, related_name="decision")
+    outcome = models.CharField(max_length=20, choices=Outcome.choices)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+",
+    )
+    reason = models.TextField(blank=True)
+    result = models.JSONField(default=dict)
+    decided_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    def __str__(self):
+        return f"{self.outcome} decision {self.pk}"

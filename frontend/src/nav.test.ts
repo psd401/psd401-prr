@@ -21,7 +21,7 @@ const ROLE_CASES: RoleCase[] = [
   {
     name: 'Records Officer',
     roles: ['records_officer'],
-    labels: ['Inbox', 'Review', 'Staff Intake', 'Oversight', 'Configuration'],
+    labels: ['Inbox', 'Review', 'Decisions', 'Staff Intake', 'Oversight', 'Configuration'],
     landing: '/inbox',
   },
   {
@@ -33,7 +33,7 @@ const ROLE_CASES: RoleCase[] = [
   {
     name: 'Reviewer',
     roles: ['reviewer'],
-    labels: ['Inbox', 'Review', 'Oversight', 'Configuration'],
+    labels: ['Inbox', 'Review', 'Decisions', 'Oversight', 'Configuration'],
     landing: '/review',
   },
   {
@@ -51,19 +51,19 @@ const ROLE_CASES: RoleCase[] = [
   {
     name: 'Officer and admin',
     roles: ['records_officer', 'admin'],
-    labels: ['Inbox', 'Review', 'Staff Intake', 'Oversight', 'Configuration'],
+    labels: ['Inbox', 'Review', 'Decisions', 'Staff Intake', 'Oversight', 'Configuration'],
     landing: '/inbox',
   },
   {
     name: 'Liaison and reviewer',
     roles: ['liaison', 'reviewer'],
-    labels: ['Inbox', 'Review', 'Oversight', 'Configuration'],
+    labels: ['Inbox', 'Review', 'Decisions', 'Oversight', 'Configuration'],
     landing: '/inbox',
   },
   {
     name: 'Reviewer and admin',
     roles: ['reviewer', 'admin'],
-    labels: ['Inbox', 'Review', 'Oversight', 'Configuration'],
+    labels: ['Inbox', 'Review', 'Decisions', 'Oversight', 'Configuration'],
     landing: '/review',
   },
   {

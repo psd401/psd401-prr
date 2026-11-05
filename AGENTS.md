@@ -64,8 +64,10 @@ and cited from code, tests, and ADRs; never renumber them.
     /api/public/requests/` is the sole anonymous operation (write-only,
     rate-limited, no PII echo). Shared stdio MCP holds only
     `records.read_staff_api`; hosted MCP uses attributed personal staff tokens,
-    never that shared identity for its gated tools, and exposes exactly four
-    gated draft/proposal tools. Never put tokens in source or `.env.example`.
+    never that shared identity for its gated tools, and exposes exactly five
+    gated draft/proposal tools (the fifth proposes a `DecisionBatch`, which
+    only a person approves in the staff UI; tokens are handed off on the
+    endpoints a batch replaces). Never put tokens in source or `.env.example`.
     Unattended Vault actions are exactly two: the automatic intent Gmail
     *counts* (iterative scoping), which never hold, export, collect, change
     status, or reach the requester; and, only with the in-app

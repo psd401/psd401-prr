@@ -103,6 +103,27 @@ ACKNOWLEDGMENT_DRAFT_CONFIRMATION_FIELDS = (
 #: the whole backlog in one response. OVERDUE_MAX_PAGES bounds the *work*
 #: rather than the output: the staff API pages at 50 rows, so this reads at
 #: most 2,000 requests before reporting an incomplete scan.
+#: Triage fields a record-items row carries to an agent: nothing that is
+#: record text, a person's address, or model rationale.
+RECORD_ITEM_FIELDS = (
+    "id",
+    "original_filename",
+    "custodian",
+    "email_sender_domain",
+    "review_state",
+    "redaction_count",
+    "tags",
+    "advisory_suggested_state",
+    "advisory_confidence",
+)
+RECORD_CLUSTER_FIELDS = ("key", "label", "size", "ai_majority", "record_item_ids")
+DECISION_BATCH_KINDS = (
+    "review",
+    "supersede",
+    "scope_and_collect",
+    "redaction_group",
+    "intake_label",
+)
 OVERDUE_DEFAULT_LIMIT = 25
 OVERDUE_MAX_LIMIT = 200
 OVERDUE_MAX_PAGES = 40
@@ -647,6 +668,139 @@ class PRRClient:
                 },
             },
         }
+
+    def list_record_items(
+        self,
+        request_number: str,
+        review_state: str | None = None,
+        page: int | None = None,
+    ):
+        """List one request's records for proposing a decision batch -- GET
+        /api/staff/record-items/.
+
+        Rows carry triage fields only: id, filename, custodian, sender
+        domain, review state, redaction count, tags, and the standing AI
+        suggestion with its confidence. No record text, addresses, or model
+        rationale leaves through this tool.
+        """
+        params: dict[str, object] = {
+            "request": _validated_request_number(request_number, field="request_number"),
+        }
+        if review_state:
+            params["review_state"] = str(review_state)
+        if page is not None:
+            params["page"] = int(page)
+        listing = self._get("/api/staff/record-items/", params)
+        rows = listing.get("results", []) if isinstance(listing, dict) else listing
+        return {
+            "count": listing.get("count", len(rows)) if isinstance(listing, dict) else len(rows),
+            "next_page": (page or 1) + 1 if isinstance(listing, dict) and listing.get("next") else None,
+            "results": [{field: row.get(field) for field in RECORD_ITEM_FIELDS} for row in rows],
+        }
+
+    def list_record_clusters(self, request_number: str, group_by: str = "thread"):
+        """Group one request's records into clusters -- GET
+        /api/staff/record-items/clusters/. Each cluster gives its size, the
+        AI majority suggestion, and its record ids, ready for a review batch."""
+        params = {
+            "request": _validated_request_number(request_number, field="request_number"),
+            "group_by": str(group_by),
+        }
+        clusters = self._get("/api/staff/record-items/clusters/", params)
+        return {
+            "group_by": clusters.get("group_by"),
+            "cluster_count": clusters.get("cluster_count"),
+            "clusters": [
+                {key: cluster.get(key) for key in RECORD_CLUSTER_FIELDS}
+                for cluster in clusters.get("clusters", [])
+            ],
+        }
+
+    def get_advisories(self, record_item_id: str):
+        """The latest responsiveness and redaction advisories for one record,
+        as labels, confidences, and patterns -- never the model's rationale
+        or the record's text."""
+        try:
+            item_id = quote(str(uuid.UUID(str(record_item_id))), safe="")
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError("record_item_id must be a UUID.") from exc
+        responsiveness = self._get(f"/api/staff/record-items/{item_id}/advisory-responsiveness/").get("latest")
+        redactions = self._get(f"/api/staff/record-items/{item_id}/advisory-redactions/").get("latest")
+
+        def _run(run) -> dict:
+            return {"state": run.get("state"), "model_identifier": run.get("model_identifier"),
+                    "created_at": run.get("created_at")}
+
+        result = {"record_item_id": str(record_item_id), "responsiveness": None, "redactions": None}
+        if responsiveness:
+            proposal = responsiveness.get("proposal") or {}
+            result["responsiveness"] = {
+                **_run(responsiveness),
+                "suggested_state": proposal.get("suggested_state"),
+                "confidence": proposal.get("confidence"),
+                "matched_terms": proposal.get("matched_terms", []),
+            }
+        if redactions:
+            proposal = redactions.get("proposal") or {}
+            result["redactions"] = {
+                **_run(redactions),
+                "candidates": [
+                    {key: candidate.get(key) for key in ("exemption_id", "pattern", "confidence")}
+                    for candidate in proposal.get("candidates", [])
+                    if isinstance(candidate, dict)
+                ],
+            }
+        return result
+
+    def propose_decision_batch(self, kind: str, payload: dict, evidence_summary: str):
+        """Propose a decision batch for a person to approve -- POST
+        /api/staff/decision-batches/. Records the proposal only."""
+        self._require_attributed_personal_token()
+        if kind not in DECISION_BATCH_KINDS:
+            raise ValueError(f"kind must be one of {', '.join(DECISION_BATCH_KINDS)}.")
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be an object.")
+        evidence = str(evidence_summary or "").strip()
+        if not evidence:
+            raise ValueError("evidence_summary cannot be blank.")
+        batch = self._post(
+            "/api/staff/decision-batches/",
+            {"kind": kind, "payload": payload, "evidence_summary": evidence},
+        )
+        return {
+            "batch": batch,
+            "applied": False,
+            "human_gate": {
+                "required": True,
+                "action": (
+                    "A person with the batch kind's role approves or rejects it in "
+                    "the staff application's Decisions queue; nothing changes until then."
+                ),
+            },
+        }
+
+    def get_decision_batch(
+        self,
+        batch_id: str | None = None,
+        request_number: str | None = None,
+        state: str | None = None,
+    ):
+        """One decision batch by id, or a list filtered by case and state --
+        GET /api/staff/decision-batches/."""
+        if batch_id:
+            try:
+                normalized = quote(str(uuid.UUID(str(batch_id))), safe="")
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise ValueError("batch_id must be a UUID.") from exc
+            return self._get(f"/api/staff/decision-batches/{normalized}/")
+        params = {}
+        if request_number:
+            params["request"] = _validated_request_number(request_number, field="request_number")
+        if state:
+            if state not in ("proposed", "approved", "rejected"):
+                raise ValueError("state must be proposed, approved, or rejected.")
+            params["state"] = state
+        return self._get("/api/staff/decision-batches/", params or None)
 
     def suggest_exemption_citations(
         self,

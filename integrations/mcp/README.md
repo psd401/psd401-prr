@@ -3,9 +3,12 @@
 The application serves [MCP](https://modelcontextprotocol.io) over streamable
 HTTP at `/mcp`, and retains the standalone stdio entrypoint for local and
 server-side automation. Both transports expose the eight shared read tools.
-Hosted HTTP additionally exposes four attributed, personal-token tools that
-create an acknowledgment or clarification draft, or return reviewable
-proposals. The standalone
+Hosted HTTP additionally exposes five attributed, personal-token tools that
+create an acknowledgment or clarification draft, return reviewable
+proposals, or propose a decision batch (#43) that only a person approves in
+the staff Decisions queue. Hosted also adds four role-gated reads -- one
+request's records, their clusters, a record's AI advisory labels, and decision
+batches -- that need a reviewer or Records Officer personal token. The standalone
 stdio deployment remains strictly read-only.
 
 ## Read-only stdio and gated hosted writes
@@ -79,7 +82,7 @@ response bodies are never written to MCP logs, and all `/mcp` responses use
 
 The read-only service token may still use hosted HTTP for the eight read tools,
 but every hosted write-tool invocation returns an MCP error before it can
-create a draft or read proposal targets. Use a personal token for the four
+create a draft or read proposal targets. Use a personal token for the five
 hosted write tools.
 
 The hosted server is deliberately stateless so the four Gunicorn/Uvicorn
@@ -254,7 +257,7 @@ identity:
 All four are annotated `readOnlyHint: false`, `destructiveHint: false`,
 `openWorldHint: false`. Two of them only read and return a proposal, so
 `readOnlyHint: false` is the conservative answer rather than the literal one:
-these are the four tools a gateway must route through human approval, and
+these are the five tools a gateway must route through human approval, and
 the honest-but-weaker hint would let a future gateway auto-approve them.
 Only the two drafting tools are non-idempotent, because each call stores
 another draft.
@@ -361,8 +364,7 @@ has at least one.
 ### Tool contract and the definition pin
 
 `apps/api/tests/test_mcp_tool_contract.py` enforces what the standard makes
-checkable without a network: namespaced lower_snake_case names, the ~15-tool
-ceiling, all four annotations plus a title on every tool,
+checkable without a network: namespaced lower_snake_case names, all four annotations plus a title on every tool,
 `server.json`'s declared inventory matching the served inventory, and every
 `mcp_tool` the capability catalog cites being a tool that exists.
 
