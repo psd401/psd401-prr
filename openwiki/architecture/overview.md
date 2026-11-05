@@ -157,7 +157,7 @@ deployed access is keyless, see [aws-deployment.md](../operations/aws-deployment
 
 1. **Matters** — Created per request, reused if it exists
 2. **Counts** — An entire-organization or account-scoped Gmail count that creates a matter but no hold
-3. **Holds and exports** — Started only from a reviewed, completed count
+3. **Holds and exports** — Started from a reviewed, completed count, or, only with `PRR_TRUST_SCOPE_MODE=auto`, from a finished automatic scoping session's final count
 4. **Ingest** — Celery polls exports, downloads them to the object store, and converts messages into record items
 
 Details are in [collection-and-vault.md](../domain/collection-and-vault.md).

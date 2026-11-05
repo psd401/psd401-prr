@@ -17,7 +17,6 @@ The trust ladder lets a named reviewer decide many records in one action, but on
 judging a random sample of them. The Records Officer chooses the policy. A model suggestion
 never applies on its own: the reviewer's judgment is what becomes the legal outcome. The
 same sampling rule governs two surfaces: responsiveness batches over records (this page's
-<!-- openwiki: broken internal link [#redaction-proposal-groups] heading anchor "redaction-proposal-groups" does not exist in /openwiki/domain/trust-ladder.md. Fix the href or restore the target, then delete this comment. -->
 main sections) and [redaction proposal groups](#redaction-proposal-groups), which accept
 proposed redaction boxes.
 
@@ -25,13 +24,14 @@ proposed redaction boxes.
 
 The policy lives in the in-app settings store ([configuration](../architecture/configuration.md)),
 is admin-only, and requires a written reason on each change. The registry in
-`apps/configuration/registry.py` declares the six settings:
+`apps/configuration/registry.py` declares the seven settings:
 
 | Setting | Values | Default |
 |---|---|---|
 | `PRR_TRUST_RESPONSIVE_MODE` | `suggest`, `batch` (no automatic mode) | `suggest` |
 | `PRR_TRUST_NON_RESPONSIVE_MODE` | `suggest`, `batch`, `auto` | `suggest` |
 | `PRR_TRUST_REDACTION_MODE` | `suggest`, `batch` (no automatic mode) | `suggest` |
+| `PRR_TRUST_SCOPE_MODE` | `suggest`, `auto` (collection from a proposed scope; see [collection and Vault](collection-and-vault.md#iterative-scoping-from-intake-intent)) | `suggest` |
 | `PRR_TRUST_NON_RESPONSIVE_AUTO_MIN_CONFIDENCE` | 50-100 percent | 95 |
 | `PRR_TRUST_BATCH_SAMPLE_SIZE` | 1-200 records | 10 |
 | `PRR_TRUST_ELUSION_SAMPLE_SIZE` | 1-500 records | 30 |
@@ -110,6 +110,51 @@ sequenceDiagram
 
 Caption: opening a batch and deciding it are separate requests. Only the decide step can apply
 an outcome, and it is the reviewer's judgment that applies it.
+
+## Redaction proposal groups
+
+The same sampling rule applies to proposed redaction boxes. A redaction proposal comes from
+the advisory model (see [advisory AI](advisory-ai.md)) and never changes the record by
+itself. `apps/records/redaction_batches.py` accepts them as a group, one exemption and one
+pattern on one case at a time.
+
+- **Grouping.** `proposal_groups()` lists the pending proposals, meaning proposals on
+  `responsive` records with no `RedactionProposalDecision` yet. Largest group first.
+- **Opening.** `create_redaction_batch()` requires a reviewer and
+  `PRR_TRUST_REDACTION_MODE=batch`, and refuses a group larger than `MAX_GROUP_PROPOSALS`
+  (2000). It also refuses any group that overlaps a **blocked** batch, so a rejected group is
+  decided one proposal at a time. Opening draws a `SystemRandom` sample of
+  `PRR_TRUST_BATCH_SAMPLE_SIZE` proposals. It accepts nothing.
+- **Deciding.** `decide_redaction_batch()` locks the batch. The judgments must cover the
+  sample exactly, and each rejection needs a reason of at least 10 characters. Each sampled
+  accept goes through `redaction_ai.accept_redaction_proposal`, so it becomes an ordinary
+  `create_redaction` with the proposal's own box and exemption citation. Each sampled reject
+  goes through `reject_redaction_proposal`. Only if every sampled proposal was accepted are
+  the rest accepted; any that are no longer decidable are skipped and counted. One rejection
+  makes the batch `blocked`, keeps the sample decisions, and leaves the rest pending.
+- **Building.** `build_ready_redacted_records()` renders the redacted PDF for each responsive
+  record on the case that has active redactions. A record awaiting a required second review is
+  counted and skipped.
+
+The staff API is `RedactionBatchViewSet` in
+[`apps/api/resources/redaction_batches.py`](../../apps/api/resources/redaction_batches.py).
+Its capabilities are `redaction_batches.groups` (`GET /api/staff/redaction-batches/groups/`),
+`redaction_batches.create` (`POST /api/staff/redaction-batches/`),
+`redaction_batches.decide` (`POST /api/staff/redaction-batches/{id}/decide/`, human-only and
+high risk), and `redaction_batches.build` (`POST /api/staff/redaction-batches/build/`). A token
+caller receives the handoff for decide and build. The accept-as-group rule keeps each accepted
+proposal a separate, exemption-backed redaction, and second review still applies, as described
+in [record review](record-review-and-handling.md#human-review-and-second-review).
+
+Focused tests are in `apps/records/tests/test_redaction_batches.py`:
+`test_pending_proposals_are_grouped_by_exemption_and_pattern`,
+`test_accepting_the_sample_accepts_the_group_one_redaction_each`,
+`test_one_rejection_blocks_the_group_and_keeps_the_sample_decisions`,
+`test_second_review_stays_required_and_only_ready_records_are_built`,
+`test_suggest_mode_allows_no_group_acceptance`, and
+`test_token_callers_are_handed_off_for_decide_and_build`.
+
+Minimal validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_redaction_batches --settings=config.test_settings`.
 
 ## Staff API and capabilities
 

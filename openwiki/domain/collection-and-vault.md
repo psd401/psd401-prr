@@ -6,15 +6,15 @@ tags: [domain, collection, vault, record-systems, ingest, google-vault]
 timestamp: 2026-09-24T00:00:00Z
 openwiki:
   roles: [domain, integration, workflow]
-  change_kinds: [vault, collection, record-system, ingest]
-  source_paths: [apps/records/vault_counts.py, apps/records/vault_collections.py, apps/records/vault_ingest.py, apps/records/vault_metadata.py, apps/records/tasks.py, apps/records/triage.py, apps/records/models.py, apps/integrations/vault/client.py, apps/api/resources/record_systems.py, apps/api/resources/collection_tasks.py]
-  symbols: [VaultCountRun, CollectionTask, VaultIngestRun, VaultMessageArtifact, request_vault_count, queue_vault_collection, start_vault_collection, ingest_completed_export, route_to_systems, poll_vault_exports, ingest_vault_export]
-  test_paths: [apps/records/tests/test_vault_counts.py, apps/records/tests/test_vault_collections.py, apps/records/tests/test_vault_ingest.py, apps/records/tests/test_vault_tasks.py, apps/records/tests/test_vault_scope_recovery.py, apps/records/tests/test_vault_custodian_metadata.py, apps/api/tests/test_vault_counts.py, apps/api/tests/test_collection_tasks.py]
+  change_kinds: [vault, collection, record-system, ingest, scoping]
+  source_paths: [apps/records/vault_counts.py, apps/records/vault_collections.py, apps/records/vault_ingest.py, apps/records/vault_metadata.py, apps/records/scoping.py, apps/records/tasks.py, apps/records/triage.py, apps/records/models.py, apps/integrations/vault/client.py, apps/api/resources/record_systems.py, apps/api/resources/collection_tasks.py]
+  symbols: [VaultCountRun, CollectionTask, VaultIngestRun, VaultMessageArtifact, ScopingSession, ScopeIteration, request_vault_count, queue_vault_collection, start_vault_collection, ingest_completed_export, route_to_systems, poll_vault_exports, ingest_vault_export, start_scoping, continue_scoping, rerun_scoping, rescope, queue_automatic_vault_collection]
+  test_paths: [apps/records/tests/test_vault_counts.py, apps/records/tests/test_vault_collections.py, apps/records/tests/test_vault_ingest.py, apps/records/tests/test_vault_tasks.py, apps/records/tests/test_vault_scope_recovery.py, apps/records/tests/test_vault_custodian_metadata.py, apps/records/tests/test_scoping.py, apps/records/tests/test_approve_and_collect.py, apps/api/tests/test_vault_counts.py, apps/api/tests/test_collection_tasks.py]
   invariants:
     - "A Vault count estimates a search universe; it never creates a hold, export, collection task, status change, or requester message."
     - "A Vault collection starts only from a completed count, with no blocking collection deposit gate, the same reviewed scope hash, a non-zero count, and a current Records Officer."
     - "Every Vault message becomes a RecordItem only after its raw bytes are retained and scanned; a RecordItem is never a responsiveness decision."
-    - "The only unattended Vault action is the automatic entire-organization count from an intake intent proposal, and it is limited to a count."
+    - "Exactly two Vault actions can run unattended: the automatic count under iterative scoping from an intake intent proposal, which only counts, and, only when PRR_TRUST_SCOPE_MODE is auto, the collection of a finished automatic session's final count on a request with no Vault collection yet."
   validation_commands: ["PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_vault_counts apps.records.tests.test_vault_collections --settings=config.test_settings"]
 ---
 
@@ -80,8 +80,10 @@ flowchart TD
     K --> L[RecordItems, state complete]
 ```
 
-Caption: the Vault path. Only the count from an intake intent can start
-without a named officer, and it stops at the count.
+Caption: the Vault path. The count from an intake intent can start without a named
+officer. With `PRR_TRUST_SCOPE_MODE=auto`, a finished automatic scoping session can also
+start the collection (`queue_automatic_vault_collection`) without one; see
+[iterative scoping](#iterative-scoping-from-intake-intent).
 
 ### Count
 
@@ -226,19 +228,87 @@ covers the restore path.
 
 Minimal validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_collection_supersession --settings=config.test_settings`.
 
-## Automatic count from intake intent
+## Iterative scoping from intake intent
 
-With `PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED` on, a completed intake intent
-proposal that maps a request to an active Vault-backed system runs one
-entire-organization count with `trigger=automatic`. This is the only unattended
-Vault action. It may create the count's matter, but it never holds, exports,
-collects, changes status, or reaches the requester. AGENTS.md rule 11 records the
-district decision and its accepted volume risk. See [Advisory AI](advisory-ai.md).
+`apps/records/scoping.py` turns an intake intent proposal into a Vault scope that a
+person can review before any hold or export. Its module docstring states the rule:
+scoping counts only. It never holds, exports, writes a status, or reaches a requester.
+
+With `PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED` on, a completed automatic intent proposal
+that maps a request to an active Vault-backed system calls `start_scoping()`. The
+session is a `ScopingSession` with a `max_iterations` copied from
+`PRR_INTENT_MAX_COUNT_ITERATIONS`, and its first `ScopeIteration` is counted through
+`_queue_iteration()` with `trigger=automatic`:
+
+- The scope is the named district mailboxes (an `accounts` scope) when the proposal names
+  any, and the whole organization otherwise. Custodians outside the configured district
+  domain are dropped before counting.
+- When a count completes, `continue_scoping()` reads the total and the busiest custodian
+  accounts, then asks the advisory model either to stop or to propose a tighter query.
+  A usable refinement becomes the next iteration, and the loop repeats.
+- The session stops for one of these reasons, recorded in `stop_reason`: the model says
+  stop; the iteration limit is reached; the refinement is unusable or repeats an earlier
+  scope; the model is unavailable, so the last count stands; or a count fails, which
+  marks the session `failed`. The last completed count is the proposed scope.
+- An officer can start a fresh run with `rerun_scoping()`. It needs a reason of at least
+  10 characters and runs even when nothing changed. Its trigger is `manual`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> running: start_scoping counts iteration 1
+    running --> running: continue_scoping counts a tighter query
+    running --> complete: model stops, limit reached, or refinement unusable or repeated
+    running --> failed: a count fails
+    complete --> [*]
+    failed --> [*]
+```
+
+Caption: a session's end is the only state change. A `complete` session with
+`PRR_TRUST_SCOPE_MODE=auto` may also schedule a collection, described below.
+
+### Collection from the approved scope
+
+Two paths start a Vault collection from a scope:
+
+- **Officer-approved.** The Records Officer starts `queue_vault_collection()` from the
+  Collection tab, or calls `rescope()`. Re-scoping requires a reason of at least
+  `MIN_SUPERSESSION_REASON` characters and a finished current collection. It queues the
+  new collection first, which checks the reviewed count hash, and then supersedes the
+  previous collection's unreviewed records (see
+  [superseding an over-broad collection](#superseding-an-over-broad-collection)).
+- **Automatic, only in trust-scope `auto` mode.** `PRR_TRUST_SCOPE_MODE` defaults to
+  `suggest`. When it is `auto`, `_finish()` schedules `_collect_automatically()` after
+  commit for a finished automatic session. That calls
+  `queue_automatic_vault_collection()` on the final completed count, but only when the
+  count's total is non-zero and the request has no Vault collection yet. The collection
+  is recorded with `trigger=automatic` and no actor. The deposit gate, the targeted-hold
+  rule, and the export into review are the same as for an officer's collection. An
+  officer's re-run never collects by itself.
+
+AGENTS.md rule 11 records the district decision and its volume risk. Its sentence "Unattended
+Vault actions are exactly two" covers the count and this collection path. See
+[advisory AI](advisory-ai.md) for the switches that start the intent proposal.
+
+Focused tests:
+
+- `apps/records/tests/test_scoping.py`: `test_the_agent_reads_the_breakdown_tightens_then_stops`,
+  `test_the_iteration_limit_stops_without_asking_the_model`,
+  `test_a_refinement_with_no_subject_terms_is_unusable`,
+  `test_a_refinement_that_repeats_a_scope_stops`, `test_a_failed_count_fails_the_session`,
+  `test_rerun_needs_a_reason_and_runs_even_when_nothing_changed`, and
+  `test_scoping_only_counts`.
+- `apps/records/tests/test_approve_and_collect.py`: `test_a_finished_automatic_session_collects_its_final_scope`,
+  `test_suggest_mode_collects_nothing`, `test_auto_mode_never_collects_from_an_officers_rerun`,
+  `test_auto_mode_never_adds_a_second_collection`, `test_auto_mode_skips_a_zero_count`, and
+  `test_rescope_supersedes_the_old_collection_and_collects_the_new_scope`.
+
+Minimal validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_scoping apps.records.tests.test_approve_and_collect --settings=config.test_settings`.
 
 ## Change guidance
 
 - Any new Vault operation must sit behind the same count, review hash, and officer
-  gate. Do not widen the automatic path to another operation.
+  gate. Do not widen either unattended path (the automatic count or the `auto` collection) to
+  another operation; AGENTS.md rule 11 lists both.
 - Keep the expected-hash check. It is what stops a collection from running on a
   scope a person did not review.
 - For ingest changes, keep retention before conversion, and keep
