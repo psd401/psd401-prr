@@ -516,7 +516,7 @@ class StaffNotificationSignalTests(TestCase):
     @mock.patch("apps.records.notifications.enqueue_staff_notification")
     @mock.patch(
         "apps.integrations.avigilon.client.create_bookmark_hold",
-        return_value=BookmarkHold(id="bm-1", coverage=(HeadCoverage("0", 1.0),)),
+        return_value=BookmarkHold(id="bm-1", coverage=(HeadCoverage("0", 86_400.0, 86_400.0),)),
     )
     @mock.patch("apps.integrations.avigilon.client.list_device_cameras")
     def test_manual_hold_and_completed_hold_each_emit_one_signal(

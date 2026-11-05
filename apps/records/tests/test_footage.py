@@ -47,10 +47,16 @@ FAKE_GROUPS = [
 ]
 
 
+def head(source, fraction, start, end, error=""):
+    """A head whose stored footage fills ``fraction`` of [start, end)."""
+    span = (end - start).total_seconds()
+    return alta.HeadCoverage(source, fraction * span, span, error)
+
+
 def full_hold(cam, start, end, *, name, description):
     return alta.BookmarkHold(
         id=f"bm-{cam.id}",
-        coverage=tuple(alta.HeadCoverage(source, 1.0) for source in cam.sources),
+        coverage=tuple(head(source, 1.0, start, end) for source in cam.sources),
     )
 
 
@@ -178,6 +184,48 @@ class CalendarDayWindowTests(SimpleTestCase):
 
 
 @override_settings(CELERY_TASK_ALWAYS_EAGER=True, CAMERA_RETENTION_DAYS=10)
+class CoverageScoringTests(SimpleTestCase):
+    NOW = dt.datetime(2026, 11, 5, 18, 0, tzinfo=dt.UTC)
+
+    def test_a_window_still_open_is_scored_on_what_has_happened(self):
+        """Live (2026-11-05): a bookmark from now-10min to now+10min read 50%
+        of its whole span; every second that existed was stored."""
+        start = self.NOW - dt.timedelta(minutes=10)
+        end = self.NOW + dt.timedelta(minutes=10)
+        bookmark = alta.BookmarkHold("bm-1", (alta.HeadCoverage("0", 600.0, 1200.0),))
+
+        fraction, notes, verified = tasks._bookmark_coverage(
+            bookmark, sources=("0",), start=start, end=end, now=self.NOW,
+        )
+
+        self.assertEqual((fraction, notes, verified), (1.0, [], True))
+
+    def test_footage_missing_before_the_oldest_retained_counts_against_the_window(self):
+        start = self.NOW - dt.timedelta(hours=4)
+        end = self.NOW - dt.timedelta(hours=2)
+        bookmark = alta.BookmarkHold("bm-1", (alta.HeadCoverage("0", 3600.0, 3600.0),))
+
+        fraction, _, verified = tasks._bookmark_coverage(
+            bookmark, sources=("0",), start=start, end=end, now=self.NOW,
+        )
+
+        self.assertAlmostEqual(fraction, 0.5)
+        self.assertTrue(verified)
+
+    def test_a_bookmarked_head_with_no_coverage_entry_is_unverified(self):
+        start = self.NOW - dt.timedelta(hours=2)
+        end = self.NOW - dt.timedelta(hours=1)
+        bookmark = alta.BookmarkHold("bm-1", (alta.HeadCoverage("0", 3600.0, 3600.0),))
+
+        fraction, notes, verified = tasks._bookmark_coverage(
+            bookmark, sources=("0", "1"), start=start, end=end, now=self.NOW,
+        )
+
+        self.assertFalse(verified)
+        self.assertEqual(fraction, 0.0)
+        self.assertIn("head 1", " ".join(notes))
+
+
 class HoldPathTests(TestCase):
     def test_hold_triage_retry_reuses_durable_preservation(self):
         prr = make_request(f"camera footage near the office on {days_ago(3)}")
@@ -407,8 +455,8 @@ class HoldPathTests(TestCase):
         def gappy(cam, start, end, *, name, description):
             return alta.BookmarkHold(
                 id="bm-1",
-                coverage=(alta.HeadCoverage("0", 1.0),
-                          alta.HeadCoverage("1", 0.6, "recording gap")),
+                coverage=(head("0", 1.0, start, end),
+                          head("1", 0.6, start, end, "recording gap")),
             )
 
         prr = make_request(f"video at Peninsula High School on {days_ago(2)}")
@@ -421,6 +469,20 @@ class HoldPathTests(TestCase):
         self.assertIn("head 1: 60%", hold.coverage_note)
         self.assertIn("recording gap", hold.coverage_note)
         self.assertEqual(hold.clip_id, "bm-1")
+
+    def test_a_head_aware_did_not_report_is_never_a_clean_hold(self):
+        cam = camera("cam-1", "Multisensor", "PHS", sources=("0", "1"))
+
+        def one_head(cam, start, end, *, name, description):
+            return alta.BookmarkHold(id="bm-1", coverage=(head("0", 1.0, start, end),))
+
+        prr = make_request(f"video at Peninsula High School on {days_ago(2)}")
+        with aware([cam], hold=one_head):
+            fp = preserve(prr)
+
+        hold = fp.camera_holds.get()
+        self.assertEqual(hold.state, CameraHold.State.GAP)
+        self.assertIn("head 1", hold.coverage_note)
 
     def test_empty_coverage_report_is_never_a_clean_hold(self):
         def silent(cam, start, end, *, name, description):
@@ -915,7 +977,7 @@ class ConfirmationTextTests(TestCase):
             if cam.id == "cam-2":
                 raise alta.AltaError("Aware refused the bookmark")
             if cam.id == "cam-3":
-                return alta.BookmarkHold("bm-cam-3", (alta.HeadCoverage("0", 0.5),))
+                return alta.BookmarkHold("bm-cam-3", (head("0", 0.5, start, end),))
             return full_hold(cam, start, end, name=name, description=description)
 
         fp = self._preserve("gym video on 2026-09-22", hold=gap_and_failure)
@@ -1211,7 +1273,7 @@ class ReleaseGateTests(TestCase):
         def gap_on_cam_3(cam, start, end, *, name, description):
             if cam.id == "cam-3":
                 return alta.BookmarkHold(
-                    id="bm-cam-3", coverage=(alta.HeadCoverage("0", 0.4),),
+                    id="bm-cam-3", coverage=(head("0", 0.4, start, end),),
                 )
             if cam.id == "cam-2":
                 raise alta.AltaError("Aware refused the bookmark")

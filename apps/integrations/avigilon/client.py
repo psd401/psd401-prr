@@ -146,9 +146,23 @@ class DeviceGroup:
 
 @dataclass(frozen=True)
 class HeadCoverage:
+    """One head's stored footage inside the bookmarked span [start, end).
+
+    ``span_seconds`` is the whole span, future included. ``covered_seconds``
+    counts only stored footage, so it can never pass the moment it was read:
+    the caller scores coverage of the part of a window that has happened."""
+
     source: str
-    covered_fraction: float       # 0.0..1.0 of the requested window found in store
+    covered_seconds: float        # stored footage found in the span
+    span_seconds: float           # length of the bookmarked span
     error: str = ""               # why coverage could not be confirmed, if it could not
+
+    @property
+    def covered_fraction(self) -> float:
+        """Share of the whole span stored; 0..1."""
+        if self.span_seconds <= 0:
+            return 0.0
+        return max(0.0, min(1.0, self.covered_seconds / self.span_seconds))
 
 
 @dataclass(frozen=True)
@@ -769,7 +783,7 @@ def _covered_seconds(intervals: list[tuple[dt.datetime, dt.datetime]]) -> float:
     return covered
 
 
-def _covered_fraction(
+def _stored_seconds(
     api: _Api, camera: Camera, sid: str, start: dt.datetime, end: dt.datetime
 ) -> float:
     now = _now()
@@ -813,16 +827,16 @@ def _covered_fraction(
             if high > low:
                 intervals.append((low, high))
         chunk_start = chunk_end
-    total = (end - start).total_seconds()
-    return max(0.0, min(1.0, _covered_seconds(intervals) / total))
+    return _covered_seconds(intervals)
 
 
 def _head_coverage(
     api: _Api, camera: Camera, sid: str, start: dt.datetime, end: dt.datetime
 ) -> HeadCoverage:
     """One head's coverage. Never raises: the bookmark already exists."""
+    span = (end - start).total_seconds()
     try:
-        return HeadCoverage(sid, _covered_fraction(api, camera, sid, start, end))
+        return HeadCoverage(sid, _stored_seconds(api, camera, sid, start, end), span)
     except Exception as exc:  # noqa: BLE001 - reported on the result instead
         reason = str(exc) if isinstance(exc, AltaError) else type(exc).__name__
         logger.warning(
@@ -831,7 +845,7 @@ def _head_coverage(
             camera.id,
             reason,
         )
-        return HeadCoverage(sid, 0.0, f"Coverage could not be read: {reason}"[:300])
+        return HeadCoverage(sid, 0.0, span, f"Coverage could not be read: {reason}"[:300])
 
 
 def _coverage(
@@ -863,7 +877,7 @@ def create_bookmark_hold(
         )
         measured = _coverage(api, camera, start_utc, end_utc)
     skipped = tuple(
-        HeadCoverage(sid, 0.0, SKIPPED_HEAD_ERROR)
+        HeadCoverage(sid, 0.0, (end_utc - start_utc).total_seconds(), SKIPPED_HEAD_ERROR)
         for sid in dict.fromkeys(camera.skipped_sources)
         if sid not in camera.sources
     )

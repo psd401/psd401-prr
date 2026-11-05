@@ -310,18 +310,20 @@ class CoverageTests(_BookmarkTestCase):
     def test_full_coverage(self):
         (head,) = self._coverage({"1": [(START - dt.timedelta(hours=1), END + dt.timedelta(hours=1))]})
 
-        self.assertEqual(head, client.HeadCoverage("1", 1.0))
+        self.assertEqual(head, client.HeadCoverage("1", 3600.0, 3600.0))
+        self.assertEqual(head.covered_fraction, 1.0)
 
     def test_partial_coverage(self):
         (head,) = self._coverage({"1": [(START, START + dt.timedelta(minutes=30))]})
 
-        self.assertEqual(head, client.HeadCoverage("1", 0.5))
+        self.assertEqual(head, client.HeadCoverage("1", 1800.0, 3600.0))
+        self.assertEqual(head.covered_fraction, 0.5)
 
     def test_no_coverage(self):
         """An explicit empty stores list is a confirmed 0%, with no error."""
         (head,) = self._coverage({})
 
-        self.assertEqual(head, client.HeadCoverage("1", 0.0))
+        self.assertEqual(head, client.HeadCoverage("1", 0.0, 3600.0))
 
     def test_a_timeline_without_stores_is_unconfirmed_not_zero(self):
         self.tenant.on("POST", TIMELINE, {"timeline": []})
@@ -340,9 +342,9 @@ class CoverageTests(_BookmarkTestCase):
         self.assertEqual(
             coverage,
             (
-                client.HeadCoverage("1", 1.0),
-                client.HeadCoverage("2", 0.25),
-                client.HeadCoverage("3", 0.0),
+                client.HeadCoverage("1", 3600.0, 3600.0),
+                client.HeadCoverage("2", 900.0, 3600.0),
+                client.HeadCoverage("3", 0.0, 3600.0),
             ),
         )
 
@@ -370,6 +372,18 @@ class CoverageTests(_BookmarkTestCase):
             (head,) = self._coverage({"1": [(START, None)]})
 
         self.assertAlmostEqual(head.covered_fraction, 0.75)
+        self.assertAlmostEqual(head.covered_seconds, 2700.0)
+
+    def test_the_span_is_the_whole_bookmark_and_footage_stops_at_now(self):
+        """Live (2026-11-05): a bookmark from now-10min to now+10min read 50%.
+        The client reports the seconds; the caller scores what has happened."""
+        now = client._now()
+        start, end = now - dt.timedelta(minutes=10), now + dt.timedelta(minutes=10)
+
+        (head,) = self._coverage({"1": [(start, None)]}, start=start, end=end)
+
+        self.assertEqual(head, client.HeadCoverage("1", 600.0, 1200.0))
+        self.assertEqual(head.covered_fraction, 0.5)
 
     def test_the_timeline_request(self):
         self._coverage({}, camera=_camera("2"))
@@ -415,7 +429,7 @@ class CoverageTests(_BookmarkTestCase):
 
         (head,) = self._hold().coverage
 
-        self.assertEqual(head, client.HeadCoverage("1", 1.0))
+        self.assertEqual(head, client.HeadCoverage("1", 3600.0, 3600.0))
 
     def test_unreadable_coverage_is_reported_never_raised(self):
         answers = {
@@ -438,7 +452,8 @@ class CoverageTests(_BookmarkTestCase):
                 self.assertEqual(hold.id, "bm-1")
                 (head,) = hold.coverage
                 self.assertEqual(head.source, "1")
-                self.assertEqual(head.covered_fraction, 0.0)
+                self.assertEqual(head.covered_seconds, 0.0)
+                self.assertEqual(head.span_seconds, 3600.0)
                 self.assertTrue(head.error)
 
     def test_a_streamless_head_is_a_gap_in_coverage_but_not_bookmarked(self):
@@ -452,9 +467,9 @@ class CoverageTests(_BookmarkTestCase):
         self.assertEqual(
             coverage,
             (
-                client.HeadCoverage("1", 1.0),
-                client.HeadCoverage("2", 0.0, client.SKIPPED_HEAD_ERROR),
-                client.HeadCoverage("3", 0.0, client.SKIPPED_HEAD_ERROR),
+                client.HeadCoverage("1", 3600.0, 3600.0),
+                client.HeadCoverage("2", 0.0, 3600.0, client.SKIPPED_HEAD_ERROR),
+                client.HeadCoverage("3", 0.0, 3600.0, client.SKIPPED_HEAD_ERROR),
             ),
         )
         self.assertEqual(
@@ -471,7 +486,7 @@ class CoverageTests(_BookmarkTestCase):
         coverage = self._coverage({"1": [(START, END)]}, camera=camera)
 
         self.assertEqual([c.source for c in coverage], ["1", "2"])
-        self.assertEqual(coverage[0], client.HeadCoverage("1", 1.0))
+        self.assertEqual(coverage[0], client.HeadCoverage("1", 3600.0, 3600.0))
 
     def test_one_unreadable_head_does_not_hide_the_others(self):
         def answer(record):
@@ -484,7 +499,7 @@ class CoverageTests(_BookmarkTestCase):
 
         first, second = self._hold(_camera("1", "2")).coverage
 
-        self.assertEqual(first, client.HeadCoverage("1", 1.0))
+        self.assertEqual(first, client.HeadCoverage("1", 3600.0, 3600.0))
         self.assertEqual(second.covered_fraction, 0.0)
         self.assertIn("BAD_REQUEST", second.error)
 

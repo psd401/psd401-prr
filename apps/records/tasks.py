@@ -910,30 +910,38 @@ def _local_time(value) -> str:
     return f"{timezone.localtime(value):%Y-%m-%d %H:%M} Pacific"
 
 
-def _bookmark_coverage(bookmark, *, start, hold_start, end, now):
+def _bookmark_coverage(bookmark, *, sources, start, end, now):
     """Return (lowest share of the REQUESTED window that footage covers
     across the camera's heads, a note per short or erroring head, whether
     every head's coverage was verified).
 
-    Aware reports each head's coverage of the bookmarked span
-    [hold_start, end). Scale that to the requested window, counting only the
-    part that had happened when the hold ran. All arguments are UTC."""
+    Each head reports the seconds of footage Aware stores inside the
+    bookmark. Score them against the requested window [start, end) up to
+    ``now``: footage after now cannot exist yet, and footage before the
+    bookmark start (the oldest retained) is gone, so it counts against the
+    window. A bookmarked head with no report is unverified. All arguments
+    are UTC."""
     if not bookmark.coverage:
         return 0.0, ["no per-head coverage reported by Aware; check the bookmark"], False
-    span = (min(end, now) - start).total_seconds()
-    if span <= 0:
-        span = (end - start).total_seconds()
-    bookmarked = (end - hold_start).total_seconds()
+    elapsed = (min(end, now) - start).total_seconds()
+    if elapsed <= 0:
+        elapsed = (end - start).total_seconds()
     fractions, notes = [], []
     for head in bookmark.coverage:
-        fraction = min(1.0, max(0.0, head.covered_fraction) * bookmarked / span)
+        fraction = min(1.0, max(0.0, head.covered_seconds) / elapsed)
         fractions.append(fraction)
         if fraction < FULL_COVERAGE or head.error:
             note = f"head {head.source}: {fraction:.0%}"
             if head.error:
                 note += f" ({head.error})"
             notes.append(note)
-    return min(fractions), notes, not any(head.error for head in bookmark.coverage)
+    reported = {head.source for head in bookmark.coverage}
+    unreported = [sid for sid in dict.fromkeys(sources) if sid not in reported]
+    for sid in unreported:
+        fractions.append(0.0)
+        notes.append(f"head {sid}: no coverage reported by Aware")
+    verified = not unreported and not any(head.error for head in bookmark.coverage)
+    return min(fractions), notes, verified
 
 
 def _hold_one_camera(fp, cam, ch, *, now) -> None:
@@ -991,7 +999,7 @@ def _hold_one_camera(fp, cam, ch, *, now) -> None:
         return
 
     fraction, head_notes, verified = _bookmark_coverage(
-        bookmark, start=start, hold_start=hold_start, end=end, now=now,
+        bookmark, sources=cam.sources, start=start, end=end, now=now,
     )
     ch.clip_id = bookmark.id
     ch.coverage_fraction = fraction
