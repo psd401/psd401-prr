@@ -1149,13 +1149,38 @@ def sweep_stalled_footage_holds() -> int:
     )
 
 
+WIDEN_STOPPED_ERROR = (
+    "Widening the hold district-wide stopped before it finished, so some "
+    "cameras outside the original sites may not be bookmarked"
+)
+
+
 @shared_task
-def execute_footage_hold(preservation_id: int):
-    """Run the hold; whatever happens, never leave it PENDING."""
+def execute_footage_hold(preservation_id: int, only_new: bool = False):
+    """Run the hold; whatever happens, never leave it PENDING. ``only_new``
+    (a widen) bookmarks only cameras with no hold row yet."""
     try:
-        _execute_footage_hold(preservation_id)
+        _execute_footage_hold(preservation_id, only_new=only_new)
+    except Exception:
+        if only_new:
+            _widen_stopped(preservation_id)
+        raise
     finally:
         _never_leave_pending(preservation_id)
+
+
+def _widen_stopped(preservation_id: int) -> None:
+    """A widen is not PENDING, so the PENDING backstops never see it stop."""
+    from .models import FootagePreservation
+
+    try:
+        fp = FootagePreservation.objects.select_related("request").get(pk=preservation_id)
+        _notify_manual_hold(
+            fp, reason="widened hold stopped before it finished",
+            error=WIDEN_STOPPED_ERROR, site_codes=[], condition="widen-stopped",
+        )
+    except Exception:  # keep the original error
+        logger.exception("Could not report widened footage hold %s", preservation_id)
 
 
 def _never_leave_pending(preservation_id: int) -> None:
@@ -1171,7 +1196,7 @@ def _never_leave_pending(preservation_id: int) -> None:
         logger.exception("Could not move footage hold %s off PENDING", preservation_id)
 
 
-def _execute_footage_hold(preservation_id: int):
+def _execute_footage_hold(preservation_id: int, *, only_new: bool = False):
     """Bookmark every in-scope camera for the requested window: each camera at
     the sites the request names, or every camera district-wide when it names
     none. Broad by default — narrowing is a human decision
@@ -1266,7 +1291,7 @@ def _execute_footage_hold(preservation_id: int):
     now = timezone.now()
     skip = {CameraHold.State.RELEASED, *CameraHold.BOOKMARKED_STATES}
     for cam in scoped:  # serial: one Aware bookmark at a time
-        ch, _ = CameraHold.objects.get_or_create(
+        ch, created = CameraHold.objects.get_or_create(
             preservation=fp,
             camera_id=str(cam.id)[:100],
             defaults={
@@ -1276,7 +1301,9 @@ def _execute_footage_hold(preservation_id: int):
             },
         )
         # A recorded bookmark id means the bookmark exists: never make another.
-        if ch.state in skip or ch.clip_id or ch.excluded_at is not None:
+        # A widen touches only cameras never tried before.
+        if (only_new and not created) or ch.state in skip or ch.clip_id \
+                or ch.excluded_at is not None:
             continue
         _hold_one_camera(fp, cam, ch, now=now)
 

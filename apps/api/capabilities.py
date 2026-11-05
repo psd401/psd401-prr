@@ -901,6 +901,23 @@ CAPABILITIES = (
         ],
     ),
     _capability(
+        "preservations.widen",
+        (
+            "Widen a site-narrowed footage preservation hold to every camera "
+            "district-wide, with a reason."
+        ),
+        "POST",
+        "/api/staff/preservations/{id}/widen/",
+        ["/requests/:number/collection"],
+        risk="moderate",
+        mcp_tool=None,
+        constraints=[
+            "records_officer_authority",
+            "substantive_reason",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
         "preservations.release",
         (
             "Release a closed request's footage preservation hold, deleting "

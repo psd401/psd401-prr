@@ -404,6 +404,74 @@ def exclude_camera(camera_hold, reason: str, *, actor=None):
     return camera_hold
 
 
+def _reason_text(reason) -> str:
+    """A reason must be text. Anything else (a list, a number, a JSON object
+    from an API body) is refused like an empty one, never coerced."""
+    if reason is None:
+        return ""
+    if not isinstance(reason, str):
+        raise ValueError("A reason must be text.")
+    return reason.strip()
+
+
+WIDEN_REASON_MAX_LENGTH = 500
+
+
+@transaction.atomic
+def widen_preservation(
+    preservation: FootagePreservation, *, actor, reason,
+) -> FootagePreservation:
+    """Widen a site-narrowed hold to every camera district-wide. Widening
+    only preserves more, so it needs a current Records Officer and a reason
+    but no handoff. The hold task then bookmarks only cameras that have no
+    hold row yet: a camera already tried keeps its outcome, and a failed
+    create that may have landed is never repeated."""
+    from .tasks import execute_footage_hold  # avoid circular import
+
+    actor = _require_current_records_officer(
+        actor=actor,
+        message="Current Records Officer authority is required to widen a hold.",
+    )
+    reason = _reason_text(reason)
+    if len(reason) < 10:
+        raise ValueError(
+            "Widening a preservation hold requires a substantive reason (e.g. "
+            "'request also names the bus loop beside the gym')."
+        )
+    if len(reason) > WIDEN_REASON_MAX_LENGTH:
+        raise ValueError(
+            "A widen reason must contain at most "
+            f"{WIDEN_REASON_MAX_LENGTH} characters."
+        )
+    fp = FootagePreservation.objects.select_for_update().select_related(
+        "request",
+    ).get(pk=preservation.pk)
+    if fp.state == FootagePreservation.State.RELEASED:
+        raise ValueError("A released preservation cannot be widened.")
+    if not fp.site_codes:
+        raise ValueError("This hold already covers every camera district-wide.")
+
+    previous = list(fp.site_codes)
+    fp.site_codes = []
+    fp.site_resolution = (
+        f"Widened district-wide from {describe_sites(previous)} by "
+        f"{actor.get_username()}: {reason}"
+    )[:500]
+    fp.save(update_fields=["site_codes", "site_resolution"])
+    audit("footage.hold_widened", target=fp.request.number, actor=actor,
+          previous_sites=previous, reason=reason)
+    StatusEvent.objects.create(
+        request=fp.request,
+        actor=actor,
+        note=(
+            f"Footage hold widened from {describe_sites(previous)} to every "
+            f"camera district-wide. Reason: {reason}"
+        ),
+    )
+    transaction.on_commit(lambda: execute_footage_hold.delay(fp.id, only_new=True))
+    return fp
+
+
 RELEASABLE_PRESERVATION_STATES = (
     FootagePreservation.State.HELD,
     FootagePreservation.State.PARTIAL,

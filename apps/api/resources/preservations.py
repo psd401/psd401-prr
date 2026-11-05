@@ -33,14 +33,19 @@ class PreservationSerializer(serializers.ModelSerializer):
     released_by = serializers.SerializerMethodField()
     request_closed = serializers.SerializerMethodField()
     confirmation_text = serializers.SerializerMethodField()
+    widenable = serializers.SerializerMethodField()
 
     class Meta:
         model = FootagePreservation
         fields = ["id", "request_number", "state", "window_start", "window_end",
                   "detected_dates_note", "site_codes", "site_resolution",
                   "held_count", "camera_holds", "confirmation_text",
-                  "request_closed", "released_at", "released_by",
+                  "request_closed", "widenable", "released_at", "released_by",
                   "release_reason"]
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_widenable(self, obj):
+        return bool(obj.site_codes) and obj.state != FootagePreservation.State.RELEASED
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_released_by(self, obj):
@@ -69,6 +74,7 @@ class PreservationViewSet(viewsets.ReadOnlyModelViewSet):
         "retrieve": {StaffRole.RECORDS_OFFICER, StaffRole.ADMIN},
         "exclude_camera": {StaffRole.RECORDS_OFFICER},
         "release": {StaffRole.RECORDS_OFFICER},
+        "widen": {StaffRole.RECORDS_OFFICER},
     }
 
     def get_queryset(self):
@@ -129,6 +135,21 @@ class PreservationViewSet(viewsets.ReadOnlyModelViewSet):
                 attest_no_litigation_hold=request.data.get(
                     "attest_no_litigation_hold"
                 ),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            PreservationSerializer(self.get_queryset().get(pk=preservation.pk)).data
+        )
+
+    @action(detail=True, methods=["post"], url_path="widen")
+    def widen(self, request, pk=None):
+        # Widening only preserves more, so it is not a human-only handoff.
+        preservation = self.get_object()
+        try:
+            triage.widen_preservation(
+                preservation, actor=request.user, reason=request.data.get("reason"),
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

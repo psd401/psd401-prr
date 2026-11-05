@@ -378,6 +378,72 @@ class PreservationApiTests(TestCase):
         self.fp.refresh_from_db()
         self.assertEqual(self.fp.state, FootagePreservation.State.HELD)
 
+    # -- widen action --------------------------------------------------------
+
+    WIDEN_REASON = "Request also names the bus loop beside the gym."
+
+    def _narrow_to_phs(self):
+        FootagePreservation.objects.filter(pk=self.fp.pk).update(site_codes=["PHS"])
+
+    def _widen(self, reason=WIDEN_REASON):
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.client.post(
+                f"/api/staff/preservations/{self.fp.id}/widen/",
+                {"reason": reason},
+                content_type="application/json",
+            )
+
+    @mock.patch("apps.records.tasks.execute_footage_hold.delay")
+    def test_widen_happy_path_returns_the_updated_preservation(self, delay):
+        self._narrow_to_phs()
+
+        response = self._widen()
+
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertEqual(body["id"], self.fp.id)
+        self.assertEqual(body["site_codes"], [])
+        self.assertFalse(body["widenable"])
+        delay.assert_called_once_with(self.fp.id, only_new=True)
+
+    @mock.patch("apps.records.tasks.execute_footage_hold.delay")
+    def test_widen_rejects_a_thin_or_non_string_reason(self, delay):
+        self._narrow_to_phs()
+        for reason in ("short", ["a list is not a reason"], {"a": "b"}, 1234567890123):
+            with self.subTest(reason=reason):
+                response = self._widen(reason=reason)
+                self.assertEqual(response.status_code, 400)
+        delay.assert_not_called()
+        self.fp.refresh_from_db()
+        self.assertEqual(self.fp.site_codes, ["PHS"])
+
+    @mock.patch("apps.records.tasks.execute_footage_hold.delay")
+    def test_widen_refuses_an_already_district_wide_hold(self, delay):
+        response = self._widen()
+        self.assertEqual(response.status_code, 400)
+        delay.assert_not_called()
+
+    @override_settings(PRR_LOCAL_IMPLICIT_STAFF_ROLES=())
+    @mock.patch("apps.records.tasks.execute_footage_hold.delay")
+    def test_widen_is_records_officer_only(self, delay):
+        self._narrow_to_phs()
+        apply_staff_roles(self.officer, {StaffRole.ADMIN})
+
+        response = self._widen()
+
+        self.assertEqual(response.status_code, 403)
+        delay.assert_not_called()
+
+    def test_widenable_reflects_scope_and_release(self):
+        url = f"/api/staff/preservations/{self.fp.id}/"
+        self.assertFalse(self.client.get(url).json()["widenable"])
+        self._narrow_to_phs()
+        self.assertTrue(self.client.get(url).json()["widenable"])
+        FootagePreservation.objects.filter(pk=self.fp.pk).update(
+            state=FootagePreservation.State.RELEASED,
+        )
+        self.assertFalse(self.client.get(url).json()["widenable"])
+
     # -- read-only enforcement --------------------------------------------
 
     def test_create_not_allowed(self):

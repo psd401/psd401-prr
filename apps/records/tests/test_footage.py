@@ -1002,6 +1002,112 @@ class SiteScopeNoticeTests(TestCase):
     CAMERA_RETENTION_DAYS=10,
     PRR_LOCAL_IMPLICIT_STAFF_ROLES=(),
 )
+class WidenTests(TestCase):
+    """A Records Officer widens a site-narrowed hold to every camera."""
+
+    REASON = "Request also names the bus loop and the district office lot."
+
+    def _officer(self):
+        officer = get_user_model().objects.create_user(
+            f"widen-officer-{get_user_model().objects.count()}",
+            password="pw", is_staff=True,
+        )
+        apply_staff_roles(officer, {StaffRole.RECORDS_OFFICER})
+        return officer
+
+    def _phs_hold(self, hold=full_hold):
+        prr = make_request(f"video at Peninsula High School on {days_ago(3)}")
+        with aware(hold=hold), mock.patch(NARROWED):
+            fp = preserve(prr)
+        self.assertEqual(fp.site_codes, ["PHS"])
+        return fp
+
+    def _widen(self, fp, reason=REASON, actor=None):
+        with self.captureOnCommitCallbacks(execute=True):
+            return triage.widen_preservation(
+                fp, reason=reason, actor=actor or self._officer(),
+            )
+
+    def test_widen_holds_district_wide_only_for_cameras_with_no_row(self):
+        fp = self._phs_hold()
+        with aware() as m:
+            fp = self._widen(fp)
+
+        fp.refresh_from_db()
+        self.assertEqual(fp.site_codes, [])
+        self.assertIn("district-wide", fp.site_resolution)
+        self.assertEqual([c.args[0].id for c in m.hold.call_args_list], ["cam-3"])
+        self.assertEqual(fp.held_count, 3)
+        self.assertEqual(fp.state, FootagePreservation.State.HELD)
+        self.assertTrue(fp.request.events.filter(note__contains=self.REASON).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(action="footage.hold_widened",
+                                    target=fp.request.number).exists()
+        )
+
+    def test_widen_never_retries_a_camera_that_already_has_a_row(self):
+        # A failed create may have landed; a widen must not make a second one.
+        def fail_cam_2(cam, start, end, *, name, description):
+            if cam.id == "cam-2":
+                raise alta.AltaWriteUncertain("timed out")
+            return full_hold(cam, start, end, name=name, description=description)
+
+        fp = self._phs_hold(hold=fail_cam_2)
+        with aware() as m:
+            self._widen(fp)
+
+        self.assertEqual([c.args[0].id for c in m.hold.call_args_list], ["cam-3"])
+        self.assertEqual(
+            fp.camera_holds.get(camera_id="cam-2").state, CameraHold.State.FAILED,
+        )
+
+    def test_widen_requires_a_substantive_string_reason(self):
+        fp = self._phs_hold()
+        for bad in ("", "   ", "n/a", None, ["a long enough reason"], 12345678901):
+            with self.subTest(reason=bad), self.assertRaises(ValueError):
+                self._widen(fp, reason=bad)
+        with self.assertRaises(ValueError):
+            self._widen(fp, reason="x" * 501)
+        fp.refresh_from_db()
+        self.assertEqual(fp.site_codes, ["PHS"])
+
+    def test_widen_requires_a_current_records_officer(self):
+        fp = self._phs_hold()
+        clerk = get_user_model().objects.create_user("clerk", password="pw", is_staff=True)
+        with self.assertRaises(PermissionDenied):
+            self._widen(fp, actor=clerk)
+
+    def test_widen_refuses_a_district_wide_or_released_hold(self):
+        prr = make_request(f"camera footage of the gym entrance on {days_ago(3)}")
+        with aware():
+            wide = preserve(prr)
+        with self.assertRaises(ValueError):
+            self._widen(wide)
+
+        fp = self._phs_hold()
+        FootagePreservation.objects.filter(pk=fp.pk).update(
+            state=FootagePreservation.State.RELEASED,
+        )
+        with self.assertRaises(ValueError):
+            self._widen(fp)
+
+    def test_a_widen_run_that_crashes_sends_an_urgent_manual_notice(self):
+        fp = self._phs_hold()
+        with aware(), \
+             mock.patch("apps.records.tasks._hold_one_camera", side_effect=RuntimeError("boom")), \
+             mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold") as manual, \
+             contextlib.suppress(RuntimeError):
+            self._widen(fp)
+
+        manual.assert_called()
+        self.assertIn("widen", manual.call_args.kwargs["error"].lower())
+
+
+@override_settings(
+    CELERY_TASK_ALWAYS_EAGER=True,
+    CAMERA_RETENTION_DAYS=10,
+    PRR_LOCAL_IMPLICIT_STAFF_ROLES=(),
+)
 class ExclusionGateTests(TestCase):
     def _records_officer(self):
         officer = get_user_model().objects.create_user(
