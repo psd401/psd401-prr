@@ -21,8 +21,12 @@ function renderWithClient(ui: ReactNode, client: QueryClient) {
   )
 }
 
-function invalidatedKeys(spy: ReturnType<typeof vi.spyOn>) {
-  return spy.mock.calls.map(([filters]) => (filters as { queryKey?: unknown[] })?.queryKey)
+function spyOnInvalidate(client: QueryClient) {
+  return vi.spyOn(client, 'invalidateQueries')
+}
+
+function invalidatedKeys(spy: ReturnType<typeof spyOnInvalidate>) {
+  return spy.mock.calls.map(([filters]) => filters?.queryKey)
 }
 
 afterEach(() => {
@@ -307,7 +311,7 @@ describe('Preservations — cache refresh after a change', () => {
       return fakeResponse(page([heldPreservation()]))
     }))
     const client = queryClient()
-    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const invalidate = spyOnInvalidate(client)
     const user = userEvent.setup()
     renderWithClient(<Preservations roles={['records_officer']} />, client)
 
@@ -332,12 +336,12 @@ describe('Preservations — cache refresh after a change', () => {
       return fakeResponse(page([heldPreservation({ request_closed: false, releasable: false })]))
     }))
     const client = queryClient()
-    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const invalidate = spyOnInvalidate(client)
     const user = userEvent.setup()
     renderWithClient(<Preservations roles={['records_officer']} />, client)
 
     await screen.findByText('Staff Parking')
-    await user.click(screen.getAllByRole('button', { name: 'Exclude' })[1])
+    await user.click(screen.getAllByRole('button', { name: 'Exclude' })[1]!)
     const dialog = await screen.findByRole('dialog')
     await user.type(within(dialog).getByLabelText(/Reason/), 'Camera faces a private office.')
     await user.click(within(dialog).getByRole('button', { name: 'Exclude camera' }))
