@@ -114,6 +114,29 @@ a completed `responsive` or `non_responsive` recommendation to reduce clerical
 work, but it never submits it. A named reviewer must still press the confirmation
 control; changing the selection always wins over a later model result.
 
+## Iterative scoping
+
+A request-intent proposal (schema v7) may also name `custodians` (district
+mailboxes), `sender_domains`, `exclude_senders` (typically the knowledge
+pack's noise senders), and a `scope_rationale`. `vault_query_from_intent` turns
+senders into Vault Gmail syntax: `(from:a OR from:b)` and `-from:x`.
+
+When the automatic intent count runs, it opens a `ScopingSession`
+(`apps/records/scoping.py`). Count 1 is the proposal: the named district
+mailboxes (the `accounts` scope) when there are any, otherwise the whole
+district; a custodian outside the district is never counted. When a count
+finishes, the agent sees every iteration -- query, total, and the busiest
+custodian accounts (Vault counts give no sender breakdown) -- with the noise
+senders, and either stops or proposes a tighter query with its reason, which is
+counted next. Scoping stops at `PRR_INTENT_MAX_COUNT_ITERATIONS` (in-app,
+default 4), when the agent says stop, when a refinement is unusable or repeats
+an earlier scope, or when a count fails; the last completed count is the
+proposed scope. The Collection tab's **Scope iterations** card shows the trail
+(`requests.scoping.read`); **Re-run scoping** (`requests.scoping.rerun`) starts
+a fresh session from the latest intent proposal, with the officer and a reason
+recorded, even when nothing changed. Counts only: no hold, export, collection,
+or status change.
+
 ## Intake classification suggests; an officer decides
 
 When `PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED` is on, every new case

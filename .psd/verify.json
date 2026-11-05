@@ -52,7 +52,8 @@
     "reviewer-cluster-approve-sampled",
     "reviewer-elusion-signoff",
     "reviewer-redaction-group-accept",
-    "reviewer-keyboard-flight"
+    "reviewer-keyboard-flight",
+    "officer-scope-iterations"
   ],
   "e2e_screenshots": {
     "staff-login-open-case": [
@@ -247,6 +248,10 @@
     "reviewer-keyboard-flight": [
       "reviewer-keyboard-flight.png",
       "reviewer-keyboard-flight-decided.png"
+    ],
+    "officer-scope-iterations": [
+      "officer-scope-iterations.png",
+      "officer-scope-rerun-refused.png"
     ]
   },
   "strictness": "block",

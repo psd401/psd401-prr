@@ -1,6 +1,6 @@
 {
   "pyright": "1.1.414",
-  "total": 1826,
+  "total": 1825,
   "files": {
     "apps/api/access_tokens.py": 2,
     "apps/api/advisory.py": 1,
@@ -193,7 +193,7 @@
     "apps/records/tests/test_requester_correction.py": 10,
     "apps/records/tests/test_retire_closed_case_inbox_rows.py": 2,
     "apps/records/tests/test_review_throughput.py": 18,
-    "apps/records/tests/test_scope_conversation.py": 11,
+    "apps/records/tests/test_scope_conversation.py": 10,
     "apps/records/tests/test_services.py": 17,
     "apps/records/tests/test_staff_notifications.py": 13,
     "apps/records/tests/test_systems.py": 2,

@@ -1046,6 +1046,58 @@ def _seed_estimate_letter_case(officer):
     return request
 
 
+def _seed_scoping_session(officer, request):
+    """A finished two-count scoping session (#36), written rather than run:
+    Vault and AI are off in acceptance runs. Counts only."""
+    from apps.records.models import ScopeIteration, ScopingSession
+
+    session = ScopingSession.objects.create(
+        request=request,
+        trigger=ScopingSession.Trigger.AUTOMATIC,
+        state=ScopingSession.State.COMPLETE,
+        max_iterations=4,
+        stop_reason="The scope is now specific to enrollment planning mail.",
+        completed_at=_BASE_TIME,
+    )
+    steps = (
+        (1, '"enrollment plan" AND ("spring" OR "projection")', "entire_org", [], 2340,
+         [{"email": "communications@psd401.net", "count": 1510}, {"email": "enrollment@psd401.net", "count": 610}],
+         "The request asks about spring enrollment planning."),
+        (2, '"enrollment plan" AND ("spring" OR "projection") AND -from:newsletter.example',
+         "accounts", ["enrollment@psd401.net"], 412,
+         [{"email": "enrollment@psd401.net", "count": 412}],
+         ("Most matches were the district newsletter in the communications mailbox; "
+         "count the enrollment office and leave the newsletter out.")),
+    )
+    for number, terms, scope, custodians, total, accounts, reason in steps:
+        run = VaultCountRun.objects.create(
+            request=request,
+            trigger=VaultCountRun.Trigger.AUTOMATIC,
+            state=VaultCountRun.State.COMPLETE,
+            search_scope=scope,
+            terms=terms,
+            custodian_emails=custodians,
+            input_sha256=hashlib.sha256(terms.encode()).hexdigest(),
+            total_count=total,
+            account_counts=accounts,
+            completed_at=_BASE_TIME,
+        )
+        ScopeIteration.objects.create(
+            session=session, number=number, count_run=run, reason=reason,
+            custodians=custodians,
+        )
+    AdvisoryRun.objects.create(
+        kind=AdvisoryRun.Kind.REQUEST_INTENT,
+        request=request,
+        model_identifier="synthetic-intent-model",
+        input_sha256=hashlib.sha256(b"trust-intent").hexdigest(),
+        state=AdvisoryRun.State.COMPLETE,
+        requested_by=officer,
+        proposal={"summary": "Spring enrollment planning mail.",
+                  "required_search_terms": ["enrollment plan"], "search_terms": ["spring"]},
+    )
+
+
 def _seed_trust_ladder_case(officer):
     """Seed the case the sampled-batch and elusion flows decide.
 
@@ -1070,6 +1122,7 @@ def _seed_trust_ladder_case(officer):
     )
     if not created:
         return request
+    _seed_scoping_session(officer, request)
     sets = (
         ("trust-newsletter", FIXTURE_TRUST_CLUSTER_DOMAIN, FIXTURE_TRUST_CLUSTER_COUNT, 0.6),
         ("trust-ad", FIXTURE_TRUST_DISCARD_DOMAIN, FIXTURE_TRUST_DISCARD_COUNT, 0.97),

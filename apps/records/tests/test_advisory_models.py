@@ -115,7 +115,11 @@ class PerKindModelTests(TestCase):
         self.assertEqual(run.state, AdvisoryRun.State.COMPLETE)
 
     def test_every_kind_has_an_output_budget(self):
-        self.assertEqual(set(MAX_OUTPUT_TOKENS), set(AdvisoryRun.Kind.values))
+        # Scope refinement (#36) is a model call with no AdvisoryRun row of
+        # its own; it is the one budget that is not an advisory kind.
+        from apps.records.advisory_ai import SCOPE_REFINEMENT
+
+        self.assertEqual(set(MAX_OUTPUT_TOKENS), set(AdvisoryRun.Kind.values) | {SCOPE_REFINEMENT})
 
     def test_an_explicit_model_overrides_the_kind_setting(self):
         with patch("apps.records.advisory_ai.boto3.client") as client_factory:

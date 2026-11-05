@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import math
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -110,7 +111,7 @@ _BEDROCK_MAX_DOCUMENTS = 5
 _BEDROCK_MAX_DOCUMENT_BYTES = int(4.5 * 1024 * 1024)
 _BEDROCK_MAX_IMAGES = 20
 _BEDROCK_MAX_IMAGE_BYTES = int(3.75 * 1024 * 1024)
-_REQUEST_INTENT_SCHEMA_VERSION = 6
+_REQUEST_INTENT_SCHEMA_VERSION = 7
 # A registry checklist or search note longer than this is cut before it is
 # offered; one long checklist must not crowd out every other system.
 _REQUEST_INTENT_SYSTEM_TEXT_LIMIT = 2_000
@@ -122,7 +123,73 @@ SHORT_TITLE_MAX_LENGTH = 80
 
 #: Request-intent keys a proposal may carry but need not. Optional so a run
 #: stored before the key existed, and a model that omits it, both stay valid.
-_REQUEST_INTENT_OPTIONAL = frozenset({"short_title"})
+_REQUEST_INTENT_OPTIONAL = frozenset(
+    {"short_title", "custodians", "sender_domains", "exclude_senders", "scope_rationale"}
+)
+
+#: Not an AdvisoryRun kind: the scope-refinement step of iterative scoping
+#: (#36) calls the model with its own output contract and records its answer
+#: on the ScopeIteration it produces.
+SCOPE_REFINEMENT = "scope_refinement"
+
+_EMAIL = re.compile(r"^[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+_DOMAIN = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
+
+
+def _validated_scope_fields(source: dict[str, Any]) -> dict[str, Any]:
+    """Custodians, sender domains, exclusions, and the scope rationale (#36).
+
+    Each is optional; a present one must be well formed. Values are folded to
+    lower case so the same sender is never listed twice.
+    """
+    out: dict[str, Any] = {}
+    shapes = (
+        ("custodians", 20, lambda v: bool(_EMAIL.match(v))),
+        ("sender_domains", 10, lambda v: bool(_DOMAIN.match(v))),
+        ("exclude_senders", 30, lambda v: bool(_EMAIL.match(v) or _DOMAIN.match(v))),
+    )
+    for key, maximum, valid in shapes:
+        if key not in source:
+            continue
+        values = [
+            value.lower()
+            for value in _bounded_string_list(
+                source[key], field=key, maximum_items=maximum, maximum_length=254,
+            )
+        ]
+        if not all(valid(value) for value in values):
+            raise AdvisoryOutputInvalid(f"{key} holds a value that is not an address or domain.")
+        out[key] = list(dict.fromkeys(values))
+    if "scope_rationale" in source:
+        out["scope_rationale"] = _bounded_string(
+            source["scope_rationale"], field="scope_rationale", maximum=1000,
+        )
+    return out
+
+
+def validate_scope_refinement(raw: Any) -> dict[str, Any]:
+    """Validate one scope-refinement answer: stop, or a tightened query."""
+    if not isinstance(raw, dict) or raw.get("decision") not in {"stop", "refine"}:
+        raise AdvisoryOutputInvalid("A scope refinement must decide stop or refine.")
+    allowed = {
+        "decision", "reason", "required_search_terms", "search_terms",
+        "custodians", "sender_domains", "exclude_senders",
+    }
+    if not set(raw) <= allowed or "reason" not in raw:
+        raise AdvisoryOutputInvalid("The scope refinement has unexpected fields.")
+    result: dict[str, Any] = {
+        "decision": raw["decision"],
+        "reason": _bounded_string(raw["reason"], field="reason", maximum=1000),
+    }
+    if raw["decision"] == "refine":
+        for key, maximum in (("required_search_terms", 5), ("search_terms", 19)):
+            if key not in raw:
+                raise AdvisoryOutputInvalid(f"A refined scope needs {key}.")
+            result[key] = _bounded_string_list(
+                raw[key], field=key, maximum_items=maximum, maximum_length=200,
+            )
+        result.update(_validated_scope_fields(raw))
+    return result
 
 #: Longest case title a proposal may carry. Same bound as the request-intent
 #: short title, and for the same reason: it is one cell in one column.
@@ -226,6 +293,7 @@ _MODEL_SETTING_FOR_KIND: dict[str, str] = {
 #: schema; this only gives room for the answer the schema asks for.
 MAX_OUTPUT_TOKENS: dict[str, int] = {
     AdvisoryRun.Kind.REQUEST_INTENT: 2000,
+    "scope_refinement": 1500,
     AdvisoryRun.Kind.CASE_TITLE: 1000,
     AdvisoryRun.Kind.RECORD_RESPONSIVENESS: 1000,
     AdvisoryRun.Kind.RECORD_REDACTIONS: 4000,
@@ -1442,6 +1510,7 @@ def _validate_proposal(
             field="short_title",
             maximum=SHORT_TITLE_MAX_LENGTH,
         )
+    validated.update(_validated_scope_fields(proposal))
     return validated
 
 
@@ -1499,6 +1568,13 @@ def _advisory_system_message(kind: str) -> str:
             "(object with exactly start and end, each an ISO date or null), "
             f"and narrowing_options (at most {MAX_NARROWING_OPTIONS} objects, "
             "each with exactly terms (string array) and rationale (string)). "
+            "Optionally also return custodians (district email addresses whose "
+            "mailboxes hold the records, when the request names people or "
+            "roles), sender_domains (domains the responsive mail comes from, "
+            "only when the request is about correspondence with them), "
+            "exclude_senders (noise_senders addresses or domains to leave out "
+            "of the search), and scope_rationale (one or two sentences on why "
+            "this scope). "
             f"short_title is at most {SHORT_TITLE_MAX_LENGTH} characters: a "
             "neutral noun phrase naming what was asked for, for a staff list "
             "column. It never names, describes, or characterises the "
@@ -1532,6 +1608,22 @@ def _advisory_system_message(kind: str) -> str:
             "retention, search_checklist, and search_notes describe how that "
             "system is actually searched; use them to choose systems and "
             "terms, not to state an outcome."
+        )
+    elif kind == SCOPE_REFINEMENT:
+        output_contract = (
+            "You are refining a Google Vault Gmail count for a public records "
+            "request. iterations lists each query already counted, with its "
+            "total and the custodian accounts holding the most matches. Decide "
+            "whether the last scope is reasonable. Return exactly: decision "
+            "(stop or refine) and reason (string); when decision is refine, "
+            "also required_search_terms (string array), search_terms (string "
+            "array), and optionally custodians, sender_domains, and "
+            "exclude_senders as in the intent proposal. Refine only to remove "
+            "plainly irrelevant mail -- district mass mail, newsletters, "
+            "notifications (noise_senders), or mailboxes the request does not "
+            "reach -- never to shrink a request below what was asked. Prefer "
+            "stop when the last scope is already specific. This proposes a "
+            "count only; it never holds, exports, or decides anything."
         )
     elif kind == AdvisoryRun.Kind.RECORD_RESPONSIVENESS:
         output_contract = (

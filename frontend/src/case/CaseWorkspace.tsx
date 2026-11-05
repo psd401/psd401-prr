@@ -24,6 +24,7 @@ import { CaseActivityFeed } from './CaseActivityFeed'
 import { EstimateLetterCard } from './EstimateLetterCard'
 import { RecordUploadPanel } from './RecordUploadPanel'
 import { ReviewFlight } from './ReviewFlight'
+import { ScopingTrail } from './ScopingTrail'
 
 
 export type CaseTab =
@@ -265,6 +266,7 @@ function TabContent({
             starts fresh when the officer hops to another case without a page
             load; the route element itself is reused across :number changes. */}
         <RequestDetail key={number} roles={roles} mode="collection" />
+        {roles.includes('records_officer') && <ScopingTrail number={number} />}
         <Tasks roles={roles} requestNumber={number} />
         {(roles.includes('records_officer') || roles.includes('admin')) && (
           <Preservations roles={roles} requestNumber={number} />

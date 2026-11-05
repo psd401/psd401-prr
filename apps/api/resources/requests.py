@@ -1365,6 +1365,45 @@ class RecordUploadResponseSerializer(serializers.Serializer):
     results = RecordUploadResultSerializer(many=True)
 
 
+def _scoping_data(session) -> dict:
+    from apps.records.models import ScopeIteration
+
+    iterations = list(
+        ScopeIteration.objects.filter(session=session).select_related("count_run").order_by("number")
+    )
+    final = next(
+        (i for i in reversed(iterations) if i.count_run.state == "complete"), None,
+    )
+
+    def row(iteration):
+        run = iteration.count_run
+        return {
+            "number": iteration.number,
+            "reason": iteration.reason,
+            "query": run.terms,
+            "search_scope": run.search_scope,
+            "custodians": iteration.custodians,
+            "state": run.state,
+            "total": run.total_count,
+            "top_accounts": run.account_counts[:5],
+            "date_range_start": run.date_range_start,
+            "date_range_end": run.date_range_end,
+        }
+
+    return {
+        "id": session.pk,
+        "trigger": session.trigger,
+        "actor": getattr(session.actor, "email", None),
+        "reason": session.reason,
+        "state": session.state,
+        "stop_reason": session.stop_reason,
+        "max_iterations": session.max_iterations,
+        "created_at": session.created_at,
+        "iterations": [row(i) for i in iterations],
+        "final": row(final) if final else None,
+    }
+
+
 class RequestsViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
@@ -1413,6 +1452,7 @@ class RequestsViewSet(
         # Sending it is approve_and_send, which is the officer's too.
         "estimate_letter": {StaffRole.RECORDS_OFFICER},
         "vault_counts": {StaffRole.RECORDS_OFFICER},
+        "scoping": {StaffRole.RECORDS_OFFICER},
         "vault_collection": {StaffRole.RECORDS_OFFICER},
         # Adding candidate records to a case is collection, which is the
         # officer's: liaisons hand theirs over through a collection task.
@@ -2929,6 +2969,40 @@ class RequestsViewSet(
                 proposed_label=(latest.proposal or {}).get("label", ""),
             )
         return Response({"outcome": feedback.outcome}, status=status.HTTP_201_CREATED)
+
+    @extend_schema(
+        request=inline_serializer("ScopingRerun", fields={"reason": serializers.CharField()}),
+        responses={
+            200: inline_serializer(
+                "ScopingLatest",
+                fields={"session": serializers.JSONField(allow_null=True)},
+            ),
+            202: inline_serializer(
+                "ScopingStarted",
+                fields={"session": serializers.JSONField()},
+            ),
+        },
+    )
+    @action(detail=True, methods=["get", "post"], url_path="scoping")
+    def scoping(self, request, number=None):
+        """Iterative scoping (#36): the latest session's count trail, or an
+        officer's re-run with a reason. Counts only."""
+        from apps.records.models import ScopingSession
+        from apps.records.scoping import rerun_scoping
+
+        prr = self.get_object()
+        if request.method == "POST":
+            try:
+                session = rerun_scoping(
+                    prr, actor=request.user, reason=request.data.get("reason", ""),
+                )
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError(exc.messages) from exc
+            except VaultCountAlreadyRunning as exc:
+                raise serializers.ValidationError([str(exc)]) from exc
+            return Response({"session": _scoping_data(session)}, status=status.HTTP_202_ACCEPTED)
+        session = ScopingSession.objects.filter(request=prr).order_by("-created_at").first()
+        return Response({"session": _scoping_data(session) if session else None})
 
     @extend_schema(
         request=VaultCountRequestSerializer,
