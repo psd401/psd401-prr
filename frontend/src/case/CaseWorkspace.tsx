@@ -90,8 +90,10 @@ const SIDE_VIEWS: Array<{ id: 'messages' | 'activity'; label: string }> = [
  * The undo lines state only what the services guarantee.
  */
 const STAGE_DECISIONS: Record<CaseStage, { title: string; undo?: string }> = {
+  // Kind-neutral: what Intake owes depends on the matter kind (rule 13),
+  // and the server's summary says it.
   intake: {
-    title: 'Acknowledge, clarify, or close this request',
+    title: 'Triage this request',
     undo: 'A closed request can be reopened; the closure stays on the timeline.',
   },
   scope: {

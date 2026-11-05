@@ -13,6 +13,7 @@ from django.test import TestCase
 
 from apps.records.models import (
     CollectionTask,
+    MatterKind,
     PublicRecordsRequest,
     RecordItem,
     Requester,
@@ -69,6 +70,29 @@ class CaseStagesTests(TestCase):
         self.assertEqual(states["intake"], "current")
         self.assertEqual(states["scope"], "upcoming")
         self.assertEqual(states["close"], "upcoming")
+
+    def test_only_a_public_records_case_is_read_as_owing_an_acknowledgment(self):
+        # Rule 13 / ADR 0004: the acknowledgment is the RCW 42.56.520
+        # response, which belongs to public_records alone. The rail itself
+        # serves every kind, since collection through closure are shared.
+        self.prr.status = RequestStatus.RECEIVED
+        self.prr.save(update_fields=["status"])
+        self.assertEqual(self._stage("intake")["summary"], "Received and not yet acknowledged")
+        for kind in (MatterKind.LITIGATION_DISCOVERY, MatterKind.FERPA_PARENT):
+            with self.subTest(kind=kind):
+                other = PublicRecordsRequest.objects.create(
+                    requester=Requester.objects.create(email=f"{kind}@example.org"),
+                    description="A matter governed by other law.",
+                    channel="portal",
+                    status=RequestStatus.RECEIVED,
+                    matter_kind=kind,
+                )
+                intake = case_stages(other)[0]
+                self.assertEqual(intake["state"], "current")
+                self.assertEqual(intake["summary"], "Received and not yet triaged")
+                self.assertNotIn("acknowledg", " ".join(
+                    f"{stage['summary']} {stage['reason']}" for stage in case_stages(other)
+                ))
 
     def test_an_acknowledged_case_with_no_collection_is_at_scope(self):
         states = self._states()

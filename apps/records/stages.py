@@ -12,6 +12,13 @@ throughout.
 This is a reading of the case for navigation, not a legal state: status
 still changes only through ``services.transition()`` (rule 2), and closure
 readiness stays the authority on what blocks closing.
+
+Matter kinds (rule 13, ADR 0004): the rail serves every kind, because
+collection, review, redaction, production, and closure are shared. Its one
+RCW 42.56 reading -- that a received case still owes its acknowledgment --
+is made for ``public_records`` alone; another kind reads only as received.
+The blocked reasons read the case's own state (an open clarification, an
+open deposit gate) and assert no statute.
 """
 
 from django.db.models import Exists, OuterRef
@@ -23,6 +30,7 @@ from .models import (
     CollectionTask,
     FeeDepositGate,
     Installment,
+    MatterKind,
     PublicRecordsRequest,
     RecordItem,
     RequestStatus,
@@ -80,6 +88,13 @@ def _open_work(prr: PublicRecordsRequest) -> dict[str, tuple[int, str, str]]:
         request=prr, released_at__isnull=True,
     ).count()
     deposits = _open_deposit_gates(prr)
+    received = prr.status == RequestStatus.RECEIVED
+    if not received:
+        intake_summary = ""
+    elif prr.matter_kind == MatterKind.PUBLIC_RECORDS:
+        intake_summary = "Received and not yet acknowledged"
+    else:
+        intake_summary = "Received and not yet triaged"
 
     scope_open = int(not has_collection or waiting_on_clarification)
     release_open = unreleased + open_installments + deposits
@@ -96,11 +111,7 @@ def _open_work(prr: PublicRecordsRequest) -> dict[str, tuple[int, str, str]]:
     else:
         release_summary = ""
     return {
-        "intake": (
-            int(prr.status == RequestStatus.RECEIVED),
-            "Received and not yet acknowledged" if prr.status == RequestStatus.RECEIVED else "",
-            "",
-        ),
+        "intake": (int(received), intake_summary, ""),
         "scope": (
             scope_open,
             "No collection has started" if not has_collection else "",
