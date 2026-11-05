@@ -572,7 +572,9 @@ def _groups(api: _Api) -> list[DeviceGroup]:
     return groups
 
 
-def _inventory(api: _Api) -> tuple[list[Camera], list[DeviceGroup]]:
+def _inventory(api: _Api) -> tuple[list[Camera], list[DeviceGroup], int]:
+    """Active cameras, every device group, and how many devices were
+    dropped as ``active: false`` (counted so a check can show them)."""
     groups = _groups(api)
     # One plain GET: offset paging on this endpoint silently drops devices.
     payload = api.get("/devices", timeout=DEVICES_TIMEOUT_SECONDS)
@@ -580,19 +582,21 @@ def _inventory(api: _Api) -> tuple[list[Camera], list[DeviceGroup]]:
         raise AltaError("Alta GET /devices did not return a list.")
     names = {group.id: group.name for group in groups}
     cameras = []
+    inactive = 0
     for device in payload:
         if not isinstance(device, dict):
             raise AltaError("An Alta device record is not an object.")
         if device.get("active") is False:
+            inactive += 1
             continue
         cameras.append(_camera(device, names))
-    return cameras, groups
+    return cameras, groups, inactive
 
 
 def list_device_cameras() -> list[Camera]:
     """Every active device (plain GET /devices; never offset paging)."""
     with _client() as api:
-        cameras, _groups_unused = _inventory(api)
+        cameras, _groups_unused, _inactive = _inventory(api)
     return cameras
 
 
@@ -891,11 +895,12 @@ def delete_clip(clip_id: str) -> None:
 def checks() -> dict:
     """Read-only connectivity and permission check for `manage.py verify_alta`."""
     with _client() as api:
-        cameras, groups = _inventory(api)
+        cameras, groups, inactive = _inventory(api)
     used = {camera.device_group_id for camera in cameras}
     return {
         "ok": True,
         "device_count": len(cameras),
+        "inactive_devices": inactive,
         "head_count": sum(len(camera.sources) for camera in cameras),
         "devices_without_heads": sum(1 for camera in cameras if not camera.sources),
         "group_count": len(groups),
@@ -950,7 +955,7 @@ def smoke_test_bookmark(device_guid: str) -> dict:
     end = _now().replace(microsecond=0) - dt.timedelta(hours=1)
     start = end - dt.timedelta(minutes=10)
     with _client() as api:
-        cameras, _groups_unused = _inventory(api)
+        cameras, _groups_unused, _inactive = _inventory(api)
         camera = next((c for c in cameras if c.id == device_guid), None)
         if camera is None:
             raise AltaError(f"No active Alta device has guid {device_guid}.")

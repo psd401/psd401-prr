@@ -2,8 +2,8 @@
 
 Set ALTA_API_BASE, ALTA_API_USERNAME, and ALTA_API_PASSWORD in the
 application's settings, then run this. The plain run signs in once and only
-reads: it counts active devices, recording heads, and device groups, and
-names the groups with no active device. ``--smoke-bookmark <device guid>``
+reads: it counts active and inactive devices, recording heads, and device
+groups, and names the groups with no active device. ``--smoke-bookmark <device guid>``
 also creates one 10-minute bookmark on that device ending an hour ago, reads
 it back, reports its coverage, and deletes it, deleting it whatever fails in
 between. Output is ids, counts, and times only.
@@ -40,7 +40,8 @@ class Command(BaseCommand):
             f"OK: signed in; {result['device_count']} active devices with "
             f"{result['head_count']} recording heads "
             f"({result['devices_without_heads']} with no recording head) in "
-            f"{result['group_count']} device groups."
+            f"{result['group_count']} device groups; "
+            f"{result['inactive_devices']} inactive device(s) not listed."
         ))
         if result["empty_groups"]:
             self.stdout.write(

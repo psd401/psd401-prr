@@ -42,6 +42,7 @@ class ChecksTests(fakes.TenantTestCase):
             {
                 "ok": True,
                 "device_count": 2,
+                "inactive_devices": 1,
                 "head_count": 2,
                 "devices_without_heads": 1,
                 "group_count": 3,
@@ -62,6 +63,7 @@ class ChecksTests(fakes.TenantTestCase):
 
         output = out.getvalue()
         self.assertIn("2 active devices", output)
+        self.assertIn("1 inactive device", output)
         self.assertIn("2 recording heads", output)
         self.assertIn("1 with no recording head", output)
         self.assertIn("3 device groups", output)
