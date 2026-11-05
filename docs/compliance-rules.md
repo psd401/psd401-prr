@@ -180,8 +180,13 @@ the surface never widens rule 6's two automated requester-facing paths. Never pu
 The one unattended Vault action is authorized by district decision
 (2026-09-23): with the in-app `PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED` setting
 on, a completed automatic intent proposal that maps a request to an active
-Vault-backed system runs one entire-organization Gmail *count* with the proposed
-query, no accountable actor, and `trigger=automatic`. It may create the count's
+Vault-backed system runs Gmail *counts* with the proposed query, no accountable
+actor, and `trigger=automatic`: the first across the entire organization, or
+only the district mailboxes the proposal names (#36); then, under iterative
+scoping (`apps/records/scoping.py`), at most `PRR_INTENT_MAX_COUNT_ITERATIONS`
+(in-app, default 4, 1 turns refinement off) counts in all, each a tighter query
+the agent proposed after reading the previous total and custodian breakdown.
+Every one is still a count. It may create the count's
 Vault matter; it never holds, exports, collects, changes status, or reaches the
 requester. It has no volume cap of its own, also by district decision: web-form
 requests are bounded only by the public-intake throttles, and emailed requests

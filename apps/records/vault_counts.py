@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import json
 import logging
+import re
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -130,7 +131,13 @@ def _input_sha256(request_id, search_scope, terms, accounts, start, end) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def vault_query_from_intent(required_terms, alternative_terms) -> str:
+def vault_query_from_intent(
+    required_terms,
+    alternative_terms,
+    *,
+    sender_domains=(),
+    exclude_senders=(),
+) -> str:
     """Assemble the proposed Vault query the staff UI shows for a proposal.
 
     Required terms are mandatory AND anchors; alternatives become one
@@ -158,12 +165,36 @@ def vault_query_from_intent(required_terms, alternative_terms) -> str:
         term for term in quoted(alternative_terms)
         if term.casefold() not in required_keys
     ]
+    if not required and not alternatives:
+        # Senders alone never make a query: there is nothing to search for.
+        return ""
     parts = list(required)
     if len(alternatives) == 1:
         parts.append(alternatives[0])
     elif alternatives:
         parts.append(f"({' OR '.join(alternatives)})")
+    # Senders (#36): mail from these domains only, and never from the
+    # district's known noise senders. Values are validated addresses and
+    # domains; anything else is dropped rather than spliced into the query.
+    senders = [f"from:{value}" for value in _sender_values(sender_domains)]
+    if len(senders) == 1:
+        parts.append(senders[0])
+    elif senders:
+        parts.append(f"({' OR '.join(senders)})")
+    parts.extend(f"-from:{value}" for value in _sender_values(exclude_senders))
     return " AND ".join(parts)
+
+
+_SENDER = re.compile(r"^[A-Za-z0-9._%+'@-]+\.[A-Za-z]{2,}$")
+
+
+def _sender_values(values) -> list[str]:
+    out = []
+    for value in values or ():
+        text = str(value or "").strip().lower()
+        if _SENDER.match(text) and text not in out:
+            out.append(text)
+    return out
 
 
 def intent_vault_system_slugs(proposal) -> list[str]:
@@ -285,15 +316,23 @@ def request_automatic_vault_count_from_intent(request_id, proposal):
         return None
     if not intent_vault_system_slugs(proposal):
         return None
-    terms = vault_query_from_intent(
+    if not vault_query_from_intent(
         proposal.get("required_search_terms"),
         proposal.get("search_terms"),
-    )
-    if not terms:
+    ):
         return None
+    from .models import ScopeIteration, ScopingSession
+    from .scoping import start_scoping
+
     prr = PublicRecordsRequest.objects.get(pk=request_id)
+    session = start_scoping(prr, proposal, trigger=ScopingSession.Trigger.AUTOMATIC)
+    return ScopeIteration.objects.get(session=session, number=1).count_run
+
+
+def proposal_date_range(prr, proposal) -> tuple[dt.date | None, dt.date]:
+    """The proposal's date range, never reaching past receipt."""
     received_date = timezone.localtime(prr.received_at).date()
-    date_range = proposal.get("date_range")
+    date_range = proposal.get("date_range") if isinstance(proposal, dict) else None
     if not isinstance(date_range, dict):
         date_range = {}
     end = _normalized_date(date_range.get("end"), "date_range_end")
@@ -303,16 +342,7 @@ def request_automatic_vault_count_from_intent(request_id, proposal):
     start = _normalized_date(date_range.get("start"), "date_range_start")
     if start is not None and start > end:
         start = None
-    return request_vault_count(
-        request_id,
-        actor=None,
-        terms=terms[:1000],
-        custodian_emails=[],
-        search_scope=VaultCountRun.SearchScope.ENTIRE_ORG,
-        date_range_start=start,
-        date_range_end=end,
-        trigger=VaultCountRun.Trigger.AUTOMATIC,
-    )
+    return start, end
 
 
 def defer_automatic_vault_count_from_intent(request_id, proposal) -> bool:
@@ -491,6 +521,9 @@ def _apply_operation(run: VaultCountRun, operation: dict) -> bool:
         or mail_result.get("account_count_errors")
         or []
     )
+    run.account_counts = _account_counts(
+        mail_result.get("accountCounts") or mail_result.get("account_counts") or []
+    )
     run.failure_code = ""
     run.failure_detail = ""
     run.completed_at = timezone.now()
@@ -502,6 +535,7 @@ def _apply_operation(run: VaultCountRun, operation: dict) -> bool:
             "matching_accounts_count",
             "non_queryable_accounts_count",
             "accounts_with_errors_count",
+            "account_counts",
             "failure_code",
             "failure_detail",
             "completed_at",
@@ -517,7 +551,50 @@ def _apply_operation(run: VaultCountRun, operation: dict) -> bool:
         queried_accounts_count=queried,
         matching_accounts_count=matching,
     )
+    _scoping_count_finished(run)
     return True
+
+
+def _scoping_count_finished(run: VaultCountRun) -> None:
+    """Hand a finished count that belongs to a scoping session onward (#36).
+
+    Queued after commit, so the next step reads the stored result.
+    """
+    from .models import ScopeIteration
+
+    session_id = (
+        ScopeIteration.objects.filter(count_run=run).values_list("session_id", flat=True).first()
+    )
+    if session_id is None:
+        return
+
+    def continue_after_commit():
+        from config.celery import app as celery_app
+
+        try:
+            celery_app.send_task("apps.records.tasks.continue_scoping", args=[session_id])
+        except Exception:
+            logger.exception("Scoping could not be continued", extra={"session": session_id})
+
+    transaction.on_commit(continue_after_commit)
+
+
+def _account_counts(entries) -> list[dict]:
+    """The busiest custodian accounts, largest first, at most 20."""
+    counts = []
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        account = entry.get("account")
+        email = account.get("email") if isinstance(account, dict) else account
+        try:
+            count = _nonnegative_integer(entry.get("count", 0), "account count")
+        except ValueError:
+            continue
+        if isinstance(email, str) and "@" in email:
+            counts.append({"email": email.lower(), "count": count})
+    counts.sort(key=lambda row: (-row["count"], row["email"]))
+    return counts[:20]
 
 
 def advance_vault_count(run_id) -> bool:
@@ -552,3 +629,4 @@ def fail_vault_count(run_id, *, code: str, detail: str) -> None:
         input_sha256=run.input_sha256,
         failure_code=run.failure_code,
     )
+    _scoping_count_finished(run)

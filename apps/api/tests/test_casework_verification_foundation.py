@@ -107,6 +107,7 @@ class CaseworkVerificationFoundationTests(SimpleTestCase):
                 "reviewer-elusion-signoff",
                 "reviewer-redaction-group-accept",
                 "reviewer-keyboard-flight",
+                "officer-scope-iterations",
             ],
         )
         self.assertEqual(

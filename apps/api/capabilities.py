@@ -531,6 +531,34 @@ CAPABILITIES = (
         constraints=["accountable_human_actor", "append_only_audit"],
     ),
     _capability(
+        "requests.scoping.read",
+        "Read the latest iterative scoping session: each proposed query, its "
+        "Vault count total and busiest custodian accounts, the agent's "
+        "reason for each change, and the final proposed scope.",
+        "GET",
+        "/api/staff/requests/{number}/scoping/",
+        ["/requests/:number/collection"],
+        constraints=["records_officer_authority"],
+    ),
+    _capability(
+        "requests.scoping.rerun",
+        "Run iterative scoping again from the latest intent proposal, with a "
+        "stated reason, even when nothing changed. Counts only: no hold, "
+        "export, or status change.",
+        "POST",
+        "/api/staff/requests/{number}/scoping/",
+        ["/requests/:number/collection"],
+        execution="human_confirmation",
+        risk="moderate",
+        constraints=[
+            "accountable_human_actor",
+            "records_officer_authority",
+            "no_export_or_hold",
+            "external_side_effects",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
         "requests.vault_counts.read",
         "Read the latest human-scoped Google Vault Gmail count and its provenance.",
         "GET",

@@ -778,6 +778,10 @@ class VaultCountRun(models.Model):
         null=True,
         blank=True,
     )
+    #: The busiest custodian accounts in the result, largest first (at most
+    #: 20), as ``{"email", "count"}``. Vault counts give no sender breakdown;
+    #: this is what scope refinement reads (#36).
+    account_counts = models.JSONField(default=list, blank=True)
     failure_code = models.CharField(max_length=100, blank=True)
     failure_detail = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -3447,6 +3451,87 @@ class RedactionBatch(models.Model):
 
     def __str__(self):
         return f"redaction batch {self.pk}: {self.outcome}"
+
+
+class ScopingSession(models.Model):
+    """One run of iterative scoping for a request (#36).
+
+    The intent agent proposes a query, Vault counts it, the agent reads the
+    total and the per-custodian breakdown and either stops or tightens the
+    query and counts again, up to ``max_iterations``. Counts only: nothing
+    here holds, exports, collects, or changes a request's status (rule 11).
+    """
+
+    class Trigger(models.TextChoices):
+        AUTOMATIC = "automatic", "Automatic"
+        MANUAL = "manual", "Re-run by an officer"
+
+    class State(models.TextChoices):
+        RUNNING = "running", "Running"
+        COMPLETE = "complete", "Complete"
+        FAILED = "failed", "Failed"
+
+    request = models.ForeignKey(
+        PublicRecordsRequest,
+        on_delete=models.CASCADE,
+        related_name="scoping_sessions",
+    )
+    trigger = models.CharField(max_length=20, choices=Trigger.choices)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    reason = models.CharField(max_length=500, blank=True)
+    state = models.CharField(max_length=20, choices=State.choices, default=State.RUNNING)
+    max_iterations = models.PositiveIntegerField()
+    stop_reason = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"scoping {self.pk}: {self.state}"
+
+
+class ScopeIteration(models.Model):
+    """One proposed query in a scoping session, and the count it got."""
+
+    session = models.ForeignKey(
+        ScopingSession,
+        on_delete=models.CASCADE,
+        related_name="iterations",
+    )
+    number = models.PositiveIntegerField()
+    count_run = models.OneToOneField(
+        VaultCountRun,
+        on_delete=models.PROTECT,
+        related_name="scope_iteration",
+    )
+    #: The agent's reason for this query (the first iteration's is the
+    #: proposal's scope rationale).
+    reason = models.CharField(max_length=1000, blank=True)
+    required_search_terms = models.JSONField(default=list)
+    search_terms = models.JSONField(default=list)
+    custodians = models.JSONField(default=list)
+    sender_domains = models.JSONField(default=list)
+    exclude_senders = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["session", "number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["session", "number"], name="scope_iteration_number_unique",
+            ),
+        ]
+
+    def __str__(self):
+        return f"scope iteration {self.pk} #{self.number}"
 
 
 class EvaluationSet(models.Model):

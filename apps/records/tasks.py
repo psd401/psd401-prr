@@ -50,6 +50,14 @@ def execute_advisory_analysis(run_id: str):
 
 
 @shared_task
+def continue_scoping(session_id: int) -> None:
+    """Take the next scoping step after a count finishes (#36). Counts only."""
+    from .scoping import continue_scoping as continue_session
+
+    continue_session(session_id)
+
+
+@shared_task
 def prepare_estimate_letters(*, limit: int = 10) -> int:
     """Draft interpretation-and-estimate letters for ready cases (#42).
 

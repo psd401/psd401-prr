@@ -368,6 +368,23 @@ SETTINGS: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key="PRR_INTENT_MAX_COUNT_ITERATIONS",
+        type=values.INTEGER,
+        default=4,
+        minimum=1,
+        maximum=10,
+        unit="counts",
+        category=CATEGORY_ADVISORY_AI,
+        label="Scoping counts per request",
+        consequence=(
+            "How many Google Vault counts iterative scoping may run for one "
+            "request: the intent proposal's count, then each tightened query "
+            "the agent proposes after reading the total and the custodian "
+            "breakdown. Counts only -- nothing is held or exported. 1 turns "
+            "refinement off and keeps the single proposal count."
+        ),
+    ),
+    SettingSpec(
         key="PRR_AI_AUTOMATIC_ESTIMATE_LETTER_ENABLED",
         type=values.BOOLEAN,
         default=False,
