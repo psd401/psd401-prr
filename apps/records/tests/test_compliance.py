@@ -849,6 +849,37 @@ class EstimateRevisionTests(TestCase):
                         callers.add(path.relative_to(settings.BASE_DIR).as_posix())
         self.assertEqual(callers, {"apps/records/scoping.py"})
 
+    def test_only_the_intake_trust_ladder_closes_a_case_without_a_person(self):
+        """intake-auto-close-ast-guard (#34).
+
+        The one closure with no human actor is the spam or non-request label
+        under its auto trust mode. Only intake_trust may call the system
+        closure, and only that closure may pass transition() its note.
+        """
+        import ast
+
+        callers, note_passers = set(), set()
+        for path in Path(settings.BASE_DIR, "apps").rglob("*.py"):
+            if "tests" in path.parts or "migrations" in path.parts:
+                continue
+            tree = ast.parse(path.read_text())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    name = (
+                        node.func.attr if isinstance(node.func, ast.Attribute)
+                        else getattr(node.func, "id", "")
+                    )
+                    where = path.relative_to(settings.BASE_DIR).as_posix()
+                    if name == "auto_close_non_request":
+                        callers.add(where)
+                    if any(k.arg == "_system_closure_note" for k in node.keywords):
+                        note_passers.add((where, name))
+        self.assertEqual(callers, {"apps/records/intake_trust.py"})
+        self.assertEqual(note_passers, {("apps/records/services.py", "transition")})
+        from apps.records.intake_trust import AUTO_LABEL_SETTINGS
+
+        self.assertEqual(set(AUTO_LABEL_SETTINGS), {"spam", "non_request"})
+
     def test_a_system_prepared_letter_is_drafted_never_sent(self):
         """estimate-letter-ast-guard (#42).
 

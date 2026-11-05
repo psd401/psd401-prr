@@ -138,6 +138,8 @@ FIXTURE_RESCOPE_REQUEST_NUMBER = "PRR-E2E-0014"
 FIXTURE_RELEASE_REQUEST_NUMBER = "PRR-E2E-0015"
 # Decision batches (#43): a review batch an agent proposed, waiting for a person.
 FIXTURE_DECISION_REQUEST_NUMBER = "PRR-E2E-0016"
+# Trust ladder for intake (#34): an email case the system closed as spam.
+FIXTURE_AUTO_CLOSED_REQUEST_NUMBER = "PRR-E2E-0017"
 FIXTURE_ESTIMATE_LETTER_INTENT = (
     "Route 12 bus video from March 3, 2026, between 3 and 4 p.m."
 )
@@ -1467,6 +1469,115 @@ def _seed_decision_batch_case(officer):
             "mailbox; neither mentions the transportation committee."
         ),
     )
+    return request
+
+
+def _seed_auto_closed_intake_case(officer, inbound_transport):
+    """Seed an email-created case the system closed as spam under the
+    intake trust ladder (#34), for the officer's one-click undo."""
+    from django.test import override_settings
+
+    from apps.configuration import runtime
+    from apps.records.intake_trust import auto_apply_intake_label
+    from apps.records.models import AdvisoryRun, IntakeAutoApplication
+
+    requester, _ = Requester.objects.get_or_create(
+        email="prize-desk@example.org",
+        defaults={"id": _fixture_uuid("auto-closed-requester"), "name": "Prize Desk"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_AUTO_CLOSED_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("auto-closed-request"),
+            "requester": requester,
+            "description": "Congratulations! Claim your synthetic cruise prize today.",
+            "channel": Channel.EMAIL,
+            "status": RequestStatus.RECEIVED,
+            "received_at": _BASE_TIME - timedelta(days=3),
+        },
+    )
+    if not created:
+        return request
+    received_at = _BASE_TIME - timedelta(days=3)
+    message = Correspondence.objects.create(
+        id=_fixture_uuid("auto-closed-correspondence"),
+        request=request,
+        direction=Correspondence.Direction.INBOUND,
+        kind=Correspondence.Kind.GENERAL,
+        status=Correspondence.Status.RECEIVED,
+        received_subject="You have won",
+        received_body=request.description,
+        received_sender="Prize Desk <prize-desk@example.org>",
+        received_recipients=["publicrecords@example.org"],
+        received_at=received_at,
+        matched_at=received_at,
+        provider="gmail",
+        provider_account="default",
+        provider_message_id="fixture-auto-closed-message",
+        provider_thread_id="fixture-auto-closed-thread",
+        created_by=inbound_transport,
+    )
+    raw_hash = hashlib.sha256(b"synthetic auto-closed message").hexdigest()
+    InboundCorrespondenceReceipt.objects.create(
+        id=_fixture_uuid("auto-closed-receipt"),
+        provider=message.provider,
+        provider_account=message.provider_account,
+        provider_message_id=message.provider_message_id,
+        provider_thread_id=message.provider_thread_id,
+        received_at=received_at,
+        envelope_sender=message.received_sender,
+        envelope_recipients=message.received_recipients,
+        parsing_status=InboundCorrespondenceReceipt.ParsingStatus.PARSED,
+        matching_status=InboundCorrespondenceReceipt.MatchingStatus.MATCHED,
+        match_method=InboundCorrespondenceReceipt.MatchMethod.EMAIL_INTAKE,
+        matched_request=request,
+        matched_correspondence=message,
+        matched_at=received_at,
+        quarantined=False,
+        raw_message_size=29,
+        raw_message_sha256=raw_hash,
+        payload_sha256=hashlib.sha256(b"auto-closed payload").hexdigest(),
+        idempotency_key="casework-e2e-auto-closed-receipt",
+        submitted_by=inbound_transport,
+        completed_at=received_at,
+    )
+    # As in production: the email that opened the case has its work item.
+    # The system's closure has no officer, so it leaves that item open.
+    reconcile_inbound_receipt(_fixture_uuid("auto-closed-receipt"))
+    run = AdvisoryRun.objects.create(
+        id=_fixture_uuid("auto-closed-advisory"),
+        kind=AdvisoryRun.Kind.INTAKE_CLASSIFICATION,
+        request=request,
+        trigger=AdvisoryRun.Trigger.AUTOMATIC,
+        model_identifier="fixture-intake-model",
+        input_sha256="0" * 64,
+        state=AdvisoryRun.State.COMPLETE,
+        completed_at=received_at,
+        proposal={
+            "label": "spam",
+            "target_case_number": None,
+            "confidence": 0.99,
+            "evidence": "Unsolicited prize offer; asks for no district records.",
+        },
+    )
+    keys = (
+        "PRR_TRUST_INTAKE_SPAM_MODE",
+        "PRR_TRUST_INTAKE_AUTO_MIN_CONFIDENCE",
+    )
+    with override_settings(
+        PRR_TRUST_INTAKE_SPAM_MODE="auto",
+        PRR_TRUST_INTAKE_AUTO_MIN_CONFIDENCE=95,
+    ):
+        for key in keys:
+            runtime.invalidate(key)
+        auto_apply_intake_label(run.pk)
+    for key in keys:
+        runtime.invalidate(key)
+    if not IntakeAutoApplication.objects.filter(request=request).exists():
+        raise CommandError(
+            f"{FIXTURE_AUTO_CLOSED_REQUEST_NUMBER} was not closed automatically; "
+            "a stored intake trust setting may be overriding the fixture."
+        )
     return request
 
 
@@ -3115,6 +3226,7 @@ class Command(BaseCommand):
             _seed_rescope_case(officer)
             _seed_release_case(officer)
             _seed_decision_batch_case(officer)
+            _seed_auto_closed_intake_case(officer, inbound_transport)
             _seed_email_intake_redirect_cases(officer, inbound_transport)
             _reconcile_fixture_inbound_work(request)
             _seed_role_work(

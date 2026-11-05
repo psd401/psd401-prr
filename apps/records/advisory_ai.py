@@ -1985,3 +1985,8 @@ def execute_advisory_run(run_id) -> None:
         from .vault_counts import defer_automatic_vault_count_from_intent
 
         defer_automatic_vault_count_from_intent(run.request_id, proposal)
+    if run.kind == AdvisoryRun.Kind.INTAKE_CLASSIFICATION:
+        # The trust ladder (#34): only spam and non-request, only in auto mode.
+        from . import intake_trust
+
+        intake_trust.auto_apply_intake_label(run.pk)

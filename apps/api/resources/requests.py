@@ -98,6 +98,7 @@ from apps.records.models import (
     InitialResponseAttestation,
     Installment,
     IntakeAttachment,
+    IntakeAutoApplication,
     JlarcRequestMetrics,
     MatterKind,
     PublicRecordsRequest,
@@ -2848,6 +2849,28 @@ class RequestsViewSet(
             .first()
         )
 
+    @staticmethod
+    def _auto_applied(prr):
+        """The system's own closure of this case, if any (#34), and whether it
+        still stands: undoing it is an ordinary reopen, a later event."""
+        applied = (
+            IntakeAutoApplication.objects.filter(request=prr)
+            .select_related("status_event")
+            .first()
+        )
+        if applied is None:
+            return None
+        event = applied.status_event
+        return {
+            "label": applied.label,
+            "confidence": applied.confidence,
+            "applied_at": event.occurred_at,
+            "in_effect": (
+                prr.status == RequestStatus.CLOSED_NON_REQUEST
+                and not prr.events.filter(occurred_at__gt=event.occurred_at).exists()
+            ),
+        }
+
     @extend_schema(
         request=None,
         responses={200: AdvisoryLatestSerializer, 202: AdvisoryRunSerializer},
@@ -2886,6 +2909,7 @@ class RequestsViewSet(
                     if feedback is not None
                     else None
                 ),
+                "auto_applied": self._auto_applied(prr),
             })
         try:
             run = request_intake_classification(prr.pk, actor=request.user)

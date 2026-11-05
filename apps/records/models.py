@@ -3653,3 +3653,37 @@ class DecisionBatchDecision(AppendOnlyModelMixin, models.Model):
 
     def __str__(self):
         return f"{self.outcome} decision {self.pk}"
+
+
+class IntakeAutoApplication(AppendOnlyModelMixin, models.Model):
+    """An intake label the system applied with no human actor (#34).
+
+    Only ``spam`` and ``non_request`` can be applied, and only by
+    ``apps/records/intake_trust.auto_apply_intake_label`` under the label's
+    ``auto`` trust mode. The closure itself is the ``status_event``; this row
+    ties it to the classification that caused it, so the case can say it was
+    closed automatically and offer to undo it. Undoing is an ordinary reopen,
+    which appends a later event and leaves this row as it was.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request = models.ForeignKey(
+        PublicRecordsRequest, on_delete=models.PROTECT, related_name="intake_auto_applications",
+    )
+    advisory_run = models.OneToOneField(
+        AdvisoryRun, on_delete=models.PROTECT, related_name="auto_application",
+    )
+    label = models.CharField(max_length=40)
+    confidence = models.FloatField()
+    status_event = models.OneToOneField(
+        StatusEvent, on_delete=models.PROTECT, related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.label} auto-applied {self.pk}"

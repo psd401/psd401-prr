@@ -709,3 +709,45 @@ it('edits closure days as a list of dates and sends them as a list', async () =>
       .toEqual(['2026-06-22', '2026-12-24'])
   })
 })
+
+function trustRow(key: string, label: string, evaluation: unknown) {
+  return {
+    key,
+    label,
+    type: 'choice',
+    category: 'Advisory AI',
+    consequence: `${label} consequence.`,
+    value: 'suggest',
+    default: 'suggest',
+    ...SHAPE,
+    choices: ['suggest', 'auto'],
+    evaluation,
+    requires: [],
+    required_by: [],
+    last_change: null,
+  }
+}
+
+it('shows the live intake model’s evaluation beside an intake trust setting', async () => {
+  const page = settingsPayload()
+  page.results.push(
+    trustRow('PRR_TRUST_INTAKE_SPAM_MODE', 'Trust ladder: spam', {
+      model: 'model-a',
+      evaluated_at: '2026-11-04T09:00:00Z',
+      items: 120,
+      precision: 0.975,
+      recall: 0.9,
+    }) as never,
+    trustRow('PRR_TRUST_INTAKE_NON_REQUEST_MODE', 'Trust ladder: not a records request', null) as never,
+  )
+  stubFetch(async () => ok(page))
+
+  renderPage()
+
+  expect(
+    await screen.findByText(/Latest evaluation of model-a .*\(120 cases\).*precision 98%.*recall 90%/),
+  ).toBeInTheDocument()
+  expect(
+    screen.getByText(/The live intake model has not been evaluated yet/),
+  ).toBeInTheDocument()
+})
