@@ -210,10 +210,14 @@ class FakeSession:
         self.tenant = tenant
         self.cookies = RequestsCookieJar()
         self.closed = False
+        # requests.Session's default: environment proxies and .netrc apply.
+        self.trust_env = True
+        self.trust_env_at_request: list[bool] = []
 
     def request(self, method, url, **kwargs):
         if kwargs.get("allow_redirects") is not False:
             raise AssertionError(f"{method} {url} did not disable redirects")
+        self.trust_env_at_request.append(self.trust_env)
         resp = self.tenant.handle(method, url, kwargs)
         # As requests does: a Set-Cookie lands in the session's own jar.
         self.cookies.update(resp.cookies)

@@ -500,6 +500,9 @@ class _Api:
 def _client() -> Iterator[_Api]:
     config = _config()
     http = requests.Session()
+    # Ignore HTTP(S)_PROXY and .netrc from the host: neither may route or
+    # authenticate this traffic, and the password goes over the sign-in.
+    http.trust_env = False
     try:
         yield _Api(http, config)
     finally:

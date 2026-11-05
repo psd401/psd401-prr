@@ -89,6 +89,19 @@ class AltaTransportSecurityTests(fakes.TenantTestCase):
         for call in self.tenant.calls:
             self.assertIs(call["kwargs"]["allow_redirects"], False)
 
+    def test_every_session_ignores_environment_proxies_and_netrc(self):
+        """trust_env off: an HTTPS_PROXY or a .netrc on the host must not
+        route or authenticate Alta traffic, the sign-in included."""
+        client.list_device_groups()
+        self.tenant.expire_all_sessions()
+        client.list_device_cameras()
+
+        self.assertTrue(self.tenant.sessions)
+        for session in self.tenant.sessions:
+            self.assertIs(session.trust_env, False)
+            self.assertTrue(session.trust_env_at_request)
+            self.assertNotIn(True, session.trust_env_at_request)
+
     def test_redirect_response_is_rejected_without_following(self):
         self.tenant.on(
             "GET",
