@@ -41,6 +41,7 @@ from .advisory_ai import (
 )
 from .models import (
     AdvisoryRun,
+    CollectionSupersession,
     KnowledgeNoiseSender,
     PublicRecordsRequest,
     ScopeIteration,
@@ -270,7 +271,14 @@ def rescope(request, *, count_run_id, expected_input_sha256, actor, reason):
     ).task
     if new.pk == current.pk:
         raise ValidationError("That count is already the current collection.")
-    supersede_collection(current.pk, actor=actor, reason=reason)
+    result = supersede_collection(current.pk, actor=actor, reason=reason)
+    if not result.record_count:
+        # supersede_collection writes no row when nothing was unreviewed, but
+        # the re-scope still replaced this collection; record that, so it is
+        # never again the current collection.
+        CollectionSupersession.objects.create(
+            collection_task=current, actor=actor, reason=reason, record_count=0,
+        )
     audit(
         "vault.collection.rescoped",
         target=request.number,

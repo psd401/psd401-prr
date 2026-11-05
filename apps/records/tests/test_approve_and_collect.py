@@ -20,6 +20,7 @@ from apps.api.identity import apply_staff_roles
 from apps.api.models import StaffRole
 from apps.audit.models import AuditLog
 from apps.records.models import (
+    CollectionSupersession,
     CollectionTask,
     PublicRecordsRequest,
     RecordItem,
@@ -202,6 +203,21 @@ class RescopeTests(_Fixture):
         _session, run = self._session(trigger=ScopingSession.Trigger.MANUAL, total=12)
         new = rescope(self.request, count_run_id=run.pk, expected_input_sha256=run.input_sha256,
                       actor=self.officer, reason="The new scope leaves out the newsletter.")
+        CollectionTask.objects.filter(pk=new.pk).update(state=CollectionTask.State.FAILED)
+
+        self.assertIsNone(current_collection(self.request))
+
+    def test_a_rescoped_collection_with_nothing_unreviewed_is_still_replaced(self, delay):
+        # supersede_collection writes no row when no record is unreviewed;
+        # the re-scope still replaced the collection and must say so.
+        old = self._collected()
+        RecordItem.objects.filter(collection_task=old).update(review_state=RecordItem.ReviewState.RESPONSIVE)
+        _session, run = self._session(trigger=ScopingSession.Trigger.MANUAL, total=12)
+        new = rescope(self.request, count_run_id=run.pk, expected_input_sha256=run.input_sha256,
+                      actor=self.officer, reason="The new scope leaves out the newsletter.")
+        row = CollectionSupersession.objects.get(collection_task=old)
+        self.assertEqual(row.record_count, 0)
+        self.assertEqual(row.actor, self.officer)
         CollectionTask.objects.filter(pk=new.pk).update(state=CollectionTask.State.FAILED)
 
         self.assertIsNone(current_collection(self.request))
