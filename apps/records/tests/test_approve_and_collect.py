@@ -28,7 +28,8 @@ from apps.records.models import (
     ScopingSession,
     VaultCountRun,
 )
-from apps.records.scoping import continue_scoping, rescope
+from apps.records.scoping import continue_scoping, current_collection, rescope
+from apps.records.vault_collections import queue_vault_collection
 
 VAULT = {
     "PRR_VAULT_CREDENTIALS_FILE": "",
@@ -176,6 +177,23 @@ class RescopeTests(_Fixture):
             rescope(self.request, count_run_id=run2.pk, expected_input_sha256=run2.input_sha256,
                     actor=self.officer, reason="short")
         self.assertEqual(CollectionTask.objects.count(), 1)
+
+    def test_a_failed_collection_is_not_the_current_one(self, delay):
+        # A failed export never finishes, so it must not lock the card into a
+        # re-scope that waits forever: the officer collects again instead.
+        old = self._collected()
+        _session, run = self._session(trigger=ScopingSession.Trigger.MANUAL)
+        failed = queue_vault_collection(run.pk, actor=self.officer, expected_input_sha256=run.input_sha256).task
+        CollectionTask.objects.filter(pk=failed.pk).update(state=CollectionTask.State.FAILED)
+        current = current_collection(self.request)
+        assert current is not None
+        self.assertEqual(current["task_id"], old.pk)
+
+        CollectionTask.objects.filter(pk=old.pk).update(state=CollectionTask.State.FAILED)
+        self.assertIsNone(current_collection(self.request))
+        with self.assertRaises(ValidationError):
+            rescope(self.request, count_run_id=run.pk, expected_input_sha256=run.input_sha256,
+                    actor=self.officer, reason="The new scope leaves out the newsletter.")
 
     def test_the_api_shows_the_diff_and_rescopes(self, delay):
         old = self._collected()

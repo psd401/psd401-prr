@@ -257,11 +257,7 @@ def rescope(request, *, count_run_id, expected_input_sha256, actor, reason):
         raise ValidationError(
             f"Say why the scope is changing (at least {MIN_SUPERSESSION_REASON} characters)."
         )
-    current = (
-        CollectionTask.objects.filter(request=request, kind=CollectionTask.Kind.VAULT_MAIL)
-        .order_by("-created_at")
-        .first()
-    )
+    current = _live_collections(request).order_by("-created_at").first()
     if current is None or current.state != CollectionTask.State.COMPLETE:
         raise ValidationError(
             "Re-scoping replaces a finished Vault collection; approve and collect instead, "
@@ -286,12 +282,23 @@ def rescope(request, *, count_run_id, expected_input_sha256, actor, reason):
     return new
 
 
-def current_collection(request) -> dict | None:
-    """The latest Vault collection on the request, for the re-scope diff."""
+def _live_collections(request):
+    """Vault mail collections that have not failed.
+
+    A failed export never finishes, so it is never the collection a re-scope
+    replaces; the officer approves and collects again instead.
+    """
     from .models import CollectionTask
 
+    return CollectionTask.objects.filter(
+        request=request, kind=CollectionTask.Kind.VAULT_MAIL,
+    ).exclude(state=CollectionTask.State.FAILED)
+
+
+def current_collection(request) -> dict | None:
+    """The latest Vault collection on the request, for the re-scope diff."""
     task = (
-        CollectionTask.objects.filter(request=request, kind=CollectionTask.Kind.VAULT_MAIL)
+        _live_collections(request)
         .select_related("source_vault_count")
         .order_by("-created_at")
         .first()

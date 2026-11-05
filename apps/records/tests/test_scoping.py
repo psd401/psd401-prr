@@ -229,6 +229,13 @@ class ScopingTests(_ScopingFixture):
         self.assertNotEqual(session.state, ScopingSession.State.RUNNING)
         invoke.assert_called_once()
 
+    @override_settings(PRR_VAULT_ADMIN_USER="")
+    def test_scoping_refuses_plainly_when_vault_counting_is_not_configured(self, delay):
+        with self.assertRaisesMessage(ValidationError, "Google Vault counting is not configured."):
+            start_scoping(self.request, PROPOSAL, trigger=ScopingSession.Trigger.AUTOMATIC)
+        self.assertFalse(ScopingSession.objects.exists())
+        delay.assert_not_called()
+
     def test_rerun_needs_a_reason_and_runs_even_when_nothing_changed(self, _delay):
         AdvisoryRun.objects.create(
             kind=AdvisoryRun.Kind.REQUEST_INTENT, request=self.request,

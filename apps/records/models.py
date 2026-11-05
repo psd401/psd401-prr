@@ -676,16 +676,16 @@ class CollectionTask(models.Model):
         COMPLETE = "complete", "Complete"
         FAILED = "failed", "Failed"
 
-    request = models.ForeignKey(PublicRecordsRequest, on_delete=models.CASCADE, related_name="collection_tasks")
-    system = models.ForeignKey("RecordSystem", null=True, blank=True,
-                               on_delete=models.SET_NULL, related_name="collection_tasks")
-    kind = models.CharField(max_length=20, choices=Kind.choices)
     class Trigger(models.TextChoices):
         MANUAL = "manual", "Manual"
         #: Started by the trust policy from a completed automatic scoping
         #: session's final count (#37, rule 11). Recorded and shown.
         AUTOMATIC = "automatic", "Automatic"
 
+    request = models.ForeignKey(PublicRecordsRequest, on_delete=models.CASCADE, related_name="collection_tasks")
+    system = models.ForeignKey("RecordSystem", null=True, blank=True,
+                               on_delete=models.SET_NULL, related_name="collection_tasks")
+    kind = models.CharField(max_length=20, choices=Kind.choices)
     trigger = models.CharField(max_length=20, choices=Trigger.choices, default=Trigger.MANUAL)
     state = models.CharField(max_length=20, choices=State.choices, default=State.PENDING)
     instructions = models.TextField(blank=True)

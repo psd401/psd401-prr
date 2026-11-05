@@ -23,6 +23,7 @@ NOTE: MBOX exports process faster than PST — use MBOX.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Final
 
@@ -111,8 +112,6 @@ def _e2e_stand_in() -> bool:
 
 
 def _e2e_id(prefix: str, *parts) -> str:
-    import hashlib
-
     return f"e2e-{prefix}-" + hashlib.sha256("|".join(map(str, parts)).encode()).hexdigest()[:12]
 
 
