@@ -151,8 +151,8 @@ class PreservationApiTests(TestCase):
         self.assertEqual(self.held.state, CameraHold.State.HELD)
 
     @override_settings(PRR_LOCAL_IMPLICIT_STAFF_ROLES=())
-    @mock.patch("apps.integrations.avigilon.client.delete_clip")
-    def test_exclude_camera_rechecks_current_role_after_dispatch(self, delete_clip):
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_exclude_camera_rechecks_current_role_after_dispatch(self, delete_bookmark):
         apply_staff_roles(self.officer, {StaffRole.RECORDS_OFFICER})
 
         def revoke_role_after_permission_check(*_args, **_kwargs):
@@ -175,7 +175,7 @@ class PreservationApiTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 403)
-        delete_clip.assert_not_called()
+        delete_bookmark.assert_not_called()
         self.other.refresh_from_db()
         self.assertEqual(self.other.state, CameraHold.State.HELD)
         self.assertIsNone(self.other.excluded_at)
@@ -204,10 +204,10 @@ class PreservationApiTests(TestCase):
         self.held.refresh_from_db()
         self.assertEqual(self.held.state, CameraHold.State.HELD)
 
-    @mock.patch("apps.integrations.avigilon.client.delete_clip")
-    def test_exclude_camera_oversized_reason_rejected_before_clip_delete(
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_exclude_camera_oversized_reason_rejected_before_bookmark_delete(
         self,
-        delete_clip,
+        delete_bookmark,
     ):
         response = self.client.post(
             f"/api/staff/preservations/{self.fp.id}/exclude-camera/",
@@ -223,7 +223,7 @@ class PreservationApiTests(TestCase):
             response.json()["detail"],
             "A camera-exclusion reason must contain at most 500 characters.",
         )
-        delete_clip.assert_not_called()
+        delete_bookmark.assert_not_called()
         self.held.refresh_from_db()
         self.assertEqual(self.held.state, CameraHold.State.HELD)
         self.assertIsNone(self.held.excluded_at)

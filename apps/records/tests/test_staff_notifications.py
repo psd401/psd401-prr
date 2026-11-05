@@ -18,7 +18,12 @@ from apps.audit.models import AuditLog
 from apps.configuration import runtime
 from apps.configuration.models import AppSetting
 from apps.correspondence.models import Correspondence
-from apps.integrations.avigilon.client import AltaNotConfigured
+from apps.integrations.avigilon.client import (
+    AltaNotConfigured,
+    BookmarkHold,
+    Camera,
+    HeadCoverage,
+)
 from apps.integrations.gmail.client import GmailUnavailable, SentMessage
 from apps.records import notifications, tasks, triage
 from apps.records.models import (
@@ -229,7 +234,10 @@ class StaffNotificationServiceTests(TestCase):
             {str(address) for address in message["To"].addresses},
             {"facilities@psd401.net", "records.supervisor@psd401.net"},
         )
-        self.assertIn("saved clips", message.get_body().get_content())
+        body = message.get_body().get_content()
+        self.assertIn('"Manually deleted"', body)
+        self.assertIn("ALL cameras district-wide", body)
+        self.assertNotIn("saved clips", body)
         self.assertFalse(Correspondence.objects.exists())
 
     @mock.patch("apps.records.notifications.gmail_client.send_raw")
@@ -343,12 +351,12 @@ class StaffNotificationServiceTests(TestCase):
 
     @mock.patch("apps.records.notifications.gmail_client.send_raw")
     @mock.patch(
-        "apps.integrations.avigilon.client.list_cameras",
+        "apps.integrations.avigilon.client.list_device_cameras",
         side_effect=AltaNotConfigured("not configured"),
     )
     def test_repeated_manual_hold_records_suppression_not_delivery_failure(
         self,
-        _list_cameras,
+        _list_device_cameras,
         send_raw,
     ):
         send_raw.return_value = SentMessage("gmail-urgent", "thread-urgent")
@@ -507,14 +515,14 @@ class StaffNotificationSignalTests(TestCase):
 
     @mock.patch("apps.records.notifications.enqueue_staff_notification")
     @mock.patch(
-        "apps.integrations.avigilon.client.create_clip_hold",
-        return_value="clip-1",
+        "apps.integrations.avigilon.client.create_bookmark_hold",
+        return_value=BookmarkHold(id="bm-1", coverage=(HeadCoverage("0", 1.0),)),
     )
-    @mock.patch("apps.integrations.avigilon.client.list_cameras")
+    @mock.patch("apps.integrations.avigilon.client.list_device_cameras")
     def test_manual_hold_and_completed_hold_each_emit_one_signal(
         self,
         list_cameras,
-        _create_clip_hold,
+        _create_bookmark_hold,
         enqueue,
     ):
         list_cameras.side_effect = AltaNotConfigured("not configured")
@@ -538,7 +546,13 @@ class StaffNotificationSignalTests(TestCase):
         enqueue.reset_mock()
         list_cameras.side_effect = None
         # Zero cameras is a manual hold, never a completed one (rule 7).
-        list_cameras.return_value = [{"id": "cam-1", "name": "Gym", "site": "PHS"}]
+        list_cameras.return_value = [
+            Camera(
+                id="cam-1", name="Gym", site="PHS", device_group_id="group-PHS",
+                server_group_id="server-1", status="CONNECTED",
+                pruned_to=timezone.now() - dt.timedelta(days=20), sources=("0",),
+            )
+        ]
         second_request = make_request(description="second camera request")
         second = FootagePreservation.objects.create(
             request=second_request,

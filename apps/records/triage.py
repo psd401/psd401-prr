@@ -1,14 +1,23 @@
 """
 Intake triage — the auto-hold / never-auto-deny engine.
 
-Decision table for footage requests (district retention: CAMERA_RETENTION_DAYS):
+Decision table for footage requests. Scope is every camera at each site the
+request names (footage_sites), or every camera district-wide when it names
+none. Retention is per camera: Aware's oldest retained footage (pruned_to).
 
-  Window vs retention        Machine does                       Human does
+  Situation                  Machine does                       Human does
   ─────────────────────      ────────────────────────────────   ──────────────────────
-  Any part still inside  →   HOLD EVERY CAMERA immediately      Exclude irrelevant
-                             (saved clips), notify facilities   cameras (reason req'd)
-  Entirely outside       →   Queue human review + adequate-     Work checklist, decide,
-                             search checklist. NEVER auto-send. draft, approve, send
+  Footage retained       →   Aware bookmark per camera, no      Exclude irrelevant
+                             expiry, from the later of window   cameras (reason req'd);
+                             start and oldest footage; GAP      release only after the
+                             when coverage is under 95%         request closes
+  Named site, 0 cameras  →   NO_CAMERAS: nothing bookmarked,    Adequate search: other
+                             review queued, never "held"        recorders, SRO/office
+  No camera retains it   →   EXPIRED: review + adequate-search  Work checklist, decide,
+                             checklist. NEVER auto-send.        draft, approve, send
+  API down / all failed  →   MANUAL: urgent email to            Bookmark by hand in
+                             facilities (EXPIRED instead when   Aware ("Manually
+                             the window predates the setting)   deleted")
   No parseable date      →   Hold the FULL current retention    Refine the window
                              window (preservation-first)
 
@@ -28,9 +37,24 @@ from django.utils import timezone
 from apps.audit.models import audit
 from apps.configuration import runtime
 
-from . import notifications
+from . import footage_sites, notifications
 from .models import FootagePreservation, PublicRecordsRequest, StatusEvent
 from .services import _require_current_records_officer
+
+BOOKMARK_NAME_MAX_LENGTH = 100
+BOOKMARK_DESCRIPTION = (
+    "Public Records Act preservation hold. Do not delete. "
+    "Managed by the PRR system."
+)
+OUTSIDE_RETENTION_CHECKLIST = (
+    "HUMAN REVIEW REQUIRED — no requester response has been drafted "
+    "or queued. HUMAN MUST COMPLETE the adequate-search checklist "
+    "before deciding and drafting any response: "
+    "(1) incident-hold clips for the window? (2) previously exported "
+    "footage (Aware bookmarks / downloads)? (3) email & Drive search "
+    "for shared copies? (4) SRO / front office copies? "
+    "Cite the retention schedule in the response."
+)
 
 FOOTAGE_KEYWORDS = re.compile(
     r"\b(footage|video|camera|cctv|surveillance|recording|recorded)\b", re.IGNORECASE
@@ -68,6 +92,72 @@ def is_footage_request(description: str) -> bool:
     return bool(FOOTAGE_KEYWORDS.search(description))
 
 
+def calendar_day_window(dates: list[dt.date]) -> tuple[dt.datetime, dt.datetime]:
+    """[first date 00:00, day after the last date 00:00) in district time,
+    returned in UTC. A DST day is 23 or 25 hours; zoneinfo resolves the
+    offsets, and UTC results keep later arithmetic in elapsed time."""
+    tz = timezone.get_current_timezone()
+    start = dt.datetime.combine(min(dates), dt.time.min, tzinfo=tz)
+    end = dt.datetime.combine(max(dates) + dt.timedelta(days=1), dt.time.min, tzinfo=tz)
+    return start.astimezone(dt.UTC), end.astimezone(dt.UTC)
+
+
+def describe_sites(codes) -> str:
+    return ", ".join(f"{footage_sites.site_name(code)} ({code})" for code in codes)
+
+
+def bookmark_name(prr: PublicRecordsRequest, camera_name: str) -> str:
+    prefix = f"{prr.number} PRA hold — "
+    name = prefix + (camera_name or "").strip()
+    if len(name) <= BOOKMARK_NAME_MAX_LENGTH:
+        return name
+    return name[: BOOKMARK_NAME_MAX_LENGTH - 1].rstrip() + "…"
+
+
+def _local_dates(fp: FootagePreservation) -> str:
+    start = timezone.localtime(fp.window_start).date()
+    last = timezone.localtime(fp.window_end - dt.timedelta(microseconds=1)).date()
+    return f"{start:%Y-%m-%d}..{last:%Y-%m-%d}"
+
+
+def record_outside_retention_review(fp: FootagePreservation, *, reason: str) -> FootagePreservation:
+    """EXPIRED: nothing is held for the window. Queue the human review and the
+    adequate-search checklist. NEVER auto-deny; no requester response. Triage
+    and the hold task both come through here so the checklist never drifts."""
+    fp.state = FootagePreservation.State.EXPIRED
+    fp.save(update_fields=["state"])
+    StatusEvent.objects.create(
+        request=fp.request,
+        note=f"TRIAGE: {reason} {OUTSIDE_RETENTION_CHECKLIST}",
+    )
+    audit("footage.expired_window", target=fp.request.number, window=_local_dates(fp))
+    notifications.notify_adequate_search_review(fp, note=reason)
+    return fp
+
+
+def record_no_cameras_review(fp: FootagePreservation, *, site_codes) -> None:
+    """A named site has no cameras in Aware: nothing to bookmark there, but
+    footage may sit on another recorder. Queue the adequate-search review;
+    never describe this as preserved, and never answer the requester."""
+    site_codes = list(site_codes)
+    StatusEvent.objects.create(
+        request=fp.request,
+        note=(
+            f"Footage preservation: Aware has no cameras at "
+            f"{describe_sites(site_codes)}, so nothing was bookmarked there. "
+            "HUMAN REVIEW REQUIRED — no requester response has been drafted "
+            "or queued. Complete the adequate-search review before deciding "
+            "any response: (1) another recorder at the site (standalone "
+            "DVR/NVR, doorbell or intercom camera)? (2) front-office or SRO "
+            "copies? (3) email & Drive search for shared copies? "
+            "(4) facilities confirmation of what, if anything, records the "
+            "location?"
+        ),
+    )
+    audit("footage.no_cameras_at_site", target=fp.request.number, sites=site_codes)
+    notifications.notify_adequate_search_review(fp, no_camera_sites=site_codes)
+
+
 def triage_footage(prr: PublicRecordsRequest) -> FootagePreservation | None:
     """Called at intake. Returns the preservation record, or None if this
     isn't a footage request."""
@@ -84,56 +174,45 @@ def triage_footage(prr: PublicRecordsRequest) -> FootagePreservation | None:
     from .tasks import execute_footage_hold  # avoid circular import
 
     now = timezone.now()
-    # Read once: the window this decision was made against is the window the
-    # StatusEvent records, so the note can never describe a different rule
-    # from the one that was applied.
-    retention_days = runtime.get("CAMERA_RETENTION_DAYS")
-    retention_floor = now - dt.timedelta(days=retention_days)
+    retention_floor = now - dt.timedelta(days=runtime.get("CAMERA_RETENTION_DAYS"))
     dates = extract_dates(prr.description)
-    tz = timezone.get_current_timezone()
 
     if dates:
-        window_start = dt.datetime.combine(min(dates), dt.time.min, tzinfo=tz)
-        window_end = dt.datetime.combine(max(dates), dt.time.max, tzinfo=tz)
+        window_start, window_end = calendar_day_window(dates)
         note = f"Dates parsed from request: {', '.join(map(str, dates))}"
     else:
         # Preservation-first: no parseable date -> hold everything that exists.
         window_start, window_end = retention_floor, now
         note = "No dates parseable — holding full retention window pending human refinement."
 
+    # rule 9: the description is the immutable legal record, so the scope
+    # decision can always be reproduced from it.
+    sites = footage_sites.resolve_sites(prr.description)
+    if sites:
+        resolution = (
+            f"Sites named in the request: {describe_sites(s.code for s in sites)}. "
+            "Holding every camera in those Aware groups."
+        )
+    else:
+        resolution = (
+            "No district site named in the request: holding every camera "
+            "district-wide. A Records Officer narrows the hold by excluding "
+            "cameras with a reason."
+        )
+
+    # The REQUESTED window is stored unclamped. Retention is per camera
+    # (Aware pruned_to), so even a window older than the flat setting goes to
+    # the hold task: some cameras keep footage far longer.
     fp = FootagePreservation.objects.create(
         request=prr, window_start=window_start, window_end=window_end,
         detected_dates_note=note,
+        site_codes=[site.code for site in sites],
+        site_resolution=resolution[:500],
     )
-
-    if window_end < retention_floor:
-        # Entirely outside retention: human review path. NEVER auto-deny.
-        fp.state = FootagePreservation.State.EXPIRED
-        fp.save(update_fields=["state"])
-        StatusEvent.objects.create(
-            request=prr,
-            note=(
-                "TRIAGE: Requested footage window predates the "
-                f"{retention_days}-day retention period. "
-                "HUMAN REVIEW REQUIRED — no requester response has been drafted "
-                "or queued. HUMAN MUST COMPLETE the adequate-search checklist "
-                "before deciding and drafting any response: "
-                "(1) incident-hold clips for the window? (2) previously exported "
-                "clips (Aware saved clips / downloads)? (3) email & Drive search "
-                "for shared copies? (4) SRO / front office copies? "
-                "Cite the retention schedule in the response."
-            ),
-        )
-        audit("footage.expired_window", target=prr.number,
-              window=f"{window_start:%Y-%m-%d}..{window_end:%Y-%m-%d}")
-        notifications.notify_adequate_search_review(fp)
-        return fp
-
-    # Some or all footage may still exist: hold NOW, clamp to what exists.
-    fp.window_start = max(window_start, retention_floor)
-    fp.save(update_fields=["window_start"])
+    audit("footage.hold_initiated", target=prr.number,
+          sites=fp.site_codes, window=_local_dates(fp))
     execute_footage_hold.delay(fp.id)
-    audit("footage.hold_initiated", target=prr.number)
+    fp.refresh_from_db()
     return fp
 
 
@@ -167,7 +246,7 @@ def exclude_camera(camera_hold, reason: str, *, actor=None):
             "A camera-exclusion reason must contain at most "
             f"{reason_max_length} characters."
         )
-    clip_id = camera_hold.clip_id
+    bookmark_id = camera_hold.clip_id
 
     camera_hold.state = CameraHold.State.RELEASED
     camera_hold.excluded_at = timezone.now()
@@ -178,10 +257,10 @@ def exclude_camera(camera_hold, reason: str, *, actor=None):
     prr = camera_hold.preservation.request
     audit("footage.camera_excluded", target=prr.number, actor=actor,
           camera=camera_hold.camera_name or camera_hold.camera_id, reason=reason)
-    if clip_id:
-        def delete_clip_after_evidence_commits():
+    if bookmark_id:
+        def delete_bookmark_after_evidence_commits():
             try:
-                alta.delete_clip(clip_id)
+                alta.delete_bookmark(bookmark_id)
             except alta.AltaError as exc:
                 audit(
                     "footage.camera_release_failed",
@@ -191,7 +270,7 @@ def exclude_camera(camera_hold, reason: str, *, actor=None):
                     error=str(exc)[:500],
                 )
 
-        transaction.on_commit(delete_clip_after_evidence_commits)
+        transaction.on_commit(delete_bookmark_after_evidence_commits)
     return camera_hold
 
 
