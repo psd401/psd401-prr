@@ -98,16 +98,13 @@ ACKNOWLEDGMENT_DRAFT_CONFIRMATION_FIELDS = (
     "draft_metadata",
 )
 
-#: Bounds for the overdue scan. The default is a triage-sized page a Records
-#: Officer can actually act on; the ceiling exists so a caller cannot ask for
-#: the whole backlog in one response. OVERDUE_MAX_PAGES bounds the *work*
-#: rather than the output: the staff API pages at 50 rows, so this reads at
-#: most 2,000 requests before reporting an incomplete scan.
 #: Triage fields a record-items row carries to an agent: nothing that is
-#: record text, a person's address, or model rationale.
+#: record text, a person's address, model rationale, or a filename. Unlike
+#: a request subject (signed off for MCP on 2026-10-19), a record's filename
+#: is an attachment name or email subject inside the collected records and can
+#: name a student, so it stays in the staff UI.
 RECORD_ITEM_FIELDS = (
     "id",
-    "original_filename",
     "custodian",
     "email_sender_domain",
     "review_state",
@@ -116,7 +113,9 @@ RECORD_ITEM_FIELDS = (
     "advisory_suggested_state",
     "advisory_confidence",
 )
-RECORD_CLUSTER_FIELDS = ("key", "label", "size", "ai_majority", "record_item_ids")
+#: A cluster's label is a member's filename and a sender cluster's key is an
+#: address, so neither leaves; size, majority, and ids are what a batch needs.
+RECORD_CLUSTER_FIELDS = ("size", "ai_majority", "record_item_ids")
 DECISION_BATCH_KINDS = (
     "review",
     "supersede",
@@ -124,6 +123,12 @@ DECISION_BATCH_KINDS = (
     "redaction_group",
     "intake_label",
 )
+
+#: Bounds for the overdue scan. The default is a triage-sized page a Records
+#: Officer can actually act on; the ceiling exists so a caller cannot ask for
+#: the whole backlog in one response. OVERDUE_MAX_PAGES bounds the *work*
+#: rather than the output: the staff API pages at 50 rows, so this reads at
+#: most 2,000 requests before reporting an incomplete scan.
 OVERDUE_DEFAULT_LIMIT = 25
 OVERDUE_MAX_LIMIT = 200
 OVERDUE_MAX_PAGES = 40
@@ -293,6 +298,20 @@ def _validated_base_url(base_url: str) -> str:
     if port is not None:
         authority = f"{authority}:{port}"
     return f"{parsed.scheme.lower()}://{authority}{parsed.path.rstrip('/')}"
+
+
+def _without_record_filenames(batch):
+    """A decision batch as an agent sees it: its records by id and state only."""
+    if isinstance(batch, dict) and isinstance(batch.get("records"), list):
+        batch = {
+            **batch,
+            "records": [
+                {"id": record.get("id"), "review_state": record.get("review_state")}
+                for record in batch["records"]
+                if isinstance(record, dict)
+            ],
+        }
+    return batch
 
 
 class PRRClient:
@@ -678,10 +697,10 @@ class PRRClient:
         """List one request's records for proposing a decision batch -- GET
         /api/staff/record-items/.
 
-        Rows carry triage fields only: id, filename, custodian, sender
-        domain, review state, redaction count, tags, and the standing AI
-        suggestion with its confidence. No record text, addresses, or model
-        rationale leaves through this tool.
+        Rows carry triage fields only: id, custodian, sender domain, review
+        state, redaction count, tags, and the standing AI suggestion with its
+        confidence. No record text, filename, address, or model rationale
+        leaves through this tool.
         """
         params: dict[str, object] = {
             "request": _validated_request_number(request_number, field="request_number"),
@@ -792,7 +811,7 @@ class PRRClient:
                 normalized = quote(str(uuid.UUID(str(batch_id))), safe="")
             except (AttributeError, TypeError, ValueError) as exc:
                 raise ValueError("batch_id must be a UUID.") from exc
-            return self._get(f"/api/staff/decision-batches/{normalized}/")
+            return _without_record_filenames(self._get(f"/api/staff/decision-batches/{normalized}/"))
         params = {}
         if request_number:
             params["request"] = _validated_request_number(request_number, field="request_number")
@@ -800,7 +819,10 @@ class PRRClient:
             if state not in ("proposed", "approved", "rejected"):
                 raise ValueError("state must be proposed, approved, or rejected.")
             params["state"] = state
-        return self._get("/api/staff/decision-batches/", params or None)
+        listing = self._get("/api/staff/decision-batches/", params or None)
+        if isinstance(listing, dict) and isinstance(listing.get("results"), list):
+            listing["results"] = [_without_record_filenames(batch) for batch in listing["results"]]
+        return listing
 
     def suggest_exemption_citations(
         self,

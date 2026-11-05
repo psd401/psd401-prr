@@ -356,12 +356,13 @@ def create_mcp_server(
         ) -> dict:
             """List one public records request's collected records, 50 per
             page, to decide what to propose in a decision batch. Each row has
-            the record id, filename, custodian, sender domain, review state
+            the record id, custodian, sender domain, review state
             (unreviewed, responsive, non_responsive, duplicate, withheld,
             superseded), redaction count, tags, and the standing AI
             suggestion with its confidence. Filter by `review_state`. Rows
-            never include record text, people's addresses, or model
-            rationale. Requires a reviewer or Records Officer token."""
+            never include record text, filenames, people's addresses, or
+            model rationale; a person sees filenames in the staff UI. Requires
+            a reviewer or Records Officer token."""
             return await call(
                 RECORD_ITEMS_LIST, ctx,
                 request_number=request_number, review_state=review_state, page=page,
@@ -378,8 +379,9 @@ def create_mcp_server(
         ) -> dict:
             """Group one request's records by email thread, sender, or tag.
             Each cluster gives its size, the AI majority suggestion, and its
-            record ids, so a whole cluster can be proposed as one review
-            batch. A view of the records, not a decision."""
+            record ids (not its label, which is a filename or address), so a
+            whole cluster can be proposed as one review batch. A view of the
+            records, not a decision."""
             return await call(RECORD_CLUSTERS_LIST, ctx, request_number=request_number, group_by=group_by)
 
         @mcp.tool(
@@ -406,8 +408,9 @@ def create_mcp_server(
         ) -> dict:
             """Get one decision batch by `batch_id`, or list batches filtered
             by `request_number` and `state`. A batch shows its kind, items,
-            evidence, who proposed it, and -- once a person decided it --
-            approved or rejected, by whom, why, and the result."""
+            evidence, who proposed it, its records by id and review state,
+            and -- once a person decided it -- approved or rejected, by whom,
+            why, and the result."""
             return await call(
                 DECISION_BATCH_GET, ctx,
                 batch_id=batch_id, request_number=request_number, state=state,

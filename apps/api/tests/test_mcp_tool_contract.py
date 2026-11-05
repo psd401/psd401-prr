@@ -44,7 +44,7 @@ from integrations.mcp.tools import (
 #: message prints the new value -- and only in a commit whose diff shows the
 #: description or annotation change that earned it.
 TOOL_DEFINITION_DIGEST = (
-    "70160910bab82bd779b624bfa19a53178271024e4611c4e7e505d3abf3d42d7c"
+    "80c6e6c32ffe0da26f461dca37d03daa490b9f627ebdfc0f44e3fc1f3fec9726"
 )
 
 

@@ -33,6 +33,7 @@ from .models import (
     CollectionTask,
     DecisionBatch,
     DecisionBatchDecision,
+    ExemptionCitation,
     PublicRecordsRequest,
     RecordItem,
     VaultCountRun,
@@ -120,6 +121,8 @@ def _validate_redaction_group(payload):
         exemption_id = int(payload.get("exemption_id"))
     except (TypeError, ValueError) as exc:
         raise ValidationError("A redaction group names its exemption_id.") from exc
+    if not ExemptionCitation.objects.filter(pk=exemption_id, active=True).exists():
+        raise ValidationError("No active exemption citation has that exemption_id.")
     return request, {
         "request_number": request.number,
         "exemption_id": exemption_id,

@@ -32,6 +32,9 @@ class RecordReadTests(SimpleTestCase):
         self.assertEqual(shaped["advisory_suggested_state"], "responsive")
         self.assertNotIn("email_from", shaped)
         self.assertNotIn("email_to", shaped)
+        # A filename can name a student (an attachment, an email subject);
+        # it stays in the staff UI and never reaches a model provider.
+        self.assertNotIn("original_filename", shaped)
         self.assertEqual(result["count"], 51)
         self.assertEqual(result["next_page"], 2)
 
@@ -44,6 +47,9 @@ class RecordReadTests(SimpleTestCase):
             result = client().list_record_clusters("PRR-2026-0042")
         self.assertEqual(result["clusters"][0]["record_item_ids"], [ITEM_ID])
         self.assertNotIn("samples", result["clusters"][0])
+        # A thread label is a filename and a sender key an address.
+        self.assertNotIn("label", result["clusters"][0])
+        self.assertNotIn("key", result["clusters"][0])
 
     def test_advisories_drop_the_model_rationale(self):
         responsiveness = {"latest": {
@@ -92,6 +98,15 @@ class DecisionBatchToolTests(SimpleTestCase):
         for kind, payload, evidence in (("approve", {}, "x"), ("review", [], "x"), ("review", {}, " ")):
             with self.subTest(kind=kind), self.assertRaises(ValueError):
                 client().propose_decision_batch(kind, payload, evidence)  # type: ignore[arg-type]
+
+    def test_a_batch_read_drops_record_filenames(self):
+        batch = {"id": BATCH_ID, "records": [{"id": ITEM_ID, "original_filename": "Student IEP.pdf",
+                                               "review_state": "unreviewed"}]}
+        with patch.object(PRRClient, "_get", side_effect=[batch, {"count": 1, "results": [batch]}]):
+            one = client().get_decision_batch(batch_id=BATCH_ID)
+            many = client().get_decision_batch()
+        self.assertEqual(one["records"], [{"id": ITEM_ID, "review_state": "unreviewed"}])
+        self.assertNotIn("Student IEP.pdf", str(many))
 
     def test_getting_one_batch_or_a_filtered_list(self):
         with patch.object(PRRClient, "_get", return_value={}) as get:

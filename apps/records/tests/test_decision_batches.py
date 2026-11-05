@@ -29,6 +29,7 @@ from apps.records.models import (
     CollectionTask,
     DecisionBatch,
     DecisionBatchDecision,
+    ExemptionCitation,
     PublicRecordsRequest,
     RecordItem,
     Requester,
@@ -230,16 +231,25 @@ class ApproveTests(_Fixture):
                 actor=self.officer, evidence_summary="Looks new.",
             )
 
+    def test_a_redaction_group_needs_an_active_exemption(self):
+        with self.assertRaisesMessage(ValidationError, "exemption"):
+            propose_decision_batch(
+                DecisionBatch.Kind.REDACTION_GROUP,
+                {"request_number": self.request.number, "exemption_id": 999999, "pattern": "phone"},
+                actor=self.reviewer, evidence_summary="No such exemption.",
+            )
+
     @patch("apps.records.decision_batches.create_redaction_batch")
     def test_approving_a_redaction_group_opens_its_sampled_qa_batch(self, create):
         create.return_value.pk = 41
+        exemption = ExemptionCitation.objects.create(citation="RCW 42.56.250(4)", short_name="Employee contact")
         batch = propose_decision_batch(
             DecisionBatch.Kind.REDACTION_GROUP,
-            {"request_number": self.request.number, "exemption_id": 7, "pattern": "phone"},
+            {"request_number": self.request.number, "exemption_id": exemption.pk, "pattern": "phone"},
             actor=self.reviewer, evidence_summary="Twelve staff cell numbers.",
         )
         approve_decision_batch(batch.pk, actor=self.reviewer)
-        create.assert_called_once_with(self.request, exemption_id=7, pattern="phone", actor=self.reviewer)
+        create.assert_called_once_with(self.request, exemption_id=exemption.pk, pattern="phone", actor=self.reviewer)
         self.assertEqual(DecisionBatchDecision.objects.get(batch=batch).result, {"redaction_batch_id": 41})
 
 
@@ -267,6 +277,9 @@ class DecisionBatchApiTests(_Fixture):
         self.assertEqual(refused.status_code, 403)
         self.assertEqual(refused.json()["code"], "human_approval_required")
         self.assertFalse(DecisionBatchDecision.objects.exists())
+
+    def test_an_unknown_state_filter_is_refused(self):
+        self.assertEqual(self.session.get("/api/staff/decision-batches/?state=pending").status_code, 400)
 
     def test_a_person_approves_in_the_staff_application(self):
         batch_id = self.token.post("/api/staff/decision-batches/", self.body, format="json").json()["id"]

@@ -130,6 +130,8 @@ class DecisionBatchViewSet(
         queryset = DecisionBatch.objects.select_related("request", "proposed_by").filter(kind__in=kinds)
         decided = DecisionBatchDecision.objects.filter(batch=OuterRef("pk"))
         state = self.request.query_params.get("state", "").strip()
+        if state and state not in {"proposed", *DecisionBatchDecision.Outcome.values}:
+            raise serializers.ValidationError({"state": "Use proposed, approved, or rejected."})
         if state == "proposed":
             queryset = queryset.filter(~Exists(decided))
         elif state in DecisionBatchDecision.Outcome.values:
