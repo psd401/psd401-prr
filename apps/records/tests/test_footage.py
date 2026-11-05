@@ -1317,7 +1317,7 @@ class ExclusionGateTests(TestCase):
             target=ch.preservation.request.number,
             actor=officer,
             camera=ch.camera_name or ch.camera_id,
-            error="Alta release unavailable",
+            error="Aware bookmark delete failed (AltaError).",
         )
 
     def test_no_automated_exclusion_path(self):
@@ -1728,4 +1728,86 @@ class ReleaseGateTests(TestCase):
         failure = failures.get(detail__bookmark="bm-cam-1")
         self.assertEqual(failure.actor, officer)
         self.assertEqual(failure.detail["camera"], "Gym Entrance")
-        self.assertEqual(failure.detail["error"], "Aware delete unavailable")
+        self.assertEqual(failure.detail["error"], "Aware bookmark delete failed (AltaError).")
+
+    # A bookmark Aware would not delete stays visible and can be retried.
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_a_failed_delete_is_recorded_and_a_repost_retries_only_it(
+        self, delete_bookmark,
+    ):
+        fp = self._held_preservation()
+
+        def refuse_cam_3(bookmark_id):
+            if bookmark_id == "bm-cam-3":
+                raise RuntimeError(f"{FAKE_BASE}/api/v1/devices/{DEVICE_GUID} reset")
+
+        delete_bookmark.side_effect = refuse_cam_3
+        with self.captureOnCommitCallbacks(execute=True):
+            self._release(fp)
+
+        failed = fp.camera_holds.get(camera_id="cam-3")
+        self.assertEqual(failed.state, CameraHold.State.RELEASE_FAILED)
+        self.assertEqual(
+            fp.camera_holds.get(camera_id="cam-1").state, CameraHold.State.RELEASED,
+        )
+        log = AuditLog.objects.get(action="footage.bookmark_release_failed")
+        self.assertEqual(log.detail["error"], "Aware bookmark delete failed (RuntimeError).")
+        self.assertTrue(
+            fp.request.events.filter(note__contains="could not be deleted").exists()
+        )
+
+        delete_bookmark.reset_mock()
+        delete_bookmark.side_effect = None
+        with self.captureOnCommitCallbacks(execute=True):
+            self._release(fp)
+
+        delete_bookmark.assert_called_once_with("bm-cam-3")
+        failed.refresh_from_db()
+        self.assertEqual(failed.state, CameraHold.State.RELEASED)
+        fp.refresh_from_db()
+        self.assertEqual(fp.state, FootagePreservation.State.RELEASED)
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_release_deletes_a_failed_hold_that_recorded_a_bookmark(
+        self, delete_bookmark,
+    ):
+        # The hold crashed after Aware made the bookmark (C2): FAILED, with an id.
+        fp = self._held_preservation()
+        fp.camera_holds.filter(camera_id="cam-2").update(state=CameraHold.State.FAILED)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self._release(fp)
+
+        self.assertIn("bm-cam-2", [c.args[0] for c in delete_bookmark.call_args_list])
+        self.assertEqual(
+            fp.camera_holds.get(camera_id="cam-2").state, CameraHold.State.RELEASED,
+        )
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_a_released_preservation_with_nothing_failed_is_not_released_again(
+        self, delete_bookmark,
+    ):
+        fp = self._held_preservation()
+        with self.captureOnCommitCallbacks(execute=True):
+            self._release(fp)
+        delete_bookmark.reset_mock()
+
+        with self.assertRaises(ValueError), self.captureOnCommitCallbacks(execute=True):
+            self._release(fp)
+        delete_bookmark.assert_not_called()
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_a_failed_exclusion_delete_is_audited_without_detail(self, delete_bookmark):
+        fp = self._held_preservation()
+        delete_bookmark.side_effect = RuntimeError(f"{FAKE_BASE}/{DEVICE_GUID}")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            triage.exclude_camera(
+                fp.camera_holds.get(camera_id="cam-2"),
+                "Camera faces staff parking; request concerns the gym entrance only.",
+                actor=self._records_officer(),
+            )
+
+        log = AuditLog.objects.get(action="footage.camera_release_failed")
+        self.assertEqual(log.detail["error"], "Aware bookmark delete failed (RuntimeError).")

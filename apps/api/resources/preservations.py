@@ -34,14 +34,19 @@ class PreservationSerializer(serializers.ModelSerializer):
     request_closed = serializers.SerializerMethodField()
     confirmation_text = serializers.SerializerMethodField()
     widenable = serializers.SerializerMethodField()
+    releasable = serializers.SerializerMethodField()
 
     class Meta:
         model = FootagePreservation
         fields = ["id", "request_number", "state", "window_start", "window_end",
                   "detected_dates_note", "site_codes", "site_resolution",
                   "held_count", "camera_holds", "confirmation_text",
-                  "request_closed", "widenable", "released_at", "released_by",
-                  "release_reason"]
+                  "request_closed", "releasable", "widenable", "released_at",
+                  "released_by", "release_reason"]
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_releasable(self, obj):
+        return triage.is_releasable(obj)
 
     @extend_schema_field(serializers.BooleanField())
     def get_widenable(self, obj):
@@ -65,7 +70,7 @@ class PreservationViewSet(viewsets.ReadOnlyModelViewSet):
     """List/retrieve only — preservations are evidence records; no
     create/update/destroy routes exist for this resource."""
     queryset = (FootagePreservation.objects
-                .select_related("request", "released_by")
+                .select_related("request__merged_into", "released_by")
                 .prefetch_related("camera_holds__excluded_by")
                 .order_by("-created_at"))
     serializer_class = PreservationSerializer

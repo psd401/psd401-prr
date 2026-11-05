@@ -378,6 +378,31 @@ class PreservationApiTests(TestCase):
         self.fp.refresh_from_db()
         self.assertEqual(self.fp.state, FootagePreservation.State.HELD)
 
+    def test_releasable_is_computed_by_the_server(self):
+        url = f"/api/staff/preservations/{self.fp.id}/"
+        self.assertFalse(self.client.get(url).json()["releasable"])   # open
+
+        self._close_request()
+        self.assertTrue(self.client.get(url).json()["releasable"])
+
+        other = PublicRecordsRequest.objects.create(
+            requester=self.prr.requester, description="case of record")
+        PublicRecordsRequest.objects.filter(pk=self.prr.pk).update(merged_into=other)
+        self.assertFalse(self.client.get(url).json()["releasable"])   # target open
+        PublicRecordsRequest.objects.filter(pk=self.prr.pk).update(merged_into=None)
+
+        FootagePreservation.objects.filter(pk=self.fp.pk).update(
+            state=FootagePreservation.State.RELEASED,
+        )
+        CameraHold.objects.filter(preservation=self.fp).update(
+            state=CameraHold.State.RELEASED,
+        )
+        self.assertFalse(self.client.get(url).json()["releasable"])
+        CameraHold.objects.filter(pk=self.held.pk).update(
+            state=CameraHold.State.RELEASE_FAILED,
+        )
+        self.assertTrue(self.client.get(url).json()["releasable"])    # retry
+
     # -- widen action --------------------------------------------------------
 
     WIDEN_REASON = "Request also names the bus loop beside the gym."

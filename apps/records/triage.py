@@ -32,6 +32,7 @@ import datetime as dt
 import re
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.audit.models import audit
@@ -389,15 +390,18 @@ def exclude_camera(camera_hold, reason: str, *, actor=None):
           camera=camera_hold.camera_name or camera_hold.camera_id, reason=reason)
     if bookmark_id:
         def delete_bookmark_after_evidence_commits():
+            from .tasks import _safe_alta_error
+
             try:
                 alta.delete_bookmark(bookmark_id)
-            except alta.AltaError as exc:
+            # The exclusion is committed: record the failure, don't raise.
+            except Exception as exc:  # noqa: BLE001
                 audit(
                     "footage.camera_release_failed",
                     target=prr.number,
                     actor=actor,
                     camera=camera_hold.camera_name or camera_hold.camera_id,
-                    error=str(exc)[:500],
+                    error=_safe_alta_error(exc, action="bookmark delete"),
                 )
 
         transaction.on_commit(delete_bookmark_after_evidence_commits)
@@ -478,6 +482,27 @@ RELEASABLE_PRESERVATION_STATES = (
 )
 
 
+def is_releasable(fp: FootagePreservation) -> bool:
+    """Whether release_preservation would accept this preservation now, the
+    actor and reason aside: the request and any case it was merged into are
+    closed, and it holds footage or has bookmarks left to retry."""
+    from .models import CameraHold
+    from .services import CLOSED_STATUSES
+
+    prr = fp.request
+    if prr.status not in CLOSED_STATUSES:
+        return False
+    target = prr.merged_into
+    if target is not None and target.status not in CLOSED_STATUSES:
+        return False
+    if fp.state in RELEASABLE_PRESERVATION_STATES:
+        return True
+    # all() so a prefetched list is read, not queried again.
+    return fp.state == FootagePreservation.State.RELEASED and any(
+        hold.state == CameraHold.State.RELEASE_FAILED for hold in fp.camera_holds.all()
+    )
+
+
 @transaction.atomic
 def release_preservation(
     preservation: FootagePreservation,
@@ -531,7 +556,10 @@ def release_preservation(
         .select_related("request__merged_into")
         .get(pk=preservation.pk)
     )
-    if fp.state not in RELEASABLE_PRESERVATION_STATES:
+    retry = fp.state == FootagePreservation.State.RELEASED and fp.camera_holds.filter(
+        state=CameraHold.State.RELEASE_FAILED,
+    ).exists()
+    if fp.state not in RELEASABLE_PRESERVATION_STATES and not retry:
         raise ValueError(
             "Only a held or partly held preservation can be released; this "
             f"one is {fp.get_state_display().lower()}."
@@ -549,30 +577,36 @@ def release_preservation(
             "open. This hold preserves the footage that case answers for."
         )
 
-    holds = list(
-        fp.camera_holds.select_for_update().filter(
-            state__in=CameraHold.BOOKMARKED_STATES,
-            excluded_at__isnull=True,
-        )
-    )
+    live = fp.camera_holds.select_for_update().filter(excluded_at__isnull=True)
+    if retry:
+        # Only the bookmarks Aware would not delete last time.
+        holds = list(live.filter(state=CameraHold.State.RELEASE_FAILED))
+    else:
+        # A FAILED hold with an id crashed after Aware made the bookmark.
+        holds = list(live.filter(
+            Q(state__in=CameraHold.BOOKMARKED_STATES)
+            | (Q(state=CameraHold.State.FAILED) & ~Q(clip_id=""))
+        ))
     bookmarks = [
-        (hold.camera_name or hold.camera_id, hold.clip_id)
+        (hold.pk, hold.camera_name or hold.camera_id, hold.clip_id)
         for hold in holds
         if hold.clip_id
     ]
     audit(
-        "footage.preservation_released",
+        "footage.preservation_release_retried" if retry
+        else "footage.preservation_released",
         target=prr.number,
         actor=actor,
         reason=reason,
         attest_no_litigation_hold=True,
         bookmarks=len(bookmarks),
     )
-    fp.state = FootagePreservation.State.RELEASED
-    fp.released_at = timezone.now()
-    fp.released_by = actor
-    fp.release_reason = reason
-    fp.save(update_fields=["state", "released_at", "released_by", "release_reason"])
+    if not retry:
+        fp.state = FootagePreservation.State.RELEASED
+        fp.released_at = timezone.now()
+        fp.released_by = actor
+        fp.release_reason = reason
+        fp.save(update_fields=["state", "released_at", "released_by", "release_reason"])
     CameraHold.objects.filter(pk__in=[hold.pk for hold in holds]).update(
         state=CameraHold.State.RELEASED,
     )
@@ -580,9 +614,15 @@ def release_preservation(
         request=prr,
         actor=actor,
         note=(
-            f"Footage preservation released: {len(bookmarks)} Aware "
-            "bookmark(s) queued for deletion after the request closed. The "
-            "Records Officer attested that no litigation hold, pending "
+            (
+                f"Footage preservation release retried: {len(bookmarks)} Aware "
+                "bookmark(s) that could not be deleted are queued for deletion "
+                "again."
+                if retry else
+                f"Footage preservation released: {len(bookmarks)} Aware "
+                "bookmark(s) queued for deletion after the request closed."
+            )
+            + " The Records Officer attested that no litigation hold, pending "
             "lawsuit, or reasonably anticipated litigation covers this "
             f"footage. Reason: {reason}"
         ),
@@ -590,18 +630,37 @@ def release_preservation(
 
     if bookmarks:
         def delete_bookmarks_after_release_commits():
-            for camera, bookmark_id in bookmarks:
+            from .tasks import _safe_alta_error
+
+            failed = []
+            for hold_pk, camera, bookmark_id in bookmarks:
                 try:
                     alta.delete_bookmark(bookmark_id)
-                except alta.AltaError as exc:
+                # Any failure, not only AltaError: the rest still get deleted.
+                except Exception as exc:  # noqa: BLE001
+                    failed.append(camera)
+                    CameraHold.objects.filter(pk=hold_pk).update(
+                        state=CameraHold.State.RELEASE_FAILED,
+                    )
                     audit(
                         "footage.bookmark_release_failed",
                         target=prr.number,
                         actor=actor,
                         camera=camera,
                         bookmark=bookmark_id,
-                        error=str(exc)[:500],
+                        error=_safe_alta_error(exc, action="bookmark delete"),
                     )
+            if failed:
+                StatusEvent.objects.create(
+                    request=prr,
+                    actor=actor,
+                    note=(
+                        f"Footage preservation release: {len(failed)} Aware "
+                        "bookmark(s) could not be deleted and may still exist: "
+                        f"{'; '.join(failed)[:1000]}. Post the release again "
+                        "to retry them."
+                    ),
+                )
 
         transaction.on_commit(delete_bookmarks_after_release_commits)
     return fp
