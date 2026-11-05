@@ -2247,10 +2247,12 @@ SETTINGS: tuple[SettingSpec, ...] = (
         default="",
         allow_blank=True,
         max_length=255,
-        pattern=r"https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~/-]*)?",
+        # The origin only: the client adds /api/v1 itself.
+        pattern=r"https://[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(?::[0-9]{1,5})?",
         format_message=(
-            "The Alta address is an HTTPS URL with no credentials or query, "
-            "such as https://psd401.alta.avigilon.com/api/v1."
+            "The Alta address is the tenant's HTTPS origin with no path, "
+            "credentials, or query, such as "
+            "https://example.us4.aware.avasecurity.com."
         ),
         category=CATEGORY_INTEGRATIONS,
         label="Avigilon Alta API address",
@@ -2261,17 +2263,37 @@ SETTINGS: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
-        key="ALTA_API_TOKEN",
+        key="ALTA_API_USERNAME",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        max_length=254,
+        pattern=r"\S{1,254}",
+        format_message=(
+            "The Alta service account is its sign-in name with no spaces, "
+            "such as prr-holds@example.org."
+        ),
+        category=CATEGORY_INTEGRATIONS,
+        label="Avigilon Alta service account",
+        consequence=(
+            "The Alta account footage holds sign in as. Give it to nothing "
+            "else: Alta keeps three sessions per account, so anything else "
+            "signing in as it logs the holds out. Blank, holds fall back to "
+            "manual facilities work."
+        ),
+    ),
+    SettingSpec(
+        key="ALTA_API_PASSWORD",
         type=values.SECRET,
         default="",
         allow_blank=True,
-        max_length=4096,
+        max_length=1024,
         category=CATEGORY_INTEGRATIONS,
-        label="Avigilon Alta API token",
+        label="Avigilon Alta service-account password",
         consequence=(
-            "The bearer token footage holds are placed with. It is "
+            "The password the holds account signs in with. It is "
             "write-only: it can be replaced or cleared, never read back. "
-            "Blank or revoked, holds fall back to manual facilities work."
+            "Blank or wrong, holds fall back to manual facilities work."
         ),
     ),
 )
