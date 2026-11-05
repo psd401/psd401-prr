@@ -123,6 +123,14 @@ FIXTURE_TRUST_DISCARD_COUNT = 5
 #: the group-acceptance flow. Its PDFs live in the e2e filesystem store.
 FIXTURE_REDACTION_REQUEST_NUMBER = "PRR-E2E-0012"
 FIXTURE_REDACTION_RECORD_COUNT = 3
+#: A case of unreviewed PDFs with AI suggestions for the keyboard Review tab
+#: (#46). Its PDFs live in the e2e filesystem store.
+FIXTURE_FLIGHT_REQUEST_NUMBER = "PRR-E2E-0013"
+FIXTURE_FLIGHT_RECORDS = (
+    ("flight-bus-video", "Route 12 bus video request log, March 3.", "responsive", 0.94),
+    ("flight-lunch-menu", "Cafeteria lunch menu for the week of March 2.", "non_responsive", 0.97),
+    ("flight-route-memo", "Memo about route 12 driver staffing.", "responsive", 0.71),
+)
 FIXTURE_ESTIMATE_LETTER_INTENT = (
     "Route 12 bus video from March 3, 2026, between 3 and 4 p.m."
 )
@@ -1191,6 +1199,77 @@ def _seed_redaction_proposal_case(officer):
             rationale="An employee's personal cell number.",
             source_span_ids=["p1s1"],
             source_text_sha256=hashlib.sha256(label.encode()).hexdigest(),
+        )
+    return request
+
+
+def _seed_review_flight_case(officer):
+    """Seed unreviewed PDFs with written AI suggestions for keyboard review.
+
+    Seeded only when the e2e filesystem store exists, like the redaction
+    case; nothing here reviews a record.
+    """
+    import io
+
+    import pymupdf as fitz
+    from django.conf import settings as django_settings
+
+    if not getattr(django_settings, "PRR_E2E_FILESYSTEM_OBJECT_STORE", ""):
+        return None
+
+    from apps.records.storage import generated_record_storage_key
+    from apps.secure_files import _object_store_client
+
+    requester, _ = Requester.objects.get_or_create(
+        email="bus-route@example.org",
+        defaults={"id": _fixture_uuid("flight-requester"), "name": "Bus Route Requester"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_FLIGHT_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("flight-request"),
+            "requester": requester,
+            "description": "Records about route 12 in March 2026.",
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    if not created:
+        return request
+    client = _object_store_client()
+    for label, text, suggested, confidence in FIXTURE_FLIGHT_RECORDS:
+        document = fitz.open()
+        page = document.new_page(width=612, height=792)
+        page.insert_text((72, 96), text, fontsize=12)
+        pdf = document.tobytes()
+        document.close()
+        key = generated_record_storage_key(request.pk, original_filename=f"{label}.pdf")
+        client.put_object(
+            Bucket=django_settings.OBJECT_STORE["bucket"], Key=key,
+            Body=io.BytesIO(pdf), IfNoneMatch="*",
+        )
+        item = RecordItem.objects.create(
+            pk=_fixture_uuid(label),
+            request=request,
+            source_system="fixture",
+            original_filename=f"synthetic-{label}.pdf",
+            storage_key=key,
+            content_length=len(pdf),
+            content_type="application/pdf",
+            sha256=hashlib.sha256(pdf).hexdigest(),
+        )
+        AdvisoryRun.objects.create(
+            kind=AdvisoryRun.Kind.RECORD_RESPONSIVENESS,
+            request=request,
+            record_item=item,
+            model_identifier="synthetic-review-model",
+            input_sha256=hashlib.sha256(f"{label}-run".encode()).hexdigest(),
+            state=AdvisoryRun.State.COMPLETE,
+            requested_by=officer,
+            proposal={"suggested_state": suggested, "confidence": confidence,
+                      "matched_terms": [], "rationale": f"Synthetic: {text}"},
         )
     return request
 
@@ -2765,6 +2844,7 @@ class Command(BaseCommand):
             _seed_estimate_letter_case(officer)
             _seed_trust_ladder_case(officer)
             _seed_redaction_proposal_case(officer)
+            _seed_review_flight_case(officer)
             _seed_email_intake_redirect_cases(officer, inbound_transport)
             _reconcile_fixture_inbound_work(request)
             _seed_role_work(

@@ -527,6 +527,95 @@ def _review_record(
     return item, decision
 
 
+_UNDO_RESTORABLE_STATES = {
+    RecordItem.ReviewState.RESPONSIVE,
+    RecordItem.ReviewState.NON_RESPONSIVE,
+    RecordItem.ReviewState.DUPLICATE,
+}
+
+
+@transaction.atomic
+def undo_review(record_item_id, *, actor):
+    """Undo the actor's own latest review decision on one record (#46).
+
+    The record goes back to the state recorded as ``before`` in that
+    decision's audit row: unreviewed, or the actor's own earlier responsive,
+    non-responsive, or duplicate decision (re-recorded in their name). An
+    earlier decision by someone else is never re-attributed; undo refuses.
+    Only the reviewer who made the latest decision may undo it. A withheld
+    decision on either side, and a record with active redactions, are never
+    undone this way: each carries a judgement that has to be revisited
+    deliberately.
+    """
+    _require_reviewer(actor)
+    item = (
+        RecordItem.objects.select_for_update()
+        .select_related("request")
+        .get(pk=record_item_id)
+    )
+    last = (
+        AuditLog.objects.filter(action="record.reviewed", target=str(item.pk))
+        .order_by("-at", "-pk")
+        .first()
+    )
+    if last is None or item.review_state == RecordItem.ReviewState.UNREVIEWED:
+        raise ValidationError("There is no review decision on this record to undo.")
+    reviewer_pk = item.reviewed_by.pk if item.reviewed_by else None
+    if last.actor_id != actor.pk or reviewer_pk != actor.pk:
+        raise ValidationError("Only the reviewer who made the latest decision may undo it.")
+    undone = item.review_state
+    before = last.detail.get("before") or {}
+    previous = str(before.get("state") or "")
+    if RecordItem.ReviewState.WITHHELD in (undone, previous):
+        raise ValidationError(
+            "A decision to withhold, or one that replaced it, is revisited one at "
+            "a time, not undone."
+        )
+    if Redaction.objects.filter(record_item=item, voided_at__isnull=True).exists():
+        raise ValidationError("Void the active redactions before undoing this decision.")
+    if previous in _UNDO_RESTORABLE_STATES:
+        # Restoring a decision re-records it in the caller's name, so only
+        # the caller's own earlier decision may come back this way; another
+        # reviewer's is never re-attributed. Review the record again instead.
+        if before.get("reviewed_by_id") != actor.pk:
+            raise ValidationError(
+                "The earlier decision was another reviewer's; review the record "
+                "again instead of undoing."
+            )
+        item, _decision = _review_record(item.pk, state=previous, actor=actor)
+    elif previous == RecordItem.ReviewState.UNREVIEWED:
+        item.review_state = RecordItem.ReviewState.UNREVIEWED
+        item.reviewed_by = None
+        item.reviewed_at = None
+        RecordItemWithholdingExemption.objects.filter(record_item=item).delete()
+        item.withholding_exemption = None
+        _clear_second_review(item)
+        _clear_derived_artifact(item)
+        item.save(update_fields=[
+            "review_state", "reviewed_by", "reviewed_at", "withholding_exemption",
+            "second_reviewed_by", "second_reviewed_at", "redacted_storage_key",
+            "redacted_sha256", "redacted_content_length", "redacted_content_type",
+            "redacted_manifest_sha256",
+        ])
+        # The latest decision on the record is now "none", so agreement
+        # stops counting the one that was undone.
+        _store_decision(item, state=RecordItem.ReviewState.UNREVIEWED, actor=actor, bulk=False)
+        from apps.work_queue.integration import schedule_source_work_item_reconciliation
+
+        schedule_source_work_item_reconciliation("records", item.pk)
+    else:
+        raise ValidationError("This decision cannot be undone; review the record again.")
+    audit(
+        "record.review_undone",
+        target=str(item.pk),
+        actor=actor,
+        request_number=item.request.number,
+        undone_state=undone,
+        restored_state=item.review_state,
+    )
+    return item
+
+
 def _store_decision(item, *, state, actor, bulk):
     """Store the decision and the suggestion standing at decision time (#38)."""
     from .agreement import latest_suggestion_runs
