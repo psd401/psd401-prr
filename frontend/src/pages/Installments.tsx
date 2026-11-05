@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { StaffRole } from '../api/auth'
-import { api, unwrap, type Page } from '../api/client'
+import { Link } from 'react-router'
+import { api, ApiError, unwrap, type Page } from '../api/client'
 import {
   Badge,
   Button,
@@ -131,6 +132,19 @@ function stateBadge(row: Installment) {
   if (row.fee_paid_at) return <Badge tone="blue">Fee paid</Badge>
   if (Number(row.fee_amount) === 0) return <Badge tone="blue">Ready for release — no fee</Badge>
   return <Badge tone="amber">Awaiting payment</Badge>
+}
+
+/** Fee panels lead when a fee applies, and fold away when it is $0 or waived. */
+function FeePanels({ open, children }: { open: boolean; children: React.ReactNode }) {
+  if (open) return <>{children}</>
+  return (
+    <details className="mb-5">
+      <summary className="cursor-pointer text-sm font-semibold text-ink">
+        Fees and deposits — no fee applies
+      </summary>
+      <div className="mt-3">{children}</div>
+    </details>
+  )
 }
 
 const EMPTY_ASSESSMENT_FORM = {
@@ -325,6 +339,17 @@ export function Installments({
       await refreshReleaseState()
     },
   })
+  // Build package (#47): create, exemption log, and prepare in one server
+  // action. It never releases; a blocker names the case tab that fixes it.
+  const buildPackage = useMutation({
+    mutationFn: () => api<Installment>(
+      `/api/staff/requests/${requestNumber}/release-package/`,
+      { method: 'POST', body: {} },
+    ),
+    onSuccess: async () => {
+      await refreshReleaseState()
+    },
+  })
   // One action, because it was always one decision. The server releases the
   // package, drafts the notice from the installment, and sends it under the
   // same officer's name; nothing here is automated in the rule 6 sense.
@@ -497,6 +522,28 @@ export function Installments({
     ))
     : []
 
+  // The package the one-step flow works on: the newest installment that is
+  // neither released nor revoked. Build package finishes it before opening
+  // another.
+  const openPackage = rows
+    .filter((row) => !row.released_at && !row.revoked_at)
+    .sort((a, b) => b.sequence - a.sequence)[0]
+  const packageReady = Boolean(openPackage?.package_prepared_at)
+  const openBalance = openPackage ? Number(openPackage.fee_balance ?? openPackage.fee_amount) : 0
+  const awaitingPayment = packageReady && openBalance > 0 && !openPackage?.fee_paid_at
+  const packageRecords = openPackage
+    ? allReady.filter((row) => openPackage.record_item_ids.includes(row.id))
+    : []
+  // Fee, waiver-floor, and deposit panels lead only when a fee applies: an
+  // unpaid balance or an open deposit. A $0 or waived fee folds them away.
+  const feeApplies = !requestNumber || openGates.length > 0 || rows.some((row) => (
+    !row.revoked_at && !row.released_at && !row.fee_paid_at
+    && Number(row.fee_balance ?? row.fee_amount) > 0
+  ))
+  const buildBlocker = buildPackage.error instanceof ApiError
+    ? (buildPackage.error.data as { blocker?: { code: string; tab: string } } | null)?.blocker
+    : undefined
+
   function toggleRecord(id: string) {
     setSelected((current) => (
       current.includes(id)
@@ -508,6 +555,100 @@ export function Installments({
   return (
     <>
       {requestNumber && canPrepare && (
+        <Card title="Release package" className="mb-5">
+          <ol className="space-y-5" aria-label="Release steps">
+            <li>
+              <p className="font-heading text-sm font-semibold text-ink">1. Build package</p>
+              <p className="mt-1 text-sm text-ink-muted">
+                {openPackage
+                  ? `Installment ${openPackage.sequence}: ${openPackage.item_count} record${openPackage.item_count === 1 ? '' : 's'}${packageReady ? ', package prepared.' : ', not prepared yet.'}`
+                  : `${ready.length} record${ready.length === 1 ? '' : 's'} ready to release.`}{' '}
+                Builds an installment from every ready record, generates the
+                exemption log when one is needed, and prepares the package.
+                Nothing is sent.
+              </p>
+              {!packageReady && (
+                <Button
+                  type="button"
+                  className="mt-2"
+                  disabled={buildPackage.isPending}
+                  onClick={() => {
+                    buildPackage.reset()
+                    buildPackage.mutate()
+                  }}
+                >
+                  {buildPackage.isPending ? 'Building…' : 'Build package'}
+                </Button>
+              )}
+              {buildPackage.isError && (
+                <div className="mt-2 space-y-1">
+                  <ErrorNote error={buildPackage.error} />
+                  {buildBlocker && buildBlocker.tab !== 'releases' && (
+                    <Link
+                      className="text-sm font-semibold text-accent underline-offset-2 hover:underline"
+                      to={`/requests/${requestNumber}/${buildBlocker.tab}`}
+                    >
+                      Go to {buildBlocker.tab.charAt(0).toUpperCase() + buildBlocker.tab.slice(1)} to fix this
+                    </Link>
+                  )}
+                </div>
+              )}
+            </li>
+            {openPackage && packageReady && (
+              <li>
+                <p className="font-heading text-sm font-semibold text-ink">2. Preview</p>
+                <p className="mt-1 text-sm text-ink-muted">
+                  {openPackage.has_exemptions
+                    ? 'The exemption log is included.'
+                    : 'No exemption log is needed.'}{' '}
+                  {openPackage.package_size !== null && `Package size ${openPackage.package_size.toLocaleString()} bytes. `}
+                  {openBalance > 0 && !openPackage.fee_paid_at
+                    ? `Fee due: $${openBalance.toFixed(2)}.`
+                    : 'No fee is due.'}
+                </p>
+                <ul className="mt-2 space-y-1 text-sm text-ink" aria-label="Records in this package">
+                  {packageRecords.map((record) => (
+                    <li key={record.id}>
+                      {record.original_filename || record.id}
+                      {record.review_state === 'withheld' && ' — withheld, listed in the exemption log'}
+                      {record.redaction_count > 0 && ` — ${record.redaction_count} redaction${record.redaction_count === 1 ? '' : 's'}`}
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            )}
+            {openPackage && packageReady && (
+              <li>
+                <p className="font-heading text-sm font-semibold text-ink">3. Release and send</p>
+                {awaitingPayment ? (
+                  <p className="mt-1 text-sm font-semibold text-warning-ink">
+                    Record the fee payment before releasing.
+                  </p>
+                ) : (
+                  <Button
+                    type="button"
+                    className="mt-2"
+                    onClick={() => {
+                      release.reset()
+                      setReleasedLink('')
+                      setReleasedNoticeId('')
+                      setIsFinal(false)
+                      setReleasing(openPackage)
+                    }}
+                  >
+                    Release and send
+                  </Button>
+                )}
+              </li>
+            )}
+          </ol>
+        </Card>
+      )}
+      {requestNumber && canPrepare && (
+        <details className="mb-5">
+          <summary className="cursor-pointer text-sm font-semibold text-ink">
+            Choose records for a partial installment
+          </summary>
         <Card
           title="Ready to release"
           actions={ready.length > 0 ? (
@@ -596,7 +737,9 @@ export function Installments({
             </>
           )}
         </Card>
+        </details>
       )}
+      <FeePanels open={feeApplies}>
       <Card
         title="Adopted fee schedule"
         actions={canPrepare && !currentSchedule ? (
@@ -746,6 +889,7 @@ export function Installments({
           )}
         </Card>
       )}
+      </FeePanels>
       <Card title="Installments and releases">
         {rows.length === 0 ? (
           <EmptyState>Installments appear when records are released in batches.</EmptyState>

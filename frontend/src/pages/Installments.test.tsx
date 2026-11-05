@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Installments } from './Installments'
 import { at } from '../test/at'
@@ -87,9 +88,11 @@ function renderPage(
   const queryClient = new QueryClient()
   return {
     ...render(
-    <QueryClientProvider client={queryClient}>
-      <Installments roles={roles} requestNumber={requestNumber} />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <Installments roles={roles} requestNumber={requestNumber} />
+      </QueryClientProvider>
+    </MemoryRouter>,
     ),
     queryClient,
   }
@@ -796,4 +799,81 @@ it('offers every release-ready record when the list spans more than one page', a
   renderPage(['records_officer'], 'PRR-2026-0042')
 
   expect(await screen.findByLabelText('Select all 60')).toBeInTheDocument()
+})
+
+it('builds the release package in one action and previews it before release', async () => {
+  let built = false
+  const prepared = {
+    ...row,
+    item_count: 1,
+    package_prepared_at: '2026-11-04T19:30:00Z',
+    package_size: 4096,
+    record_item_ids: [readyRecord.id],
+  }
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, options?: RequestInit) => {
+    if (String(input) === '/api/staff/requests/PRR-2026-0042/release-package/' && options?.method === 'POST') {
+      built = true
+      return response(prepared)
+    }
+    return listFor(input, built ? [prepared] : [])
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const user = userEvent.setup()
+  renderPage(['records_officer'], 'PRR-2026-0042')
+
+  expect(await screen.findByText(/1 record ready to release/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Build package' }))
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    '/api/staff/requests/PRR-2026-0042/release-package/',
+    expect.objectContaining({ method: 'POST' }),
+  )
+  const preview = await screen.findByRole('list', { name: 'Records in this package' })
+  expect(within(preview).getByText('board-minutes.pdf')).toBeInTheDocument()
+  expect(screen.getByText(/No exemption log is needed/)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Build package' })).not.toBeInTheDocument()
+  const steps = screen.getByRole('list', { name: 'Release steps' })
+  await user.click(within(steps).getByRole('button', { name: 'Release and send' }))
+  expect(screen.getByRole('dialog', { name: 'Release installment' })).toBeInTheDocument()
+})
+
+it('shows a build blocker with a link to the tab that fixes it', async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, options?: RequestInit) => {
+    if (String(input) === '/api/staff/requests/PRR-2026-0042/release-package/' && options?.method === 'POST') {
+      return {
+        ok: false,
+        status: 400,
+        text: async () => JSON.stringify({
+          detail: 'No records are ready to release.',
+          blocker: { code: 'no_ready_records', tab: 'review' },
+        }),
+      }
+    }
+    return listFor(input, [])
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const user = userEvent.setup()
+  renderPage(['records_officer'], 'PRR-2026-0042')
+
+  await user.click(await screen.findByRole('button', { name: 'Build package' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('No records are ready to release.')
+  expect(screen.getByRole('link', { name: 'Go to Review to fix this' })).toHaveAttribute(
+    'href', '/requests/PRR-2026-0042/review',
+  )
+})
+
+it('folds the fee panels away when no fee applies, and leads with them when one does', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => listFor(input, [row])))
+  const { unmount } = renderPage(['records_officer'], 'PRR-2026-0042')
+  const summary = await screen.findByText('Fees and deposits — no fee applies')
+  expect(summary.closest('details')).not.toHaveAttribute('open')
+  unmount()
+
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => listFor(input, [
+    { ...row, fee_amount: '4.20', fee_balance: '4.20' },
+  ])))
+  renderPage(['records_officer'], 'PRR-2026-0042')
+  expect(await screen.findByText('Adopted fee schedule')).toBeInTheDocument()
+  expect(screen.queryByText('Fees and deposits — no fee applies')).not.toBeInTheDocument()
 })

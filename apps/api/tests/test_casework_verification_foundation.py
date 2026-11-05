@@ -110,6 +110,7 @@ class CaseworkVerificationFoundationTests(SimpleTestCase):
                 "officer-scope-iterations",
                 "officer-approve-and-collect",
                 "officer-rescope",
+                "officer-one-step-release",
             ],
         )
         self.assertEqual(

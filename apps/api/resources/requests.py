@@ -44,6 +44,7 @@ from apps.api.identity import (
     staff_roles,
 )
 from apps.api.resources.collection_tasks import CollectionTaskSerializer
+from apps.api.resources.records_misc import InstallmentSerializer
 from apps.api.resources.work_items import (
     INBOX_MESSAGE_WORK_KINDS,
     NEXT_ACTION_LABELS,
@@ -1456,6 +1457,7 @@ class RequestsViewSet(
         "vault_counts": {StaffRole.RECORDS_OFFICER},
         "scoping": {StaffRole.RECORDS_OFFICER},
         "rescope": {StaffRole.RECORDS_OFFICER},
+        "release_package": {StaffRole.RECORDS_OFFICER},
         "vault_collection": {StaffRole.RECORDS_OFFICER},
         # Adding candidate records to a case is collection, which is the
         # officer's: liaisons hand theirs over through a collection task.
@@ -3043,6 +3045,42 @@ class RequestsViewSet(
             CollectionTaskSerializer(task, context={"request": request}).data,
             status=status.HTTP_202_ACCEPTED,
         )
+
+    @extend_schema(
+        request=None,
+        responses={
+            200: InstallmentSerializer,
+            400: inline_serializer(
+                "ReleasePackageBlocked",
+                fields={
+                    "detail": serializers.CharField(),
+                    "blocker": inline_serializer(
+                        "ReleasePackageBlocker",
+                        fields={"code": serializers.CharField(), "tab": serializers.CharField()},
+                    ),
+                },
+            ),
+        },
+    )
+    @action(detail=True, methods=["post"], url_path="release-package")
+    def release_package(self, request, number=None):
+        """Build the next release package in one action (#47); never releases it."""
+        from apps.records.release_package import (
+            ReleasePackageBlocked,
+            build_release_package,
+        )
+
+        prr = self.get_object()
+        try:
+            installment = build_release_package(prr.number, actor=request.user)
+        except ReleasePackageBlocked as exc:
+            return Response(
+                {"detail": exc.messages[0], "blocker": {"code": exc.code, "tab": exc.tab}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
+        return Response(InstallmentSerializer(installment, context={"request": request}).data)
 
     @extend_schema(
         request=VaultCountRequestSerializer,
