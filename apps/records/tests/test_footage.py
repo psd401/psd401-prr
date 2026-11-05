@@ -891,6 +891,75 @@ class HoldPathTests(TestCase):
         self.assertIn("may already exist", manual.call_args.kwargs["error"])
 
 
+NARROWED = "apps.records.triage.notifications.notify_footage_scope_narrowed"
+
+
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True, CAMERA_RETENTION_DAYS=10)
+class HoldSpanCapTests(TestCase):
+    """A birth date beside the incident date must not become an 11-year
+    bookmark on every camera: hold the most recent days, and tell a human."""
+
+    BORN = "Video of my son (born 2015-03-04) in the gym on 2026-09-22."
+
+    def test_a_long_span_holds_the_most_recent_days_ending_at_the_window_end(self):
+        prr = make_request(self.BORN)
+        with aware() as m, mock.patch(NARROWED) as narrowed:
+            fp = preserve(prr)
+
+        self.assertEqual(fp.window_end, dt.datetime(2026, 9, 23, 7, tzinfo=dt.UTC))
+        self.assertEqual(fp.window_start, dt.datetime(2026, 8, 23, 7, tzinfo=dt.UTC))
+        self.assertEqual(m.hold.call_args.args[1], fp.window_start)
+        self.assertIn("2015-03-04", fp.detected_dates_note)
+        self.assertIn("2026-08-23..2026-09-22", fp.detected_dates_note)
+        narrowed.assert_called_once()
+        reasons = " ".join(narrowed.call_args.kwargs["reasons"])
+        self.assertIn("2015-03-04..2026-09-22", reasons)
+        self.assertIn("31", reasons)
+        self.assertTrue(
+            prr.events.filter(note__icontains="narrower than the request").exists()
+        )
+
+    @override_settings(CAMERA_HOLD_MAX_SPAN_DAYS=7)
+    def test_the_cap_is_the_runtime_setting(self):
+        prr = make_request(self.BORN)
+        with aware(), mock.patch(NARROWED):
+            fp = preserve(prr)
+
+        self.assertEqual(fp.window_start, dt.datetime(2026, 9, 16, 7, tzinfo=dt.UTC))
+
+    def test_a_span_within_the_cap_is_held_whole_and_raises_no_notice(self):
+        prr = make_request("Video in the gym on 2026-09-01 and 2026-09-22.")
+        with aware(), mock.patch(NARROWED) as narrowed:
+            fp = preserve(prr)
+
+        self.assertEqual(fp.window_start, dt.datetime(2026, 9, 1, 7, tzinfo=dt.UTC))
+        narrowed.assert_not_called()
+
+    def test_the_no_date_window_is_unchanged(self):
+        prr = make_request("I want the surveillance video of the incident at the gym")
+        with aware(), mock.patch(NARROWED) as narrowed:
+            fp = preserve(prr)
+
+        self.assertGreaterEqual((fp.window_end - fp.window_start).days, 9)
+        narrowed.assert_not_called()
+
+    def test_the_narrowed_notice_is_urgent_and_names_the_clipped_range(self):
+        prr = make_request(self.BORN)
+        with aware(), mock.patch(
+            "apps.records.notifications.enqueue_staff_notification"
+        ) as enqueue:
+            preserve(prr)
+
+        calls = [
+            c.kwargs for c in enqueue.call_args_list
+            if c.kwargs["signal_type"] == "footage.hold_scope_narrowed"
+        ]
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0]["immediate"])
+        self.assertIn("URGENT", calls[0]["subject"])
+        self.assertIn("2015-03-04..2026-09-22", " ".join(calls[0]["context"]["reasons"]))
+
+
 @override_settings(
     CELERY_TASK_ALWAYS_EAGER=True,
     CAMERA_RETENTION_DAYS=10,

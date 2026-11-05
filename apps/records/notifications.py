@@ -44,6 +44,7 @@ SIGNAL_TYPES: Final = frozenset(
         "footage.manual_hold_required",
         "footage.hold_complete",
         "footage.adequate_search_review_queued",
+        "footage.hold_scope_narrowed",
         "collection.task_created",
         "intake.auto_applied",
         "correspondence.delivery_effects_failed",
@@ -595,6 +596,36 @@ def notify_footage_manual_hold(
             f"{preservation.window_end.isoformat()}"
             + (f":{condition}" if condition else "")
         ),
+        immediate=True,
+    )
+
+
+def notify_footage_scope_narrowed(
+    preservation, *, reasons, condition: str = "scope",
+) -> bool | None:
+    """URGENT: the automatic hold covers less than the request asked for
+    (a clipped date span, specific sites). A human must widen it."""
+    request = preservation.request
+    reasons = [str(reason)[:500] for reason in reasons]
+    return enqueue_staff_notification(
+        signal_type="footage.hold_scope_narrowed",
+        request=request,
+        recipients=(
+            runtime.get("FACILITIES_EMAIL"),
+            runtime.get("PRA_SUPERVISOR_EMAIL"),
+            *_records_officer_recipients(),
+        ),
+        subject=(
+            f"[URGENT — HOLD SCOPE] {request.number}: the automatic hold is "
+            "narrower than the request"
+        ),
+        template_name="notifications/footage_scope_narrowed.txt",
+        context={
+            "window_start": preservation.window_start,
+            "window_end": preservation.window_end,
+            "reasons": reasons,
+        },
+        condition_key=f"{preservation.pk}:{condition}",
         immediate=True,
     )
 

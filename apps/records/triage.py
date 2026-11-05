@@ -178,10 +178,31 @@ def preservation_confirmation_text(fp: FootagePreservation) -> str | None:
     return "; ".join(parts) + "."
 
 
+def _date_range(start: dt.datetime, end: dt.datetime) -> str:
+    """Local calendar days of the half-open window [start, end)."""
+    first = timezone.localtime(start).date()
+    last = timezone.localtime(end - dt.timedelta(microseconds=1)).date()
+    return f"{first:%Y-%m-%d}..{last:%Y-%m-%d}"
+
+
 def _local_dates(fp: FootagePreservation) -> str:
-    start = timezone.localtime(fp.window_start).date()
-    last = timezone.localtime(fp.window_end - dt.timedelta(microseconds=1)).date()
-    return f"{start:%Y-%m-%d}..{last:%Y-%m-%d}"
+    return _date_range(fp.window_start, fp.window_end)
+
+
+def record_scope_narrowed(fp: FootagePreservation, *, reasons) -> None:
+    """The automatic hold covers less than the request asked for. Say so on
+    the timeline and send an URGENT notice: only a human can widen it."""
+    reasons = list(reasons)
+    StatusEvent.objects.create(
+        request=fp.request,
+        note=(
+            "HOLD SCOPE: the automatic hold is narrower than the request. "
+            + " ".join(reasons)
+        )[:2000],
+    )
+    audit("footage.hold_scope_narrowed", target=fp.request.number,
+          window=_local_dates(fp), sites=fp.site_codes)
+    notifications.notify_footage_scope_narrowed(fp, reasons=reasons)
 
 
 def record_outside_retention_review(fp: FootagePreservation, *, reason: str) -> FootagePreservation:
@@ -266,9 +287,22 @@ def triage_footage(prr: PublicRecordsRequest) -> FootagePreservation | None:
     retention_floor = now - dt.timedelta(days=runtime.get("CAMERA_RETENTION_DAYS"))
     dates = extract_dates(prr.description)
 
+    narrowed = []
     if dates:
         window_start, window_end = calendar_day_window(dates)
         note = f"Dates parsed from request: {', '.join(map(str, dates))}"
+        cap = dt.timedelta(days=runtime.get("CAMERA_HOLD_MAX_SPAN_DAYS"))
+        if window_end - window_start > cap:
+            requested = _date_range(window_start, window_end)
+            window_start = window_end - cap
+            held = _date_range(window_start, window_end)
+            note = f"{note}. Span clipped to the most recent {cap.days} days: {held}."
+            narrowed.append(
+                f"The request's dates span {requested}, longer than the "
+                f"{cap.days}-day automatic hold limit, so only {held} is held. "
+                "A human must refine the window and hold any earlier footage "
+                "the request covers."
+            )
     else:
         # Preservation-first: no parseable date -> hold everything that exists.
         window_start, window_end = retention_floor, now
@@ -294,12 +328,14 @@ def triage_footage(prr: PublicRecordsRequest) -> FootagePreservation | None:
     # the hold task: some cameras keep footage far longer.
     fp = FootagePreservation.objects.create(
         request=prr, window_start=window_start, window_end=window_end,
-        detected_dates_note=note,
+        detected_dates_note=note[:500],
         site_codes=[site.code for site in sites],
         site_resolution=resolution[:500],
     )
     audit("footage.hold_initiated", target=prr.number,
           sites=fp.site_codes, window=_local_dates(fp))
+    if narrowed:
+        record_scope_narrowed(fp, reasons=narrowed)
     execute_footage_hold.delay(fp.id)
     fp.refresh_from_db()
     return fp

@@ -1,0 +1,7 @@
+URGENT: The automatic camera hold for request {{ request_number }} covers less than the request asks for. It bookmarks footage from {{ window_start|date:"Y-m-d H:i" }} to {{ window_end|date:"Y-m-d H:i" }} Pacific time.
+
+{% for reason in reasons %}- {{ reason }}
+{% endfor %}
+Read the request now. If it covers any other time or place, widen the hold in the staff workspace or bookmark that footage by hand in Alta Aware with "Available until" set to "Manually deleted". Footage outside the hold is deleted on the normal retention schedule.
+
+Open the staff workspace: {{ status_url }}

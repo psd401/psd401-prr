@@ -1265,6 +1265,26 @@ SETTINGS: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key="CAMERA_HOLD_MAX_SPAN_DAYS",
+        type=values.INTEGER,
+        default=31,
+        minimum=1,
+        maximum=366,
+        unit="days",
+        category=CATEGORY_RECORDS,
+        label="Longest automatic hold span",
+        consequence=(
+            "The longest window an automatic camera hold bookmarks when the "
+            "request's dates span more than this (a birth date beside the "
+            "incident date, for instance). The hold keeps the most recent "
+            "days ending at the request's last date and sends an urgent "
+            "notice asking a human to refine the window and bookmark any "
+            "earlier footage by hand. Raising it bookmarks more footage on "
+            "every camera in scope; lowering it leaves more of a long "
+            "request to that human."
+        ),
+    ),
+    SettingSpec(
         key="PRR_RECORD_PREVIEW_MAX_BYTES",
         type=values.INTEGER,
         default=500 * _MIB,
