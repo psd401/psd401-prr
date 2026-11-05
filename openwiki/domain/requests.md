@@ -171,8 +171,10 @@ Only public records requests may arrive through the public form or the intake
 mailbox (`apps/records/intake.py`). Intake then runs through the canonical
 `submit_intake` pipeline with `Channel.PORTAL`. When the intake-classification switch
 is on, `submit_intake` also defers a suggested label for the new case until after the
-write commits. The label is advisory and changes nothing about the case; see
-[advisory AI](advisory-ai.md).
+write commits. The label is advisory and changes nothing about the case, except that a
+`spam` or `non_request` label in its `auto` trust mode can close an email-created case
+automatically; see [advisory AI](advisory-ai.md) and
+[automatic intake closure](trust-ladder.md#automatic-intake-closure).
 
 ```mermaid
 sequenceDiagram
@@ -252,7 +254,8 @@ handoffs are in [agent-parity.md](../architecture/agent-parity.md).
 `request.description` is never edited after intake. It is the legal record of
 what was asked. Clarifications are recorded as new `StatusEvent` rows.
 
-Two numbers for one matter are resolved only by `services.merge_requests()`.
+Two numbers for one matter are resolved only by `services.merge_requests()`. A
+proposed merge reaches it only when a person approves a `duplicate_of` [decision batch](decision-batches.md).
 The duplicate closes as `closed_duplicate` with `merged_into` set, its matched
 email is rematched to the case of record, and the target keeps its own
 `received_at` and deadline. Cases governed by different law cannot merge.

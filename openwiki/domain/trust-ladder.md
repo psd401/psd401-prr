@@ -1,14 +1,14 @@
 ---
 type: Domain
-title: "Trust Ladder: Sampled Batch Review"
-description: "Sampled batch approval of record responsiveness, the Ready-to-discard elusion check, and group acceptance of redaction proposals. Covers the ReviewBatch and RedactionBatch models, trust-policy settings, the review-batches and redaction-batches staff APIs, and the invariants that keep a model from applying any outcome."
-tags: [domain, record-review, batch-review, trust-ladder, responsiveness, redaction]
+title: "Trust Ladder: Sampled Batch Review and Automatic Intake Closure"
+description: "Trust-ladder policy for records and intake: sampled batch approval of record responsiveness, the Ready-to-discard elusion check, group acceptance of redaction proposals, and automatic closure of spam or non-request email cases. Covers the ReviewBatch, RedactionBatch, and IntakeAutoApplication models, the trust-policy settings, the staff APIs, and the invariants that keep a model from applying any outcome without a trusted mode."
+tags: [domain, record-review, batch-review, trust-ladder, responsiveness, redaction, intake-classification, automatic-closure]
 openwiki:
   roles: [domain, workflow]
-  change_kinds: [batch-review, trust-policy, review-workflow, redaction-batch]
-  source_paths: [apps/records/review_batches.py, apps/records/redaction_batches.py, apps/api/resources/review_batches.py, apps/api/resources/redaction_batches.py, apps/records/models.py, apps/configuration/registry.py, frontend/src/case/BatchReview.tsx, frontend/src/case/RedactionProposals.tsx]
-  symbols: [ReviewBatch, RedactionBatch, create_cluster_batch, create_discard_batch, decide_batch, discard_candidates, policy, ReviewBatchViewSet, proposal_groups, create_redaction_batch, decide_redaction_batch, build_ready_redacted_records, RedactionBatchViewSet]
-  test_paths: [apps/records/tests/test_review_batches.py, apps/records/tests/test_redaction_batches.py, frontend/src/case/BatchReview.test.tsx, frontend/src/case/RedactionProposals.test.tsx]
+  change_kinds: [batch-review, trust-policy, review-workflow, redaction-batch, intake-auto-closure]
+  source_paths: [apps/records/review_batches.py, apps/records/redaction_batches.py, apps/records/intake_trust.py, apps/api/resources/review_batches.py, apps/api/resources/redaction_batches.py, apps/records/models.py, apps/configuration/registry.py, apps/records/advisory_ai.py, frontend/src/case/BatchReview.tsx, frontend/src/case/RedactionProposals.tsx]
+  symbols: [ReviewBatch, RedactionBatch, IntakeAutoApplication, create_cluster_batch, create_discard_batch, decide_batch, discard_candidates, policy, ReviewBatchViewSet, proposal_groups, create_redaction_batch, decide_redaction_batch, build_ready_redacted_records, RedactionBatchViewSet, auto_apply_intake_label, AUTO_LABEL_SETTINGS, auto_close_non_request]
+  test_paths: [apps/records/tests/test_review_batches.py, apps/records/tests/test_redaction_batches.py, apps/records/tests/test_intake_trust.py, apps/records/tests/test_compliance.py, frontend/src/case/BatchReview.test.tsx, frontend/src/case/RedactionProposals.test.tsx]
 ---
 
 # Trust Ladder: Sampled Batch Review
@@ -18,13 +18,14 @@ judging a random sample of them. The Records Officer chooses the policy. A model
 never applies on its own: the reviewer's judgment is what becomes the legal outcome. The
 same sampling rule governs two surfaces: responsiveness batches over records (this page's
 main sections) and [redaction proposal groups](#redaction-proposal-groups), which accept
-proposed redaction boxes.
+proposed redaction boxes. The same policy also governs one intake decision: the automatic
+closure of spam and non-request email cases, covered in [automatic intake closure](#automatic-intake-closure).
 
 ## Policy settings
 
 The policy lives in the in-app settings store ([configuration](../architecture/configuration.md)),
 is admin-only, and requires a written reason on each change. The registry in
-`apps/configuration/registry.py` declares the seven settings:
+`apps/configuration/registry.py` declares the ten settings:
 
 | Setting | Values | Default |
 |---|---|---|
@@ -32,6 +33,9 @@ is admin-only, and requires a written reason on each change. The registry in
 | `PRR_TRUST_NON_RESPONSIVE_MODE` | `suggest`, `batch`, `auto` | `suggest` |
 | `PRR_TRUST_REDACTION_MODE` | `suggest`, `batch` (no automatic mode) | `suggest` |
 | `PRR_TRUST_SCOPE_MODE` | `suggest`, `auto` (collection from a proposed scope; see [collection and Vault](collection-and-vault.md#iterative-scoping-from-intake-intent)) | `suggest` |
+| `PRR_TRUST_INTAKE_SPAM_MODE` | `suggest`, `auto` (spam only) | `suggest` |
+| `PRR_TRUST_INTAKE_NON_REQUEST_MODE` | `suggest`, `auto` (not a records request only) | `suggest` |
+| `PRR_TRUST_INTAKE_AUTO_MIN_CONFIDENCE` | 50-100 percent, shared by both intake labels | 95 |
 | `PRR_TRUST_NON_RESPONSIVE_AUTO_MIN_CONFIDENCE` | 50-100 percent | 95 |
 | `PRR_TRUST_BATCH_SAMPLE_SIZE` | 1-200 records | 10 |
 | `PRR_TRUST_ELUSION_SAMPLE_SIZE` | 1-500 records | 30 |
@@ -156,6 +160,54 @@ Focused tests are in `apps/records/tests/test_redaction_batches.py`:
 
 Minimal validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_redaction_batches --settings=config.test_settings`.
 
+## Automatic intake closure
+
+Intake classification is advisory, and its label changes nothing about a case unless the
+label's trust mode is `auto`. `apps/records/intake_trust.py` is the only path that closes a
+case without a person. It can apply only `spam` and `non_request`, each governed by its own
+mode setting (`AUTO_LABEL_SETTINGS`). Every other label, such as a merge, follow-up, related
+request, or new request, stays with an officer or an approved
+[decision batch](decision-batches.md).
+
+`advisory_ai.execute_advisory_run` calls `intake_trust.auto_apply_intake_label(run.pk)` when an
+intake-classification run completes. The function returns without acting unless every condition holds:
+
+- the label's mode setting is `auto`, and the run was created automatically rather than by an officer;
+- the run completed, and its confidence in percent is at least `PRR_TRUST_INTAKE_AUTO_MIN_CONFIDENCE`;
+- the run is the case's latest intake classification, the case is still `received`, and no officer
+  feedback or earlier automatic application exists for it.
+
+```mermaid
+flowchart TD
+    A[Intake classification run completes] --> B{Label is spam or non_request and its mode is auto?}
+    B -- no --> Z[Nothing changes, the case stays with a person]
+    B -- yes --> C{Confidence at or above the floor, latest run, case still received, no feedback?}
+    C -- no --> Z
+    C -- yes --> D[services.auto_close_non_request in one transaction]
+    D --> E{Closure accepted? Email-created case with no unresolved delivery}
+    E -- no --> Z
+    E -- yes --> F[IntakeAutoApplication row and intake.auto_applied audit with no actor]
+    F --> G[Records Officers emailed, no requester mail, one reopen undoes it]
+```
+
+Caption: the closure is a status event, so `reopen_request` undoes it. The
+`IntakeAutoApplication` row ties the closure to the classification that caused it. A web-form
+case is never closed this way.
+
+Focused tests are in `apps/records/tests/test_intake_trust.py`:
+`test_spam_above_the_floor_closes_the_case_with_no_human_actor`,
+`test_below_the_floor_changes_nothing`, `test_other_labels_are_never_applied`,
+`test_a_web_form_case_is_never_closed`, `test_a_run_an_officer_asked_for_is_not_applied`,
+`test_an_older_run_is_not_applied`, `test_a_run_is_applied_once`,
+`test_the_day_five_safety_net_does_not_reach_an_automatic_closure`, and
+`test_one_reopen_undoes_it_and_the_read_says_so`. `apps/records/tests/test_compliance.py`
+pins that only this ladder closes a case without a person, in
+`test_only_the_intake_trust_ladder_closes_a_case_without_a_person`.
+
+Minimal validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_intake_trust --settings=config.test_settings`.
+Choose this path when a change touches the intake label's trust mode or its closure. For a change to the
+classification itself, read [advisory AI](advisory-ai.md#boundary) first.
+
 ## Staff API and capabilities
 
 `ReviewBatchViewSet` in [`apps/api/resources/review_batches.py`](../../apps/api/resources/review_batches.py)
@@ -200,6 +252,9 @@ decision the panel invalidates the record, facet, cluster, and trust-policy quer
 - **Reviewer rules still hold.** Each applied record goes through the same review service as a
   single decision, so [record review](record-review-and-handling.md) rules for redaction, citation,
   and second review are unchanged.
+- **Only spam and non-request close without a person, and only in `auto`.** No other intake label
+  has an automatic path, and a closure is refused unless the case is still `received` and was created
+  from email. The closure never sends mail to the requester.
 
 ## Behavior test matrix
 
