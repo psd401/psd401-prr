@@ -140,10 +140,8 @@ def preservation_confirmation_text(fp: FootagePreservation) -> str | None:
         return None
     gaps = sum(hold.state == CameraHold.State.GAP for hold in rows)
     not_retained = sum(hold.state == CameraHold.State.NOT_RETAINED for hold in rows)
-    failed = sum(
-        hold.state in (CameraHold.State.FAILED, CameraHold.State.PENDING)
-        for hold in rows
-    )
+    pending = sum(hold.state == CameraHold.State.PENDING for hold in rows)
+    failed = sum(hold.state == CameraHold.State.FAILED for hold in rows)
 
     if fp.site_codes:
         held_sites = {(hold.site or "").strip().upper() for hold in bookmarked}
@@ -170,6 +168,8 @@ def preservation_confirmation_text(fp: FootagePreservation) -> str | None:
     ]
     if not_retained:
         parts.append(f"{not_retained} with no retained footage for the window")
+    if pending:   # not yet attempted, which is not the same as failed
+        parts.append(f"{pending} pending")
     parts.append(f"{failed} failed")
     if unheld_codes:
         parts.append(
@@ -361,7 +361,7 @@ def exclude_camera(camera_hold, reason: str, *, actor=None):
             "Current Records Officer authority is required to exclude a camera."
         ),
     )
-    reason = (reason or "").strip()
+    reason = _reason_text(reason)
     if len(reason) < 10:
         raise ValueError(
             "Excluding a camera from a preservation hold requires a substantive "
@@ -376,6 +376,14 @@ def exclude_camera(camera_hold, reason: str, *, actor=None):
         raise ValueError(
             "A camera-exclusion reason must contain at most "
             f"{reason_max_length} characters."
+        )
+    preservation = FootagePreservation.objects.select_for_update().get(
+        pk=camera_hold.preservation_id,
+    )
+    if preservation.state == FootagePreservation.State.RELEASED:
+        raise ValueError(
+            "This preservation is already released; there is no hold left to "
+            "narrow."
         )
     bookmark_id = camera_hold.clip_id
 
@@ -528,7 +536,7 @@ def release_preservation(
             "preservation hold."
         ),
     )
-    reason = (reason or "").strip()
+    reason = _reason_text(reason)
     if len(reason) < 10:
         raise ValueError(
             "Releasing a preservation hold requires a substantive reason (e.g. "

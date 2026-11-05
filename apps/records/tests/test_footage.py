@@ -1320,6 +1320,30 @@ class ExclusionGateTests(TestCase):
             error="Aware bookmark delete failed (AltaError).",
         )
 
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_exclusion_refuses_a_released_preservation(self, delete_bookmark):
+        ch = self._held_camera()
+        FootagePreservation.objects.filter(pk=ch.preservation_id).update(
+            state=FootagePreservation.State.RELEASED,
+        )
+        ch.refresh_from_db()
+        with self.assertRaisesMessage(ValueError, "released"), \
+             self.captureOnCommitCallbacks(execute=True):
+            triage.exclude_camera(
+                ch, "Camera faces staff parking; not the gym entrance.",
+                actor=self._records_officer(),
+            )
+        delete_bookmark.assert_not_called()
+        ch.refresh_from_db()
+        self.assertIsNone(ch.excluded_at)
+
+    def test_exclusion_refuses_a_non_text_reason(self):
+        ch = self._held_camera()
+        with self.assertRaises(ValueError):
+            triage.exclude_camera(
+                ch, ["a reason long enough"], actor=self._records_officer(),
+            )
+
     def test_no_automated_exclusion_path(self):
         """Guard rail: no background task may call exclude_camera."""
         import ast
@@ -1351,6 +1375,19 @@ class ConfirmationTextTests(TestCase):
             f"2 cameras at Peninsula High School held {self.WINDOW} "
             "(Aware bookmarks, no expiry); 0 cameras have footage gaps; 0 failed.",
         )
+
+    def test_a_camera_still_pending_is_counted_as_pending_not_failed(self):
+        fp = self._preserve("video at Peninsula High School on 2026-09-22")
+        fp.camera_holds.filter(camera_id="cam-2").update(
+            state=CameraHold.State.PENDING, clip_id="",
+        )
+        FootagePreservation.objects.filter(pk=fp.pk).update(
+            state=FootagePreservation.State.PARTIAL,
+        )
+        fp.refresh_from_db()
+        text = triage.preservation_confirmation_text(fp)
+        self.assertIn("1 pending", text)
+        self.assertTrue(text.endswith("0 failed."), text)
 
     def test_single_camera_reads_singular(self):
         fp = self._preserve(

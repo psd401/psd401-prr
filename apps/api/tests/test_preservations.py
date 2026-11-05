@@ -378,6 +378,21 @@ class PreservationApiTests(TestCase):
         self.fp.refresh_from_db()
         self.assertEqual(self.fp.state, FootagePreservation.State.HELD)
 
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_non_text_reasons_are_400_not_500(self, delete_bookmark):
+        self._close_request()
+        for reason in (["a list is not a reason"], {"a": "b"}, 1234567890123):
+            with self.subTest(action="release", reason=reason):
+                self.assertEqual(self._release(reason=reason).status_code, 400)
+            with self.subTest(action="exclude", reason=reason):
+                response = self.client.post(
+                    f"/api/staff/preservations/{self.fp.id}/exclude-camera/",
+                    {"camera_hold_id": self.other.id, "reason": reason},
+                    content_type="application/json",
+                )
+                self.assertEqual(response.status_code, 400)
+        delete_bookmark.assert_not_called()
+
     def test_releasable_is_computed_by_the_server(self):
         url = f"/api/staff/preservations/{self.fp.id}/"
         self.assertFalse(self.client.get(url).json()["releasable"])   # open
