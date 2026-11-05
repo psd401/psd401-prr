@@ -67,6 +67,13 @@ class ResolveSitesTests(SimpleTestCase):
         self.assertEqual(codes("video of the mes de septiembre"), [])
         self.assertEqual(codes("video at MES"), ["MES"])
 
+    def test_district_office_is_the_esc(self):
+        self.assertEqual(codes("video outside the District Office"), ["ESC"])
+
+    def test_purdy_alone_is_not_a_building(self):
+        # Purdy is a community with several district buildings in it.
+        self.assertEqual(codes("camera footage from Purdy on 2026-09-22"), [])
+
     def test_each_site_reported_once(self):
         self.assertEqual(
             codes("PHS footage, Peninsula High School gym, Peninsula High lot"),

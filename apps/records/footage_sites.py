@@ -132,7 +132,7 @@ SITES: tuple[Site, ...] = (
     Site(
         "ESC",
         "Educational Service Center",
-        ("Educational Service Center", "Education Service Center"),
+        ("Educational Service Center", "Education Service Center", "District Office"),
     ),
     Site(
         "CTP",

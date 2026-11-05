@@ -316,6 +316,11 @@ def triage_footage(prr: PublicRecordsRequest) -> FootagePreservation | None:
             f"Sites named in the request: {describe_sites(s.code for s in sites)}. "
             "Holding every camera in those Aware groups."
         )
+        narrowed.append(
+            f"The hold covers only {describe_sites(s.code for s in sites)}. "
+            "If the request names any other place, a human must widen the "
+            "hold to every camera district-wide."
+        )
     else:
         resolution = (
             "No district site named in the request: holding every camera "

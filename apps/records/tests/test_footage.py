@@ -452,7 +452,7 @@ class HoldPathTests(TestCase):
         m.hold.assert_not_called()
         manual.assert_not_called()
         review.assert_called_once()
-        checklist = prr.events.get()
+        checklist = prr.events.get(note__startswith="TRIAGE:")
         for phrase in ("HUMAN REVIEW REQUIRED", "HUMAN MUST COMPLETE",
                        "incident-hold", "email & Drive", "other users' bookmarks"):
             self.assertIn(phrase, checklist.note)
@@ -958,6 +958,43 @@ class HoldSpanCapTests(TestCase):
         self.assertTrue(calls[0]["immediate"])
         self.assertIn("URGENT", calls[0]["subject"])
         self.assertIn("2015-03-04..2026-09-22", " ".join(calls[0]["context"]["reasons"]))
+
+
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True, CAMERA_RETENTION_DAYS=10)
+class SiteScopeNoticeTests(TestCase):
+    """A hold narrowed to the sites a request names misses any place the
+    table cannot read ("the bus loop", "the Purdy field"). Say so, URGENTLY."""
+
+    def test_a_named_site_hold_sends_an_urgent_scope_notice(self):
+        prr = make_request(f"video at Peninsula High School on {days_ago(3)}")
+        with aware(), mock.patch(NARROWED) as narrowed:
+            fp = preserve(prr)
+
+        self.assertEqual(fp.site_codes, ["PHS"])
+        narrowed.assert_called_once()
+        reasons = " ".join(narrowed.call_args.kwargs["reasons"])
+        self.assertIn("only Peninsula High School (PHS)", reasons)
+        self.assertIn("widen", reasons)
+        self.assertTrue(
+            prr.events.filter(note__icontains="narrower than the request").exists()
+        )
+
+    def test_a_district_wide_hold_sends_no_scope_notice(self):
+        prr = make_request(f"camera footage of the gym entrance on {days_ago(3)}")
+        with aware(), mock.patch(NARROWED) as narrowed:
+            preserve(prr)
+
+        narrowed.assert_not_called()
+
+    def test_a_clipped_span_and_named_site_share_one_notice(self):
+        prr = make_request(
+            "Video of my son (born 2015-03-04) at Peninsula High School on 2026-09-22."
+        )
+        with aware(), mock.patch(NARROWED) as narrowed:
+            preserve(prr)
+
+        narrowed.assert_called_once()
+        self.assertEqual(len(narrowed.call_args.kwargs["reasons"]), 2)
 
 
 @override_settings(
