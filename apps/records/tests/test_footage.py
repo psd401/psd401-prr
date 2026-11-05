@@ -541,6 +541,83 @@ class HoldPathTests(TestCase):
         self.assertEqual(fp.state, FootagePreservation.State.HELD)
         self.assertEqual(fp.camera_holds.count(), 3)
 
+    def test_a_crash_after_the_bookmark_is_made_keeps_its_id(self):
+        prr = make_request(f"video at Peninsula High School on {days_ago(2)}")
+        with aware([camera("cam-1", "Gym", "PHS")]), \
+             mock.patch("apps.records.tasks._bookmark_coverage",
+                        side_effect=RuntimeError("boom")), \
+             mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold",
+                        return_value=True) as manual:
+            fp = preserve(prr)
+
+        hold = fp.camera_holds.get()
+        self.assertEqual(hold.state, CameraHold.State.FAILED)
+        self.assertEqual(hold.clip_id, "bm-cam-1")
+        self.assertIn("bookmark exists", hold.error)
+        self.assertEqual(fp.state, FootagePreservation.State.MANUAL)
+        manual.assert_called_once()
+
+    def test_a_rerun_never_makes_a_second_bookmark_for_a_camera(self):
+        prr = make_request(f"video at Peninsula High School on {days_ago(2)}")
+        with aware([camera("cam-1", "Gym", "PHS")]) as m, \
+             mock.patch("apps.records.tasks._bookmark_coverage",
+                        side_effect=RuntimeError("boom")), \
+             mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold"):
+            fp = preserve(prr)
+            tasks.execute_footage_hold(fp.id)
+
+        m.hold.assert_called_once()
+
+    def test_a_task_that_dies_midway_never_leaves_the_hold_pending(self):
+        prr = make_request("camera footage")
+        now = timezone.now()
+        fp = FootagePreservation.objects.create(
+            request=prr, window_start=now - dt.timedelta(days=1), window_end=now,
+        )
+        with aware(), \
+             mock.patch("apps.records.tasks._hold_one_camera",
+                        side_effect=RuntimeError("worker lost")), \
+             mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold",
+                        return_value=True) as manual, \
+             self.assertRaises(RuntimeError):
+            tasks.execute_footage_hold(fp.id)
+
+        fp.refresh_from_db()
+        self.assertEqual(fp.state, FootagePreservation.State.MANUAL)
+        manual.assert_called_once()
+        self.assertIn("stopped before it finished", manual.call_args.kwargs["error"])
+
+    def test_the_sweeper_moves_only_stale_pending_holds_to_manual(self):
+        now = timezone.now()
+        stale = FootagePreservation.objects.create(
+            request=make_request("camera footage"),
+            window_start=now - dt.timedelta(days=1), window_end=now,
+        )
+        FootagePreservation.objects.filter(pk=stale.pk).update(
+            created_at=now - dt.timedelta(minutes=16),
+        )
+        fresh = FootagePreservation.objects.create(
+            request=make_request("camera footage"),
+            window_start=now - dt.timedelta(days=1), window_end=now,
+        )
+        with mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold",
+                        return_value=True) as manual:
+            tasks.sweep_stalled_footage_holds()
+            tasks.sweep_stalled_footage_holds()
+
+        stale.refresh_from_db()
+        fresh.refresh_from_db()
+        self.assertEqual(stale.state, FootagePreservation.State.MANUAL)
+        self.assertEqual(fresh.state, FootagePreservation.State.PENDING)
+        manual.assert_called_once()
+        self.assertEqual(manual.call_args.args[0].pk, stale.pk)
+
+    def test_the_sweeper_runs_on_the_beat_schedule(self):
+        from config.celery import app
+
+        tasks_scheduled = {entry["task"] for entry in app.conf.beat_schedule.values()}
+        self.assertIn("apps.records.tasks.sweep_stalled_footage_holds", tasks_scheduled)
+
     def test_released_preservation_is_never_re_held(self):
         prr = make_request("camera footage")
         now = timezone.now()

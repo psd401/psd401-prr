@@ -1031,21 +1031,34 @@ def _hold_one_camera(fp, cam, ch, *, now) -> None:
         ch.save()
         return
 
-    fraction, head_notes, verified = _bookmark_coverage(
-        bookmark, sources=cam.sources, start=start, end=end, now=now,
-    )
-    ch.clip_id = bookmark.id
-    ch.coverage_fraction = fraction
-    # An unverified head is never a clean hold.
-    ch.state = (
-        CameraHold.State.HELD if verified and fraction >= FULL_COVERAGE
-        else CameraHold.State.GAP
-    )
-    ch.error = ""
-    if head_notes:
-        notes.append("Short coverage: " + "; ".join(head_notes) + ".")
-    ch.coverage_note = " ".join(notes)[:500]
-    ch.save()
+    # The bookmark exists now: record it before anything else can fail, so a
+    # rerun never makes a second one and a release can still delete it.
+    ch.clip_id = str(bookmark.id)[:100]
+    ch.save(update_fields=["clip_id"])
+    try:
+        fraction, head_notes, verified = _bookmark_coverage(
+            bookmark, sources=cam.sources, start=start, end=end, now=now,
+        )
+        ch.coverage_fraction = fraction
+        # An unverified head is never a clean hold.
+        ch.state = (
+            CameraHold.State.HELD if verified and fraction >= FULL_COVERAGE
+            else CameraHold.State.GAP
+        )
+        ch.error = ""
+        if head_notes:
+            notes.append("Short coverage: " + "; ".join(head_notes) + ".")
+        ch.coverage_note = " ".join(notes)[:500]
+        ch.save()
+    except Exception as exc:  # the bookmark stands; say so
+        logger.exception("Recording footage hold %s failed after its bookmark", ch.pk)
+        ch.state = CameraHold.State.FAILED
+        ch.error = (
+            f"Recording the hold failed ({type(exc).__name__}) after Aware made "
+            "the bookmark: the bookmark exists, but its coverage is unconfirmed; "
+            "check it in Aware."
+        )[:500]
+        ch.save(update_fields=["state", "error"])
 
 
 def _window_predates_flat_retention(fp) -> bool:
@@ -1053,8 +1066,72 @@ def _window_predates_flat_retention(fp) -> bool:
     return fp.window_end < floor
 
 
+# A hold still PENDING this long after intake has stopped; tell a human.
+FOOTAGE_HOLD_STALL_MINUTES = 15
+HOLD_STOPPED_ERROR = (
+    "The automatic hold stopped before it finished, so some or all cameras "
+    "may not be bookmarked"
+)
+
+
+def _claim_pending_as_manual(fp, *, reason: str, error: str) -> bool:
+    """Move a still-PENDING preservation to MANUAL and send the URGENT notice.
+    Conditional, so a finished hold or a second sweeper is left alone."""
+    from .models import FootagePreservation
+
+    claimed = FootagePreservation.objects.filter(
+        pk=fp.pk, state=FootagePreservation.State.PENDING,
+    ).update(state=FootagePreservation.State.MANUAL)
+    if not claimed:
+        return False
+    fp.state = FootagePreservation.State.MANUAL
+    _notify_manual_hold(fp, reason=reason, error=error, site_codes=fp.site_codes)
+    return True
+
+
+@shared_task
+def sweep_stalled_footage_holds() -> int:
+    """Rule 7 backstop: a hold whose task never ran or died mid-way must not
+    sit PENDING with nobody told while retention runs out."""
+    from .models import FootagePreservation
+
+    cutoff = timezone.now() - dt.timedelta(minutes=FOOTAGE_HOLD_STALL_MINUTES)
+    stalled = FootagePreservation.objects.select_related("request").filter(
+        state=FootagePreservation.State.PENDING, created_at__lt=cutoff,
+    )
+    return sum(
+        _claim_pending_as_manual(
+            fp,
+            reason=f"hold not finished after {FOOTAGE_HOLD_STALL_MINUTES} minutes",
+            error=HOLD_STOPPED_ERROR,
+        )
+        for fp in stalled
+    )
+
+
 @shared_task
 def execute_footage_hold(preservation_id: int):
+    """Run the hold; whatever happens, never leave it PENDING."""
+    try:
+        _execute_footage_hold(preservation_id)
+    finally:
+        _never_leave_pending(preservation_id)
+
+
+def _never_leave_pending(preservation_id: int) -> None:
+    from .models import FootagePreservation
+
+    try:
+        fp = FootagePreservation.objects.select_related("request").get(pk=preservation_id)
+        if fp.state == FootagePreservation.State.PENDING:
+            _claim_pending_as_manual(
+                fp, reason="hold stopped before it finished", error=HOLD_STOPPED_ERROR,
+            )
+    except Exception:  # the sweeper retries; keep the original error
+        logger.exception("Could not move footage hold %s off PENDING", preservation_id)
+
+
+def _execute_footage_hold(preservation_id: int):
     """Bookmark every in-scope camera for the requested window: each camera at
     the sites the request names, or every camera district-wide when it names
     none. Broad by default — narrowing is a human decision
@@ -1158,7 +1235,8 @@ def execute_footage_hold(preservation_id: int):
                 "device_group_id": (cam.device_group_id or "")[:100],
             },
         )
-        if ch.state in skip or ch.excluded_at is not None:
+        # A recorded bookmark id means the bookmark exists: never make another.
+        if ch.state in skip or ch.clip_id or ch.excluded_at is not None:
             continue
         _hold_one_camera(fp, cam, ch, now=now)
 

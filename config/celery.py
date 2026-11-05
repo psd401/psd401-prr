@@ -99,4 +99,9 @@ app.conf.beat_schedule = {
         "task": "apps.records.tasks.stall_detector",
         "schedule": crontab(day_of_week="mon", hour=7, minute=30),
     },
+    "footage-hold-stall-sweeper": {
+        # A PENDING hold past 15 minutes goes URGENT manual (rule 7).
+        "task": "apps.records.tasks.sweep_stalled_footage_holds",
+        "schedule": crontab(minute="*/5"),
+    },
 }
