@@ -241,6 +241,34 @@ class StaffNotificationServiceTests(TestCase):
         self.assertFalse(Correspondence.objects.exists())
 
     @mock.patch("apps.records.notifications.gmail_client.send_raw")
+    def test_a_camera_scoped_manual_hold_names_each_camera_and_is_its_own_alert(
+        self, send_raw,
+    ):
+        send_raw.return_value = SentMessage("gmail-urgent", "thread-urgent")
+        request = make_request(description="Camera footage from yesterday")
+        preservation = FootagePreservation.objects.create(
+            request=request,
+            window_start=timezone.now() - dt.timedelta(days=1),
+            window_end=timezone.now(),
+        )
+
+        first = notifications.notify_footage_manual_hold(preservation, error="Aware down")
+        scoped = notifications.notify_footage_manual_hold(
+            preservation,
+            error="2 camera(s) are not confirmed held",
+            cameras=["Gym Entrance (PHS): failed", "Staff Parking (PHS): footage gap"],
+            condition="partial",
+        )
+
+        self.assertEqual((first, scoped), (True, True))
+        body = BytesParser(policy=policy.default).parsebytes(
+            send_raw.call_args.args[0]
+        ).get_body().get_content()
+        self.assertIn("Gym Entrance (PHS): failed", body)
+        self.assertIn("Staff Parking (PHS): footage gap", body)
+        self.assertNotIn("ALL cameras district-wide", body)
+
+    @mock.patch("apps.records.notifications.gmail_client.send_raw")
     def test_unapplied_delivery_effect_is_one_immediate_urgent_staff_alert(
         self, send_raw
     ):

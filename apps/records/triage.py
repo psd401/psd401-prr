@@ -51,7 +51,8 @@ OUTSIDE_RETENTION_CHECKLIST = (
     "or queued. HUMAN MUST COMPLETE the adequate-search checklist "
     "before deciding and drafting any response: "
     "(1) incident-hold clips for the window? (2) previously exported "
-    "footage (Aware bookmarks / downloads)? (3) email & Drive search "
+    "footage (Aware bookmarks / downloads), including other users' bookmarks "
+    "on each device, which may still hold older footage? (3) email & Drive search "
     "for shared copies? (4) SRO / front office copies? "
     "Cite the retention schedule in the response."
 )
@@ -196,6 +197,31 @@ def record_outside_retention_review(fp: FootagePreservation, *, reason: str) -> 
     audit("footage.expired_window", target=fp.request.number, window=_local_dates(fp))
     notifications.notify_adequate_search_review(fp, note=reason)
     return fp
+
+
+NOT_RETAINED_NOTE = (
+    "Check other users' bookmarks on these devices in Aware: they may still "
+    "hold older footage, so do not conclude that none exists until you have."
+)
+
+
+def record_not_retained_review(fp: FootagePreservation, *, cameras) -> None:
+    """Part of a hold went ahead, but some cameras no longer retain the
+    window. Queue the adequate-search checklist for those cameras; the
+    preservation keeps its state, and no requester response is drafted."""
+    cameras = list(cameras)
+    StatusEvent.objects.create(
+        request=fp.request,
+        note=(
+            f"TRIAGE: Aware retains no footage for the window on {len(cameras)} "
+            f"camera(s): {'; '.join(cameras)[:1000]}. {NOT_RETAINED_NOTE} "
+            f"{OUTSIDE_RETENTION_CHECKLIST}"
+        ),
+    )
+    audit("footage.cameras_not_retained", target=fp.request.number, cameras=len(cameras))
+    notifications.notify_adequate_search_review(
+        fp, not_retained_cameras=cameras, note=NOT_RETAINED_NOTE,
+    )
 
 
 def record_no_cameras_review(fp: FootagePreservation, *, site_codes) -> None:

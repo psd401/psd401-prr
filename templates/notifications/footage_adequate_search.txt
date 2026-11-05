@@ -1,6 +1,11 @@
 {% if no_camera_sites %}Request {{ request_number }} names {{ no_camera_sites }}, where Aware has no cameras. Nothing was bookmarked there.
 
-Human review and an adequate search are required. Check for another recorder at the site (a standalone DVR or NVR, a doorbell or intercom camera), front-office and SRO copies, and email and Drive copies before deciding or drafting a response. No requester response has been generated.{% else %}Request {{ request_number }} asks for footage ({{ window_start|date:"Y-m-d" }} through {{ window_last_day|date:"Y-m-d" }}) that no camera in scope still retains.{% if note %} {{ note }}{% endif %}
+Human review and an adequate search are required. Check for another recorder at the site (a standalone DVR or NVR, a doorbell or intercom camera), front-office and SRO copies, and email and Drive copies before deciding or drafting a response. No requester response has been generated.{% elif not_retained_cameras %}Request {{ request_number }} asks for footage ({{ window_start|date:"Y-m-d" }} through {{ window_last_day|date:"Y-m-d" }}). The rest of the hold went ahead, but these cameras no longer retain the window:
+{% for line in not_retained_cameras %}- {{ line }}
+{% endfor %}{% if note %}
+{{ note }}{% endif %}
+
+Human review and an adequate search are required for them. Check incident holds, prior exports or Aware bookmarks, email and Drive copies, and SRO/front-office copies before deciding or drafting a response. No requester response has been generated.{% else %}Request {{ request_number }} asks for footage ({{ window_start|date:"Y-m-d" }} through {{ window_last_day|date:"Y-m-d" }}) that no camera in scope still retains.{% if note %} {{ note }}{% endif %}
 
 Human review and an adequate search are required. Check incident holds, prior exports or Aware bookmarks, email and Drive copies, and SRO/front-office copies before deciding or drafting a response. No requester response has been generated.{% endif %}
 

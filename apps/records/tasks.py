@@ -860,15 +860,19 @@ def stall_detector():
 FULL_COVERAGE = 0.95
 
 
-def _notify_manual_hold(fp, *, reason: str, error: str, site_codes) -> None:
+def _notify_manual_hold(
+    fp, *, reason: str, error: str, site_codes, cameras=(), condition: str = "",
+) -> None:
     """Send the URGENT manual-hold instructions and record on the timeline
     whether the alert went out."""
     from .models import StatusEvent
 
+    extra = {"cameras": list(cameras), "condition": condition} if cameras or condition else {}
     notification_result = notifications.notify_footage_manual_hold(
         fp,
         error=error,
         site_codes=list(site_codes),
+        **extra,
     )
     if notification_result is True:
         notification_note = "notification sent or queued to facilities."
@@ -929,6 +933,41 @@ def _safe_alta_error(exc: BaseException, *, action: str = "bookmark") -> str:
     if isinstance(exc, alta.AltaWriteUncertain):
         return f"Aware {action} uncertain ({detail}): {BOOKMARK_MAY_EXIST}."
     return f"Aware {action} failed ({detail})."
+
+
+def _camera_line(ch) -> str:
+    """One camera for a human checklist: name, site, and what happened."""
+    from .models import CameraHold
+
+    label = f"{ch.camera_name or 'Unnamed camera'} ({ch.site or 'no site'})"
+    if ch.state == CameraHold.State.GAP:
+        confirmed = f"{ch.coverage_fraction:.0%}" if ch.coverage_fraction is not None else "unknown"
+        return f"{label}: footage gap or unverified coverage ({confirmed} confirmed)"
+    if ch.state == CameraHold.State.FAILED:
+        return f"{label}: failed — {ch.error}" if ch.error else f"{label}: failed"
+    if ch.state == CameraHold.State.NOT_RETAINED:
+        return f"{label}: no footage retained for the window"
+    return f"{label}: not attempted"
+
+
+def _no_cameras_at(fp, site_codes) -> None:
+    """A named site has no cameras in Aware: queue the adequate search and
+    send the URGENT manual notice, since footage may sit on another recorder."""
+    from . import triage
+
+    sites = triage.describe_sites(site_codes)
+    triage.record_no_cameras_review(fp, site_codes=site_codes)
+    _notify_manual_hold(
+        fp,
+        reason=f"Aware has no cameras at {sites}",
+        error=(
+            f"Aware lists no cameras at {sites}, so nothing was bookmarked "
+            "there; a human must find what, if anything, records the site "
+            "and preserve it"
+        ),
+        site_codes=site_codes,
+        condition="no-cameras:" + ",".join(site_codes),
+    )
 
 
 def _local_time(value) -> str:
@@ -1003,7 +1042,8 @@ def _hold_one_camera(fp, cam, ch, *, now) -> None:
         ch.error = ""
         notes.append(
             f"Oldest retained footage ({_local_time(pruned_to)}) is at or after "
-            "the window end; nothing to bookmark."
+            "the window end; nothing to bookmark, but other users' bookmarks "
+            "on this device may still hold older footage: check them in Aware."
         )
         ch.coverage_note = " ".join(notes)[:500]
         ch.save()
@@ -1220,7 +1260,7 @@ def _execute_footage_hold(preservation_id: int):
             fp.state = FootagePreservation.State.NO_CAMERAS
             fp.save(update_fields=["state"])
         if empty:
-            triage.record_no_cameras_review(fp, site_codes=empty)
+            _no_cameras_at(fp, empty)
         return
 
     now = timezone.now()
@@ -1282,7 +1322,7 @@ def _execute_footage_hold(preservation_id: int):
                 ),
             )
         if empty:
-            triage.record_no_cameras_review(fp, site_codes=empty)
+            _no_cameras_at(fp, empty)
         return
 
     complete = held == holds.count() and not missing and not empty
@@ -1304,6 +1344,29 @@ def _execute_footage_hold(preservation_id: int):
     notifications.notify_footage_hold_complete(
         fp, held=held, gap=gap, failed=failed, not_retained=not_retained,
     )
+    short = list(holds.filter(state__in=(
+        CameraHold.State.FAILED, CameraHold.State.GAP, CameraHold.State.PENDING,
+    )).order_by("pk"))
+    if short:
+        _notify_manual_hold(
+            fp,
+            reason=f"{len(short)} camera(s) not confirmed held",
+            error=(
+                f"{len(short)} camera(s) are not confirmed held; the others "
+                "were bookmarked"
+            ),
+            site_codes=named,
+            cameras=[_camera_line(ch) for ch in short],
+            condition="partial:" + ",".join(str(ch.pk) for ch in short),
+        )
+    if not_retained:
+        triage.record_not_retained_review(
+            fp,
+            cameras=[
+                _camera_line(ch)
+                for ch in holds.filter(state=CameraHold.State.NOT_RETAINED).order_by("pk")
+            ],
+        )
     if missing:
         _notify_manual_hold(
             fp,
@@ -1313,9 +1376,10 @@ def _execute_footage_hold(preservation_id: int):
                 "the other named sites were bookmarked"
             ),
             site_codes=missing,
+            condition="missing-groups:" + ",".join(missing),
         )
     if empty:
-        triage.record_no_cameras_review(fp, site_codes=empty)
+        _no_cameras_at(fp, empty)
 
 
 @shared_task(bind=True, max_retries=3)

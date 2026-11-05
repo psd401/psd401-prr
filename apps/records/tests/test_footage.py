@@ -332,7 +332,8 @@ class HoldPathTests(TestCase):
         self.assertFalse(fp.camera_holds.exists())
         review.assert_called_once()
         self.assertEqual(review.call_args.kwargs["no_camera_sites"], ["HHE"])
-        manual.assert_not_called()
+        manual.assert_called_once()
+        self.assertEqual(manual.call_args.kwargs["site_codes"], ["HHE"])
         complete.assert_not_called()
         notes = " ".join(prr.events.values_list("note", flat=True)).lower()
         self.assertNotIn("held", notes)
@@ -406,7 +407,8 @@ class HoldPathTests(TestCase):
             camera("cam-2", "Staff Parking", "PHS", pruned_to=end),
         ]
         prr = make_request(f"video at Peninsula High School on {days_ago(2)}")
-        with aware(cameras) as m:
+        with aware(cameras) as m, \
+             mock.patch("apps.records.triage.notifications.notify_adequate_search_review") as review:
             fp = preserve(prr)
 
         self.assertEqual([c.args[0].id for c in m.hold.call_args_list], ["cam-1"])
@@ -414,7 +416,13 @@ class HoldPathTests(TestCase):
         self.assertEqual(pruned.state, CameraHold.State.NOT_RETAINED)
         self.assertEqual(pruned.clip_id, "")
         self.assertIn("after the window end", pruned.coverage_note)
+        self.assertIn("other users' bookmarks", pruned.coverage_note)
         self.assertEqual(fp.state, FootagePreservation.State.PARTIAL)
+        review.assert_called_once()
+        self.assertIn("Staff Parking (PHS)", review.call_args.kwargs["not_retained_cameras"][0])
+        self.assertIn("other users' bookmarks", review.call_args.kwargs["note"])
+        checklist = prr.events.get(note__contains="HUMAN MUST COMPLETE")
+        self.assertIn("other users' bookmarks", checklist.note)
 
     def test_a_naive_oldest_footage_time_is_read_as_utc(self):
         _, end = triage.calendar_day_window(
@@ -446,7 +454,7 @@ class HoldPathTests(TestCase):
         review.assert_called_once()
         checklist = prr.events.get()
         for phrase in ("HUMAN REVIEW REQUIRED", "HUMAN MUST COMPLETE",
-                       "incident-hold", "email & Drive"):
+                       "incident-hold", "email & Drive", "other users' bookmarks"):
             self.assertIn(phrase, checklist.note)
         self.assertTrue(
             AuditLog.objects.filter(action="footage.expired_window",
@@ -803,10 +811,33 @@ class HoldPathTests(TestCase):
             fp.camera_holds.get(camera_id="cam-2").error,
             "Aware bookmark failed (RuntimeError).",
         )
-        notify_manual_hold.assert_not_called()
+        notify_manual_hold.assert_called_once()
+        kwargs = notify_manual_hold.call_args.kwargs
+        self.assertEqual(len(kwargs["cameras"]), 1)
+        self.assertIn("Staff Parking (PHS)", kwargs["cameras"][0])
+        self.assertIn("failed", kwargs["cameras"][0])
         notify_complete.assert_called_once_with(
             fp, held=2, gap=0, failed=1, not_retained=0,
         )
+
+    def test_a_partial_hold_names_every_camera_not_confirmed_held(self):
+        def gap_on_cam_3(cam, start, end, *, name, description):
+            if cam.id == "cam-3":
+                return alta.BookmarkHold("bm-cam-3", (head("0", 0.4, start, end),))
+            return full_hold(cam, start, end, name=name, description=description)
+
+        prr = make_request(f"camera footage of the gym on {days_ago(2)}")
+        with aware(hold=gap_on_cam_3), \
+             mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold",
+                        return_value=True) as manual:
+            fp = preserve(prr)
+
+        self.assertEqual(fp.state, FootagePreservation.State.PARTIAL)
+        manual.assert_called_once()
+        (line,) = manual.call_args.kwargs["cameras"]
+        self.assertIn("Main Office (KMS)", line)
+        self.assertIn("gap", line)
+        self.assertTrue(manual.call_args.kwargs["condition"].startswith("partial"))
 
     def test_a_failed_hold_stores_no_address_or_device_id(self):
         import requests

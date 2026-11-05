@@ -561,12 +561,18 @@ def notify_footage_manual_hold(
     *,
     error: str,
     site_codes=None,
+    cameras=(),
+    condition: str = "",
 ) -> bool | None:
-    """URGENT: a human must bookmark footage in Aware by hand. ``site_codes``
-    scopes the instructions; empty means every camera district-wide."""
+    """URGENT: a human must bookmark footage in Aware by hand. ``cameras``
+    (one line per camera) scopes the instructions to those cameras; else
+    ``site_codes`` scopes them, and empty means every camera district-wide.
+    ``condition`` keeps a distinct alert for the same preservation (a
+    partial hold, a site with no cameras) from being deduplicated away."""
     request = preservation.request
     if site_codes is None:
         site_codes = preservation.site_codes
+    cameras = [str(line)[:200] for line in cameras]
     return enqueue_staff_notification(
         signal_type="footage.manual_hold_required",
         request=request,
@@ -581,11 +587,13 @@ def notify_footage_manual_hold(
             "camera_retention_days": runtime.get("CAMERA_RETENTION_DAYS"),
             "failure": str(error)[:500],
             "sites": _footage_sites(site_codes or ()),
+            "cameras": cameras,
             "held_count": preservation.held_count,
         },
         condition_key=(
             f"{preservation.pk}:{preservation.window_start.isoformat()}:"
             f"{preservation.window_end.isoformat()}"
+            + (f":{condition}" if condition else "")
         ),
         immediate=True,
     )
@@ -647,12 +655,15 @@ def notify_adequate_search_review(
     preservation,
     *,
     no_camera_sites=(),
+    not_retained_cameras=(),
     note: str = "",
 ) -> bool | None:
-    """Queue the human adequate-search review: either nothing is retained
-    for the window, or a named site has no cameras in Aware."""
+    """Queue the human adequate-search review: nothing is retained for the
+    window (on every camera, or on ``not_retained_cameras`` of a partial
+    hold), or a named site has no cameras in Aware."""
     request = preservation.request
     no_camera_sites = list(no_camera_sites)
+    not_retained_cameras = [str(line)[:200] for line in not_retained_cameras]
     return enqueue_staff_notification(
         signal_type="footage.adequate_search_review_queued",
         request=request,
@@ -666,11 +677,14 @@ def notify_adequate_search_review(
             "window_last_day": preservation.window_end - dt.timedelta(microseconds=1),
             "camera_retention_days": runtime.get("CAMERA_RETENTION_DAYS"),
             "no_camera_sites": _footage_sites(no_camera_sites),
+            "not_retained_cameras": not_retained_cameras,
             "note": str(note)[:500],
         },
         condition_key=(
             f"{preservation.pk}:no-cameras:{','.join(no_camera_sites)}"
-            if no_camera_sites else str(preservation.pk)
+            if no_camera_sites else
+            f"{preservation.pk}:not-retained" if not_retained_cameras else
+            str(preservation.pk)
         ),
     )
 
