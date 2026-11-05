@@ -642,9 +642,14 @@ response ceiling are all edited there with a reason and a history:
 | `PRR_AI_MODEL_CASE_TITLE` | blank (uses `PRR_AI_MODEL`) | model for case titles |
 | `PRR_AI_MODEL_RESPONSIVENESS` | blank (uses `PRR_AI_MODEL`) | model for record responsiveness |
 | `PRR_AI_MODEL_REDACTION` | blank (uses `PRR_AI_MODEL`) | model for redaction candidates |
+| `PRR_AI_MODEL_INTAKE` | blank (uses `PRR_AI_MODEL`) | model for intake classification |
 | `PRR_AI_TIMEOUT_SECONDS` | `30` | 1-120 |
 | `PRR_AI_MAX_INPUT_CHARACTERS` | `50000` | 1000-250000 |
 | `PRR_AI_MAX_RESPONSE_BYTES` | `65536` | 1024-1048576 |
+| `PRR_AI_MAX_OUTPUT_TOKENS_INTAKE` | `1000` | 256-16000; output budget for intake classification |
+| `PRR_AI_MAX_OUTPUT_TOKENS_INTENT` | `2000` | 256-16000; output budget for request intent |
+| `PRR_AI_MAX_OUTPUT_TOKENS_RESPONSIVENESS` | `1000` | 256-16000; output budget for record responsiveness |
+| `PRR_AI_MAX_OUTPUT_TOKENS_REDACTION` | `4000` | 256-16000; output budget for redaction candidates |
 
 The district's chosen model is `us.amazon.nova-2-lite-v1:0` in `us-west-2`,
 and the production Compose overlay still carries those three values as the

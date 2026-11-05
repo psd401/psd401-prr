@@ -304,6 +304,25 @@ MAX_OUTPUT_TOKENS: dict[str, int] = {
 }
 
 
+#: The four kinds whose output budget an administrator sets in the app
+#: (#31); each setting defaults to the budget above. The case title and the
+#: scope refinement keep their code budgets.
+_MAX_TOKENS_SETTING_FOR_KIND: dict[str, str] = {
+    AdvisoryRun.Kind.INTAKE_CLASSIFICATION: "PRR_AI_MAX_OUTPUT_TOKENS_INTAKE",
+    AdvisoryRun.Kind.REQUEST_INTENT: "PRR_AI_MAX_OUTPUT_TOKENS_INTENT",
+    AdvisoryRun.Kind.RECORD_RESPONSIVENESS: "PRR_AI_MAX_OUTPUT_TOKENS_RESPONSIVENESS",
+    AdvisoryRun.Kind.RECORD_REDACTIONS: "PRR_AI_MAX_OUTPUT_TOKENS_REDACTION",
+}
+
+
+def max_output_tokens(kind: str) -> int:
+    """The most output tokens one call of ``kind`` may produce."""
+    setting = _MAX_TOKENS_SETTING_FOR_KIND.get(kind)
+    if setting:
+        return int(runtime.get(setting))
+    return MAX_OUTPUT_TOKENS.get(kind, 1000)
+
+
 def model_for_kind(kind: str) -> str:
     """The Bedrock model a new run of ``kind`` is asked of and recorded with."""
     setting = _MODEL_SETTING_FOR_KIND.get(kind)
@@ -1697,7 +1716,7 @@ def invoke_advisory_model(
                 },
             ],
             inferenceConfig={
-                "maxTokens": MAX_OUTPUT_TOKENS.get(kind, 1000),
+                "maxTokens": max_output_tokens(kind),
                 "temperature": 0,
             },
             requestMetadata={

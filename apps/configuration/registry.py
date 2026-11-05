@@ -677,6 +677,66 @@ SETTINGS: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key="PRR_AI_MAX_OUTPUT_TOKENS_INTAKE",
+        type=values.INTEGER,
+        default=1000,
+        minimum=256,
+        maximum=16000,
+        unit="tokens",
+        category=CATEGORY_ADVISORY_AI,
+        label="Intake classification output budget",
+        consequence=(
+            "The most output tokens the model may produce for an intake classification. "
+            "Too low cuts the answer off and the run fails closed; the reply "
+            "is still bounded by the response ceiling and its schema."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MAX_OUTPUT_TOKENS_INTENT",
+        type=values.INTEGER,
+        default=2000,
+        minimum=256,
+        maximum=16000,
+        unit="tokens",
+        category=CATEGORY_ADVISORY_AI,
+        label="Request-intent output budget",
+        consequence=(
+            "The most output tokens the model may produce for a request-intent analysis. "
+            "Too low cuts the answer off and the run fails closed; the reply "
+            "is still bounded by the response ceiling and its schema."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MAX_OUTPUT_TOKENS_RESPONSIVENESS",
+        type=values.INTEGER,
+        default=1000,
+        minimum=256,
+        maximum=16000,
+        unit="tokens",
+        category=CATEGORY_ADVISORY_AI,
+        label="Record-responsiveness output budget",
+        consequence=(
+            "The most output tokens the model may produce for a record-responsiveness suggestion. "
+            "Too low cuts the answer off and the run fails closed; the reply "
+            "is still bounded by the response ceiling and its schema."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MAX_OUTPUT_TOKENS_REDACTION",
+        type=values.INTEGER,
+        default=4000,
+        minimum=256,
+        maximum=16000,
+        unit="tokens",
+        category=CATEGORY_ADVISORY_AI,
+        label="Redaction-proposal output budget",
+        consequence=(
+            "The most output tokens the model may produce for a redaction-proposal run. "
+            "Too low cuts the answer off and the run fails closed; the reply "
+            "is still bounded by the response ceiling and its schema."
+        ),
+    ),
+    SettingSpec(
         key="PRR_AI_MAX_RESPONSE_BYTES",
         type=values.INTEGER,
         default=64 * 1024,

@@ -1,7 +1,7 @@
 // ABOUTME: Installment production requires an explicit Records Officer
 // ABOUTME: confirmation and uses the same registered REST primitive as agents.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -782,8 +782,13 @@ it('offers every release-ready record when the list spans more than one page', a
     id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, '0')}`,
     original_filename: `record-${index}.pdf`,
   }))
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const posted: unknown[] = []
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
+    if (url === '/api/staff/installments/' && init?.method === 'POST') {
+      posted.push(JSON.parse(String(init.body)))
+      return response({ id: 9, sequence: 1, items: [] })
+    }
     if (url.startsWith('/api/staff/record-items/')) {
       const second = url.includes('page=2')
       return response({
@@ -798,7 +803,16 @@ it('offers every release-ready record when the list spans more than one page', a
   vi.stubGlobal('fetch', fetchMock)
   renderPage(['records_officer'], 'PRR-2026-0042')
 
-  expect(await screen.findByLabelText('Select all 60')).toBeInTheDocument()
+  const user = userEvent.setup()
+  await user.click(await screen.findByLabelText('Select all 60'))
+  await user.click(screen.getByRole('button', { name: 'Create installment (60)' }))
+
+  // Every record on both pages is sent, not just the first page's 50.
+  await waitFor(() => expect(posted).toHaveLength(1))
+  expect(posted[0]).toEqual({
+    request_number: 'PRR-2026-0042',
+    record_item_ids: records.map((record) => record.id),
+  })
 })
 
 it('builds the release package in one action and previews it before release', async () => {
