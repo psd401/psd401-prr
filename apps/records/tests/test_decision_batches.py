@@ -294,3 +294,24 @@ class DecisionBatchApiTests(_Fixture):
             f"/api/staff/record-items/{self.items[0].pk}/review/", {"state": "responsive"}, format="json",
         )
         self.assertEqual(ok.status_code, 200, ok.content)
+
+    def test_an_officer_token_is_handed_off_on_every_endpoint_a_batch_replaces(self):
+        officer = APIClient()
+        officer.credentials(HTTP_AUTHORIZATION=f"Token {Token.objects.create(user=self.officer).key}")
+        number = self.request.number
+        task = CollectionTask.objects.create(
+            request=self.request, kind=CollectionTask.Kind.VAULT_MAIL, state=CollectionTask.State.COMPLETE,
+        )
+        endpoints = (
+            f"/api/staff/collection-tasks/{task.pk}/supersede/",
+            f"/api/staff/requests/{number}/vault-collection/",
+            f"/api/staff/requests/{number}/rescope/",
+            f"/api/staff/requests/{number}/merge/",
+            f"/api/staff/requests/{number}/close-non-request/",
+        )
+        for path in endpoints:
+            with self.subTest(path=path):
+                response = officer.post(path, {}, format="json")
+                self.assertEqual(response.status_code, 403, response.content)
+                self.assertEqual(response.json()["code"], "human_approval_required")
+        self.assertFalse(AuditLog.objects.filter(action__startswith="collection.").exists())
