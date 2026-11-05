@@ -90,6 +90,8 @@ function heldPreservation(overrides: Record<string, unknown> = {}) {
     held_count: 2,
     confirmation_text: CONFIRMATION,
     request_closed: true,
+    releasable: true,
+    widenable: false,
     released_at: null,
     released_by: null,
     release_reason: '',
@@ -154,20 +156,52 @@ describe('Preservations — Aware bookmark holds', () => {
 })
 
 describe('Preservations — release', () => {
-  it('offers release only to a Records Officer on a closed request', async () => {
+  it('offers release only to a Records Officer when the server says it is releasable', async () => {
     for (const [roles, overrides] of [
       [['admin'], {}],
-      [['records_officer'], { request_closed: false }],
-      [['records_officer'], { state: 'manual' }],
+      // A closed request can still be unreleasable (merged-target rule).
+      [['records_officer'], { request_closed: true, releasable: false }],
+      [['records_officer'], { state: 'manual', releasable: false }],
     ] as const) {
       vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([
         heldPreservation(overrides),
       ]))))
       const view = renderPage(<Preservations roles={[...roles]} />)
       await screen.findByText('Footage preservation')
-      expect(screen.queryByRole('button', { name: 'Release hold' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Release hold|Retry release/ }))
+        .not.toBeInTheDocument()
       view.unmount()
     }
+  })
+
+  it('trusts the server releasable flag over request_closed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([
+      heldPreservation({ request_closed: false, releasable: true }),
+    ]))))
+    renderPage(<Preservations roles={['records_officer']} />)
+    expect(await screen.findByRole('button', { name: /Release hold/ })).toBeInTheDocument()
+  })
+
+  it('offers "Retry release" when a released hold still has release_failed cameras', async () => {
+    const base = heldPreservation()
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([
+      heldPreservation({
+        state: 'released',
+        confirmation_text: null,
+        releasable: true,
+        released_at: '2026-10-01T17:00:00Z',
+        released_by: 'records.officer',
+        release_reason: 'Request fulfilled and closed.',
+        camera_holds: [
+          { ...base.camera_holds[0], state: 'released' },
+          { ...base.camera_holds[1], state: 'release_failed', error: 'Bookmark delete timed out.' },
+        ],
+      }),
+    ]))))
+    renderPage(<Preservations roles={['records_officer']} />)
+
+    expect(await screen.findByRole('button', { name: /Retry release/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Release hold/ })).not.toBeInTheDocument()
   })
 
   it('requires a reason and the litigation-hold attestation before releasing', async () => {

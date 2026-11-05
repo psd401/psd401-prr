@@ -50,6 +50,11 @@ interface Preservation {
   camera_holds: CameraHold[]
   confirmation_text: string | null
   request_closed: boolean
+  /** Server-computed: closed, not a merged target, and held/partial — or
+   * released with cameras whose bookmark delete failed (a retry). */
+  releasable: boolean
+  /** Server-computed: narrowed to specific sites and not released. */
+  widenable: boolean
   released_at: string | null
   released_by: string | null
   release_reason: string
@@ -65,7 +70,10 @@ const PRESERVATION_STATES = [
   'released',
 ] as const
 
-const RELEASABLE_STATES = new Set(['held', 'partial'])
+/** A release already ran but some Aware bookmarks may still exist. */
+function hasReleaseFailures(preservation: Preservation) {
+  return preservation.camera_holds.some((h) => h.state === 'release_failed')
+}
 
 const STATE_TONES: Record<string, 'green' | 'amber' | 'red' | 'neutral'> = {
   pending: 'amber',
@@ -320,9 +328,9 @@ export function Preservations({
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <StateBadge state={p.state} />
-                  {canExclude && p.request_closed && RELEASABLE_STATES.has(p.state) && (
+                  {canExclude && p.releasable && (
                     <Button variant="ghost" onClick={() => openRelease(p)}>
-                      Release hold
+                      {hasReleaseFailures(p) ? 'Retry release' : 'Release hold'}
                     </Button>
                   )}
                 </div>
@@ -448,7 +456,11 @@ export function Preservations({
 
       <Modal
         open={canExclude && releasing !== null}
-        title={releasing ? `Release preservation for ${releasing.request_number}` : ''}
+        title={
+          releasing
+            ? `${hasReleaseFailures(releasing) ? 'Retry release' : 'Release preservation'} for ${releasing.request_number}`
+            : ''
+        }
         onClose={closeRelease}
       >
         {releasing && (
