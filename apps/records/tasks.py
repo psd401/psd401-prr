@@ -1089,17 +1089,13 @@ def execute_footage_hold(preservation_id: int):
     except Exception as exc:  # noqa: BLE001
         error = _safe_alta_error(exc, action="camera list")
         if _window_predates_flat_retention(fp):
-            triage.record_outside_retention_review(
-                fp,
-                reason=(
-                    "Requested footage window predates the "
-                    f"{runtime.get('CAMERA_RETENTION_DAYS')}-day retention "
-                    "setting, and per-camera retention could not be checked "
-                    f"({error[:200]}). Some cameras keep footage longer than "
-                    "the setting: check each camera in Aware."
-                ),
+            # Never EXPIRED: only Aware knows which cameras keep it longer.
+            error += (
+                " The window predates the "
+                f"{runtime.get('CAMERA_RETENTION_DAYS')}-day retention setting, "
+                "but some cameras keep footage longer: check each camera's "
+                "retention in Aware and bookmark any that still hold the window."
             )
-            return
         _degrade_footage_hold_to_manual(fp, reason="API unavailable", error=error)
         return
 

@@ -553,25 +553,27 @@ class HoldPathTests(TestCase):
         m.list.assert_not_called()
         m.hold.assert_not_called()
 
-    def test_expired_window_queues_review_never_denies(self):
+    def test_api_down_with_an_old_window_is_urgent_manual_never_expired(self):
+        """Some cameras keep footage longer than the setting, and only Aware
+        knows which: with Aware unreachable nothing may be written off."""
         prr = make_request(f"cctv footage of the parking lot on {days_ago(30)}")
         with mock.patch(f"{CLIENT}.list_device_cameras",
                         side_effect=alta.AltaError("Aware unreachable")), \
-             mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold") as manual:
+             mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold",
+                        return_value=True) as manual, \
+             mock.patch("apps.records.triage.notifications.notify_adequate_search_review") as review:
             fp = preserve(prr)
 
-        self.assertEqual(fp.state, FootagePreservation.State.EXPIRED)
-        self.assertEqual(fp.camera_holds.count(), 0)          # no pointless holds
-        manual.assert_not_called()
-        # Request is NOT denied — status untouched, checklist queued for a human
+        self.assertEqual(fp.state, FootagePreservation.State.MANUAL)
+        self.assertEqual(fp.camera_holds.count(), 0)
+        manual.assert_called_once()
+        self.assertIn("retention", manual.call_args.kwargs["error"])
+        review.assert_not_called()
         prr.refresh_from_db()
         self.assertEqual(prr.status, "received")
-        checklist = prr.events.get()
-        for phrase in ("HUMAN MUST COMPLETE", "incident-hold", "email & Drive"):
-            self.assertIn(phrase, checklist.note)
-        self.assertIn("HUMAN REVIEW REQUIRED", checklist.note)
-        self.assertIn("per-camera retention could not be checked", checklist.note)
-        self.assertNotIn("response queued", checklist.note)
+        self.assertFalse(
+            AuditLog.objects.filter(action="footage.expired_window", target=prr.number).exists()
+        )
 
     @mock.patch(f"{CLIENT}.list_device_cameras",
                 side_effect=alta.AltaNotConfigured("no token"))

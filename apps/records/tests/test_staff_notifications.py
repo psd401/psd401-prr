@@ -569,7 +569,15 @@ class StaffNotificationSignalTests(TestCase):
         )
 
     @mock.patch("apps.records.notifications.enqueue_staff_notification")
-    def test_expired_footage_emits_adequate_search_review_signal(self, enqueue):
+    @mock.patch("apps.integrations.avigilon.client.list_device_cameras")
+    def test_expired_footage_emits_adequate_search_review_signal(self, list_cameras, enqueue):
+        list_cameras.return_value = [
+            Camera(
+                id="cam-1", name="Gym", site="PHS", device_group_id="group-PHS",
+                server_group_id="server-1", status="CONNECTED",
+                pruned_to=timezone.now() - dt.timedelta(days=5), sources=("0",),
+            )
+        ]
         old = (timezone.localdate() - dt.timedelta(days=30)).isoformat()
         request = make_request(description=f"camera footage on {old}")
 
