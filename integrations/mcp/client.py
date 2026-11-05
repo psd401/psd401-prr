@@ -787,7 +787,7 @@ class PRRClient:
             {"kind": kind, "payload": payload, "evidence_summary": evidence},
         )
         return {
-            "batch": batch,
+            "batch": _without_record_filenames(batch),
             "applied": False,
             "human_gate": {
                 "required": True,

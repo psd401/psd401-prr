@@ -94,6 +94,17 @@ class DecisionBatchToolTests(SimpleTestCase):
         self.assertFalse(result["applied"])
         self.assertTrue(result["human_gate"]["required"])
 
+    def test_a_proposal_result_drops_record_filenames(self):
+        echoed = {"id": BATCH_ID, "state": "proposed", "records": [
+            {"id": ITEM_ID, "original_filename": "Student IEP.pdf", "review_state": "unreviewed"},
+        ]}
+        with patch.object(PRRClient, "_post", return_value=echoed):
+            result = client().propose_decision_batch(
+                "review", {"record_item_ids": [ITEM_ID], "state": "responsive"}, "Board minutes.",
+            )
+        self.assertNotIn("Student IEP.pdf", str(result))
+        self.assertEqual(result["batch"]["records"], [{"id": ITEM_ID, "review_state": "unreviewed"}])
+
     def test_a_proposal_is_validated_before_it_is_sent(self):
         for kind, payload, evidence in (("approve", {}, "x"), ("review", [], "x"), ("review", {}, " ")):
             with self.subTest(kind=kind), self.assertRaises(ValueError):
