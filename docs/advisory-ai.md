@@ -172,13 +172,29 @@ requesters' request text, which the 2026-11-03 model acceptance in
 sent, so the input does not change while the run waits. Kinds never mix
 (AGENTS.md rule 13).
 
+For a case opened from an email, the model also sees `email_evidence`
+(schema version 2, #33): the sender's domain; whether the subject presents as
+a reply or a forward; whether the email carried reply headers; which list or
+automated-mail headers it carried (`auto-submitted`, `list-id`,
+`list-unsubscribe`, `precedence`, named but never quoted); and
+`replies_to_cases`, the earlier same-kind cases whose district mail -- sent
+before this email arrived -- it replies to by In-Reply-To, References, or the
+Gmail thread. Those cases join the candidate list whatever their age, so the
+model can name the case the thread points at. A web-form or staff-entered
+case has no email evidence.
+
 It returns one label -- `new_request`, `follow_up`, `duplicate_of`,
 `related_to`, `non_request`, or `spam` -- with a confidence and the evidence it
 relied on. The three labels that point at a case must name one of the cases it
 was shown; an invented number fails the run. The proposal is not applied,
 except for spam and non-request under the intake trust ladder below.
 
-The case Overview shows the label to Records Officers. **Correct** records the
+The case's Intake stage shows the label to Records Officers, and so does the
+officer's Inbox (#33): an open case whose latest completed label nobody has
+answered shows "AI suggests ..." under its subject with its own **Correct**,
+which records agreement and opens the case with the same prefilled action
+(`?intake_action=`; the parameters are dropped once used, and ignored for any
+other role). **Correct** on the case records the
 officer's agreement (`AdvisoryFeedback`, append-only, one per run) and opens
 the ordinary action prefilled: merge for a duplicate or follow-up, add to an
 existing case for a follow-up on an automatically opened email case, or close

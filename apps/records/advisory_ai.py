@@ -9,6 +9,7 @@ import logging
 import math
 import re
 from dataclasses import dataclass
+from email.utils import parseaddr
 from typing import Any
 
 import boto3
@@ -21,6 +22,7 @@ from botocore.exceptions import (
 )
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.api.identity import has_staff_role
@@ -199,7 +201,7 @@ def validate_scope_refinement(raw: Any) -> dict[str, Any]:
 CASE_TITLE_MAX_LENGTH = 80
 
 _CASE_TITLE_SCHEMA_VERSION = 1
-_INTAKE_SCHEMA_VERSION = 1
+_INTAKE_SCHEMA_VERSION = 2
 #: What an intake classification may say. The three that point at an earlier
 #: case must name one the model was shown; the rest must name none.
 INTAKE_LABELS_WITH_TARGET = frozenset({"follow_up", "duplicate_of", "related_to"})
@@ -545,7 +547,81 @@ def _request_intent_context(budget: int) -> tuple[list[dict[str, Any]], dict[str
     return systems, knowledge, truncated
 
 
-def _intake_candidates(request) -> list[dict[str, Any]]:
+_REPLY_SUBJECT = re.compile(r"^\s*(re|aw|sv)\s*:", re.IGNORECASE)
+_FORWARD_SUBJECT = re.compile(r"^\s*(fwd?|fw)\s*:", re.IGNORECASE)
+_LIST_OR_BULK_HEADERS = ("auto-submitted", "list-id", "list-unsubscribe", "precedence")
+_INTAKE_MAX_THREAD_CASES = 20
+
+
+def _intake_email_evidence(request) -> dict[str, Any] | None:
+    """Header and thread facts about the email that created this case (#33).
+
+    Facts only, fixed at intake: the sender's domain, whether the email
+    presents as a reply or a forward, which list or bulk headers it carried
+    (named, never quoted), and which earlier cases of the same matter kind
+    it replies to -- an In-Reply-To or References id, or the Gmail thread, of
+    mail the district sent on that case before this email arrived. A
+    web-form or staff-entered case has none.
+    """
+    from apps.correspondence.models import (
+        Correspondence,
+        InboundCorrespondenceReceipt,
+    )
+
+    receipt = (
+        InboundCorrespondenceReceipt.objects.filter(
+            matched_request=request,
+            match_method=InboundCorrespondenceReceipt.MatchMethod.EMAIL_INTAKE,
+        )
+        .select_related("matched_correspondence")
+        .order_by("received_at", "pk")
+        .first()
+    )
+    if receipt is None:
+        return None
+    correspondence = receipt.matched_correspondence
+    headers = {
+        str(name).casefold()
+        for name in ((correspondence.received_headers or {}) if correspondence else {})
+    }
+    subject = correspondence.received_subject if correspondence else ""
+    sender = parseaddr(
+        (correspondence.received_sender if correspondence else "")
+        or receipt.envelope_sender
+    )[1]
+    message_ids = {receipt.in_reply_to, *(receipt.references or [])} - {""}
+    thread = Q(rfc_message_id__in=message_ids)
+    if receipt.provider_thread_id:
+        thread |= Q(
+            provider=receipt.provider,
+            provider_account=receipt.provider_account,
+            provider_thread_id=receipt.provider_thread_id,
+        )
+    replies_to = (
+        Correspondence.objects.filter(
+            thread,
+            direction=Correspondence.Direction.OUTBOUND,
+            status=Correspondence.Status.SENT,
+            sent_at__lte=receipt.received_at,
+            request__matter_kind=request.matter_kind,
+            request__received_at__lt=request.received_at,
+        )
+        .exclude(request=request)
+        .values_list("request__number", flat=True)
+        .distinct()
+        .order_by("request__number")
+    )
+    return {
+        "sender_domain": sender.rpartition("@")[2].lower()[:255],
+        "subject_marks_reply": bool(_REPLY_SUBJECT.match(subject)),
+        "subject_marks_forward": bool(_FORWARD_SUBJECT.match(subject)),
+        "has_reply_headers": bool(receipt.in_reply_to or receipt.references),
+        "list_or_bulk_headers": [h for h in _LIST_OR_BULK_HEADERS if h in headers],
+        "replies_to_cases": list(replies_to[:_INTAKE_MAX_THREAD_CASES]),
+    }
+
+
+def _intake_candidates(request, *, also=()) -> list[dict[str, Any]]:
     """Earlier cases of the same matter kind the new one might belong to.
 
     Only cases received before this one, and only fields that do not change
@@ -572,10 +648,15 @@ def _intake_candidates(request) -> list[dict[str, Any]]:
         .select_related("requester")
         .order_by("-received_at", "pk")[:_INTAKE_MAX_SAME_SENDER]
     ) if email else []
+    # Cases the email replies to are offered whatever their age, so the
+    # model can name the one the thread evidence points at.
+    threaded = list(
+        earlier.filter(number__in=list(also)).select_related("requester")
+    ) if also else []
     seen = set()
     rows = []
     for case in sorted(
-        [*recent, *same_sender], key=lambda c: (c.received_at, c.number),
+        [*recent, *same_sender, *threaded], key=lambda c: (c.received_at, c.number),
         reverse=True,
     ):
         if case.pk in seen:
@@ -596,6 +677,7 @@ def _build_advisory_input(run: AdvisoryRun) -> _AdvisoryInput:
     if run.kind == AdvisoryRun.Kind.INTAKE_CLASSIFICATION:
         request = run.request
         description = request.description
+        email_evidence = _intake_email_evidence(request)
         payload = {
             "kind": run.kind,
             "advisory_schema_version": _INTAKE_SCHEMA_VERSION,
@@ -603,7 +685,11 @@ def _build_advisory_input(run: AdvisoryRun) -> _AdvisoryInput:
             "request_email_subject": _case_title_subject(request),
             "request_channel": request.channel,
             "request_received_date": _received_date(request).isoformat(),
-            "candidate_cases": _intake_candidates(request),
+            "email_evidence": email_evidence,
+            "candidate_cases": _intake_candidates(
+                request,
+                also=email_evidence["replies_to_cases"] if email_evidence else (),
+            ),
         }
         return _AdvisoryInput(
             payload=payload,
@@ -1557,6 +1643,12 @@ def _advisory_system_message(kind: str) -> str:
             "different requester. non_request: correspondence that asks for "
             "no records (a complaint, a general question, a notice, a "
             "vendor pitch). spam: unsolicited bulk or automated mail. "
+            "email_evidence, when present, holds facts about the email that "
+            "created the case: replies_to_cases names earlier cases whose "
+            "district mail this email replies to (strong evidence of a "
+            "follow_up), and list_or_bulk_headers names list or automated-mail "
+            "headers it carried (evidence of spam or a non_request, never "
+            "proof). "
             "For follow_up, duplicate_of, and related_to, target_case_number "
             "must be the number of one of the supplied candidate_cases; for "
             "every other label it must be null. Never invent a case number. "

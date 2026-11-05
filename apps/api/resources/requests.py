@@ -257,6 +257,41 @@ class CaseNoteCreateSerializer(serializers.Serializer):
 CASE_NOTE_SNIPPET_LENGTH = 160
 
 
+def _unanswered_intake_labels(cases) -> dict:
+    """Each case's latest completed intake label nobody has answered (#33).
+
+    One query for the page: the newest completed intake run per case, kept
+    only when no officer feedback exists for it. A case whose latest run is
+    still pending or failed shows nothing.
+    """
+    latest = {}
+    runs = (
+        AdvisoryRun.objects.filter(
+            request__in=[case.pk for case in cases],
+            kind=AdvisoryRun.Kind.INTAKE_CLASSIFICATION,
+            record_item__isnull=True,
+        )
+        .annotate(
+            _answered=Exists(
+                AdvisoryFeedback.objects.filter(advisory_run=OuterRef("pk"))
+            )
+        )
+        .order_by("request_id", "-created_at")
+    )
+    for run in runs:
+        latest.setdefault(run.request_id, run)
+    return {
+        request_id: {
+            "label": run.proposal.get("label"),
+            "target_case_number": run.proposal.get("target_case_number"),
+            "confidence": run.proposal.get("confidence"),
+        }
+        for request_id, run in latest.items()
+        if run.state == AdvisoryRun.State.COMPLETE and not run._answered
+        and run.proposal.get("label")
+    }
+
+
 class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
     requester_email = serializers.EmailField(source="requester.email", read_only=True)
     requester_name = serializers.CharField(source="requester.name", read_only=True)
@@ -273,6 +308,7 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
     next_due = serializers.SerializerMethodField()
     next_due_basis = serializers.SerializerMethodField()
     latest_note = serializers.SerializerMethodField()
+    intake_suggestion = serializers.SerializerMethodField()
 
     class Meta:
         model = PublicRecordsRequest
@@ -287,7 +323,7 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
                   "next_due", "next_due_basis",
                   "latest_note",
                   "inbox_needs_attention", "latest_inbound_at",
-                  "subject", "subject_source"]
+                  "subject", "subject_source", "intake_suggestion"]
         read_only_fields = ["id", "number", "status", "matter_kind",
                             "received_at",
                             "statutory_response_due", "ferpa_access_due",
@@ -295,6 +331,12 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
                             "closed_at", "tolled_business_days",
                             "acknowledgment_sent_at",
                             "initial_response_delivered"]
+
+    @extend_schema_field(serializers.JSONField(allow_null=True))
+    def get_intake_suggestion(self, obj):
+        """The case's unanswered intake label, on a Records Officer's Inbox
+        rows only (#33); null everywhere else. Precomputed for the page."""
+        return (self.context.get("intake_suggestions") or {}).get(obj.pk)
 
     @extend_schema_field(serializers.IntegerField())
     def get_inbox_needs_attention(self, obj):
@@ -1723,6 +1765,20 @@ class RequestsViewSet(
         if ordering:
             return qs.order_by(*ordering)
         return qs.order_by(CASE_DUE_DATE.asc(nulls_last=True), "pk")
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        rows = page if page is not None else list(queryset)
+        context = self.get_serializer_context()
+        if request.query_params.get("queue") == "inbox" and has_staff_role(
+            request.user, StaffRole.RECORDS_OFFICER,
+        ):
+            context["intake_suggestions"] = _unanswered_intake_labels(rows)
+        data = self.get_serializer_class()(rows, many=True, context=context).data
+        if page is not None:
+            return self.get_paginated_response(data)
+        return Response(data)
 
     def get_serializer_class(self):
         if self.action == "intake":

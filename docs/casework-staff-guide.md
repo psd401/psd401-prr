@@ -78,6 +78,14 @@ it, or open the approved message to queue it. Each remains a separate,
 human-confirmed action, because a draft is not a response and neither is an
 approval.
 
+
+When advisory AI is on, an open case whose intake label nobody has answered
+shows **AI suggests** and the label (for example "Duplicate of PRR-…") under
+its subject, with a **Correct** link. Correct records that you agree and
+opens the case with the matching action already filled in -- merge, add to an
+existing case, or close as not a request. Nothing happens until you read and
+submit that action. To disagree, open the case and choose **Not correct**.
+
 ## The Cases table
 
 The **Cases** and **All cases** views list the cases themselves rather than the
