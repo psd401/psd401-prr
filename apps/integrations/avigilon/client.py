@@ -39,6 +39,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from secrets import token_hex  # the stdlib module; ``secrets`` below is ours
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
@@ -277,9 +278,10 @@ def _session_cookie(http: requests.Session, config: _Config, *, stale: str = "")
     if _usable(cookie, stale):
         return cookie
     lock = _login_lock_key(config)
+    token = token_hex(16)
     deadline = _monotonic() + LOGIN_WAIT_SECONDS
     while True:
-        if _cache_op(cache.add, lock, "1", LOGIN_LOCK_TTL_SECONDS):
+        if _cache_op(cache.add, lock, token, LOGIN_LOCK_TTL_SECONDS):
             try:
                 cookie = _cached_cookie(config)
                 if _usable(cookie, stale):
@@ -293,16 +295,31 @@ def _session_cookie(http: requests.Session, config: _Config, *, stale: str = "")
                 )
                 return cookie
             finally:
-                try:
-                    cache.delete(lock)
-                except Exception:  # noqa: BLE001 - the lock expires on its own
-                    logger.warning("Could not release the Alta login lock; it expires on its own.")
+                _release_login_lock(lock, token)
         if _monotonic() >= deadline:
             raise AltaError("Timed out waiting for another process to sign in to Alta.")
         _sleep(LOGIN_POLL_SECONDS)
         cookie = _cached_cookie(config)
         if _usable(cookie, stale):
             return cookie
+
+
+def _release_login_lock(lock: str, token: str) -> None:
+    """Delete the login lock only while it still holds this process's token.
+
+    If this holder outlived the lock's TTL, another process may have taken
+    the lock since, and deleting it would let a third process sign in beside
+    that one. The get and the delete are two cache calls, not one atomic
+    compare-and-delete, so the lock can still expire and be retaken in the
+    gap between them. That race is accepted: the TTL outlives a login, so it
+    needs a holder at the very end of its TTL, and the worst outcome is one
+    extra sign-in, which costs a session slot, not a hold.
+    """
+    try:
+        if cache.get(lock) == token:
+            cache.delete(lock)
+    except Exception:  # noqa: BLE001 - the lock expires on its own
+        logger.warning("Could not release the Alta login lock; it expires on its own.")
 
 
 def _reject_redirect(response) -> None:

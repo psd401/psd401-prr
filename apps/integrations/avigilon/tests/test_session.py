@@ -208,3 +208,30 @@ class LoginLockTests(fakes.TenantTestCase):
         client.list_device_groups()
 
         self.assertIsNone(cache.get(client._login_lock_key(client._config())))
+
+    def test_each_lock_holder_takes_the_lock_with_its_own_random_token(self):
+        key = client._login_lock_key(client._config())
+        with mock.patch.object(client.cache, "add", wraps=cache.add) as adder:
+            client.list_device_groups()
+            self.tenant.expire_all_sessions()
+            client.list_device_groups()
+
+        tokens = [c.args[1] for c in adder.call_args_list if c.args[0] == key]
+        self.assertEqual(len(tokens), 2)
+        self.assertNotEqual(tokens[0], tokens[1])
+        for token in tokens:
+            self.assertRegex(token, r"^[0-9a-f]{32,}$")
+
+    def test_a_lock_that_expired_and_was_retaken_is_not_released(self):
+        """A slow holder whose lock expired must not delete its successor's."""
+        key = client._login_lock_key(client._config())
+        real_login = client._login
+
+        def slow_login(http, config):
+            cache.set(key, "the-next-holder", 60)
+            return real_login(http, config)
+
+        with mock.patch.object(client, "_login", side_effect=slow_login):
+            client.list_device_groups()
+
+        self.assertEqual(cache.get(key), "the-next-holder")
