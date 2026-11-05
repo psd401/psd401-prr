@@ -53,7 +53,9 @@
     "reviewer-elusion-signoff",
     "reviewer-redaction-group-accept",
     "reviewer-keyboard-flight",
-    "officer-scope-iterations"
+    "officer-scope-iterations",
+    "officer-approve-and-collect",
+    "officer-rescope"
   ],
   "e2e_screenshots": {
     "staff-login-open-case": [
@@ -251,7 +253,15 @@
     ],
     "officer-scope-iterations": [
       "officer-scope-iterations.png",
-      "officer-scope-rerun-refused.png"
+      "officer-scope-rerun.png"
+    ],
+    "officer-approve-and-collect": [
+      "officer-approve-and-collect.png",
+      "officer-approve-and-collect-started.png"
+    ],
+    "officer-rescope": [
+      "officer-rescope-diff.png",
+      "officer-rescope-superseded.png"
     ]
   },
   "strictness": "block",

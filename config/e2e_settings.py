@@ -43,3 +43,11 @@ PRR_TRUST_REDACTION_MODE = "batch"
 # test-fixture switch above is on; no deployed setting names it.
 PRR_E2E_FILESYSTEM_OBJECT_STORE = str(BASE_DIR / ".verification" / "e2e-objects")  # noqa: F405
 
+# A deterministic stand-in for Google Vault (apps.integrations.vault.client),
+# honoured only with the test-fixture switch above, so acceptance flows can
+# count, approve and collect, and re-scope. Synthetic identifiers only.
+PRR_E2E_FAKE_VAULT = True
+PRR_VAULT_ADMIN_USER = "vault-admin@psd401.net"
+PRR_VAULT_IMPERSONATION_TARGET = "prr-vault-e2e@psd401-prr-identity.iam.gserviceaccount.com"
+PRR_GOOGLE_HOSTED_DOMAIN = "psd401.net"
+

@@ -186,7 +186,23 @@ only the district mailboxes the proposal names (#36); then, under iterative
 scoping (`apps/records/scoping.py`), at most `PRR_INTENT_MAX_COUNT_ITERATIONS`
 (in-app, default 4, 1 turns refinement off) counts in all, each a tighter query
 the agent proposed after reading the previous total and custodian breakdown.
-Every one is still a count. It may create the count's
+Every one is still a count.
+
+Collection from the approved scope (#37, rule 11 amendment, district decision
+of the epic #27 plan). A Records Officer approves the proposed scope and
+starts the Vault collection in one action from the Collection tab
+(`requests.vault_collection.start`). With the in-app `PRR_TRUST_SCOPE_MODE`
+set to `auto` (default `suggest`), the export also starts unattended -- and
+only then: from the final completed count of a finished *automatic* scoping
+session, on a request with no Vault collection yet, with no actor and
+`CollectionTask.trigger=automatic`, which the Collection tab shows. It is the
+same collection an officer would start: the same deposit gate, the same
+targeted hold for named district mailboxes and no organization-wide hold, the
+same export into review. An officer's re-run never collects by itself;
+re-scoping (`requests.rescope`) is an officer's approval with a reason that
+collects the new scope and supersedes the previous finished collection's
+unreviewed records. `test_compliance` pins the only caller of the automatic
+path. It may create the count's
 Vault matter; it never holds, exports, collects, changes status, or reaches the
 requester. It has no volume cap of its own, also by district decision: web-form
 requests are bounded only by the public-intake throttles, and emailed requests

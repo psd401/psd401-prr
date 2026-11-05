@@ -134,8 +134,28 @@ an earlier scope, or when a count fails; the last completed count is the
 proposed scope. The Collection tab's **Scope iterations** card shows the trail
 (`requests.scoping.read`); **Re-run scoping** (`requests.scoping.rerun`) starts
 a fresh session from the latest intent proposal, with the officer and a reason
-recorded, even when nothing changed. Counts only: no hold, export, collection,
-or status change.
+recorded, even when nothing changed. Scoping itself only counts: no hold,
+export, collection, or status change.
+
+### Collecting the approved scope
+
+Collection starts from the proposed scope (#37, rule 11 amendment):
+
+- **Approve and collect** on the Scope iterations card starts the Vault export
+  of the final count in the officer's name (`requests.vault_collection.start`),
+  with a hold on the named mailboxes when the scope names any.
+- With `PRR_TRUST_SCOPE_MODE` (in-app, default `suggest`) set to `auto`, a
+  finished *automatic* scoping session on a request with no Vault mail
+  collection starts that export itself through
+  `queue_automatic_vault_collection`. The task is recorded as
+  `trigger=automatic` with no actor, and the card and Tasks list say so. A zero
+  count, an officer's re-run, or an existing collection never starts one.
+- **Approve re-scope** (`requests.rescope`) appears when the final count
+  differs from the current collection. It shows both totals, needs a reason of
+  at least 20 characters and a finished current collection, then collects the
+  new scope and supersedes the old collection's unreviewed records.
+
+Holds are unchanged: the export path places the same holds it always has.
 
 ## Intake classification suggests; an officer decides
 

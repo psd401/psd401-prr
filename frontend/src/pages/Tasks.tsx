@@ -25,6 +25,8 @@ import {
 
 interface CollectionTask {
   id: number
+  /** "automatic" when the scope trust policy started it (#37). */
+  trigger?: 'manual' | 'automatic'
   request: number
   request_number: string
   system_name: string | null
@@ -452,6 +454,11 @@ export function Tasks({
                   r.system_urgent_hold ? <Badge tone="red">URGENT</Badge> : '—',
               },
               {
+                header: 'Started',
+                cell: (r: CollectionTask) =>
+                  r.trigger === 'automatic' ? <Badge tone="amber">Automatically</Badge> : 'By staff',
+              },
+              {
                 header: 'Due date',
                 cell: (r: CollectionTask) =>
                   r.due_date ? (
@@ -579,6 +586,7 @@ export function Tasks({
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2">
               <Badge>{KIND_LABELS[selected.kind] ?? selected.kind}</Badge>
+              {selected.trigger === 'automatic' && <Badge tone="amber">Started automatically</Badge>}
               {selected.system_name && <Badge tone="blue">{selected.system_name}</Badge>}
               {selected.system_urgent_hold && <Badge tone="red">URGENT</Badge>}
             </div>

@@ -108,6 +108,8 @@ class CaseworkVerificationFoundationTests(SimpleTestCase):
                 "reviewer-redaction-group-accept",
                 "reviewer-keyboard-flight",
                 "officer-scope-iterations",
+                "officer-approve-and-collect",
+                "officer-rescope",
             ],
         )
         self.assertEqual(

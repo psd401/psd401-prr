@@ -65,11 +65,15 @@ and cited from code, tests, and ADRs; never renumber them.
     rate-limited, no PII echo). Shared stdio MCP holds only
     `records.read_staff_api`; hosted MCP uses attributed personal staff tokens,
     never that shared identity for its gated tools, and exposes exactly four
-    gated draft/proposal tools. Never put tokens in source or `.env.example`. The
-    one unattended Vault action is the automatic intent Gmail *count*: it never
-    holds, exports, collects, changes status, or reaches the requester — do not
-    widen it. Web-form files are scan-gated `IntakeAttachment`s, never
-    `RecordItem`s; no unscanned file is downloadable.
+    gated draft/proposal tools. Never put tokens in source or `.env.example`.
+    Unattended Vault actions are exactly two: the automatic intent Gmail
+    *counts* (iterative scoping), which never hold, export, collect, change
+    status, or reach the requester; and, only with the in-app
+    `PRR_TRUST_SCOPE_MODE=auto`, the export of a finished automatic scoping
+    session's final count on a request with no Vault collection yet, recorded
+    `trigger=automatic` (`vault_collections.queue_automatic_vault_collection`,
+    holds unchanged) — do not widen either. Web-form files are scan-gated
+    `IntakeAttachment`s, never `RecordItem`s; no unscanned file is downloadable.
 12. **Google group authorization stays keyless and read-only** — a dedicated
     group-reader service account plus named-user membership lookups. No private
     key, domain-wide delegation, Vault-identity reuse, or Groups Editor/Admin

@@ -215,6 +215,27 @@ class ScopingTests(_ScopingFixture):
         session.refresh_from_db()
         self.assertEqual(session.state, ScopingSession.State.FAILED)
 
+    @patch("apps.records.scoping.invoke_advisory_model")
+    def test_a_count_that_finishes_before_its_iteration_is_written_still_continues(self, invoke, delay):
+        # A fast worker (or eager Celery) finishes the count inside
+        # request_vault_count, before the ScopeIteration row exists, so the
+        # count's own hand-off finds no session. Scoping must still move on.
+        delay.side_effect = lambda run_id: _complete(VaultCountRun.objects.get(pk=run_id), 10)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            session = start_scoping(self.request, PROPOSAL, trigger=ScopingSession.Trigger.MANUAL, actor=self.officer)
+
+        session.refresh_from_db()
+        self.assertNotEqual(session.state, ScopingSession.State.RUNNING)
+        invoke.assert_called_once()
+
+    @override_settings(PRR_VAULT_ADMIN_USER="")
+    def test_scoping_refuses_plainly_when_vault_counting_is_not_configured(self, delay):
+        with self.assertRaisesMessage(ValidationError, "Google Vault counting is not configured."):
+            start_scoping(self.request, PROPOSAL, trigger=ScopingSession.Trigger.AUTOMATIC)
+        self.assertFalse(ScopingSession.objects.exists())
+        delay.assert_not_called()
+
     def test_rerun_needs_a_reason_and_runs_even_when_nothing_changed(self, _delay):
         AdvisoryRun.objects.create(
             kind=AdvisoryRun.Kind.REQUEST_INTENT, request=self.request,
@@ -265,7 +286,7 @@ class ScopingApiTests(_ScopingFixture):
         api = APIClient()
         api.force_authenticate(self.officer)
         url = f"/api/staff/requests/{self.request.number}/scoping/"
-        self.assertEqual(api.get(url).json(), {"session": None})
+        self.assertEqual(api.get(url).json(), {"session": None, "current_collection": None})
 
         self.assertEqual(api.post(url, {"reason": "short"}, format="json").status_code, 400)
         started = api.post(url, {"reason": "The custodian list changed."}, format="json")

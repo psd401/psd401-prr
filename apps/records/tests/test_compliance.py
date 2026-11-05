@@ -825,6 +825,30 @@ class EstimateRevisionTests(TestCase):
             )
         )
 
+    def test_only_scoping_starts_an_automatic_collection(self):
+        """automatic-collection-ast-guard (#37, rule 11).
+
+        The unattended export has one door: a finished automatic scoping
+        session under PRR_TRUST_SCOPE_MODE=auto. Nothing else may call the
+        automatic queue path.
+        """
+        import ast
+
+        callers = set()
+        for path in Path(settings.BASE_DIR, "apps").rglob("*.py"):
+            if "tests" in path.parts or "migrations" in path.parts:
+                continue
+            tree = ast.parse(path.read_text())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    name = (
+                        node.func.attr if isinstance(node.func, ast.Attribute)
+                        else getattr(node.func, "id", "")
+                    )
+                    if name == "queue_automatic_vault_collection":
+                        callers.add(path.relative_to(settings.BASE_DIR).as_posix())
+        self.assertEqual(callers, {"apps/records/scoping.py"})
+
     def test_a_system_prepared_letter_is_drafted_never_sent(self):
         """estimate-letter-ast-guard (#42).
 

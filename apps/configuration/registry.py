@@ -324,6 +324,22 @@ SETTINGS: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key="PRR_TRUST_SCOPE_MODE",
+        type=values.CHOICE,
+        default="suggest",
+        choices=("suggest", "auto"),
+        category=CATEGORY_ADVISORY_AI,
+        label="Trust ladder: collect from the proposed scope",
+        consequence=(
+            "Suggest: a Records Officer approves the proposed scope and starts "
+            "the Vault collection with one click. Auto: when automatic "
+            "scoping finishes on a request with no Vault collection yet, the "
+            "export starts from its final count with no officer, recorded as "
+            "started automatically. Holds are unchanged: a targeted hold is "
+            "placed only for named district mailboxes."
+        ),
+    ),
+    SettingSpec(
         key="PRR_TRUST_NON_RESPONSIVE_AUTO_MIN_CONFIDENCE",
         type=values.INTEGER,
         default=95,

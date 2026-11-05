@@ -1379,6 +1379,8 @@ def _scoping_data(session) -> dict:
         run = iteration.count_run
         return {
             "number": iteration.number,
+            "count_run_id": str(run.pk),
+            "input_sha256": run.input_sha256,
             "reason": iteration.reason,
             "query": run.terms,
             "search_scope": run.search_scope,
@@ -1453,6 +1455,7 @@ class RequestsViewSet(
         "estimate_letter": {StaffRole.RECORDS_OFFICER},
         "vault_counts": {StaffRole.RECORDS_OFFICER},
         "scoping": {StaffRole.RECORDS_OFFICER},
+        "rescope": {StaffRole.RECORDS_OFFICER},
         "vault_collection": {StaffRole.RECORDS_OFFICER},
         # Adding candidate records to a case is collection, which is the
         # officer's: liaisons hand theirs over through a collection task.
@@ -3001,8 +3004,45 @@ class RequestsViewSet(
             except VaultCountAlreadyRunning as exc:
                 raise serializers.ValidationError([str(exc)]) from exc
             return Response({"session": _scoping_data(session)}, status=status.HTTP_202_ACCEPTED)
+        from apps.records.scoping import current_collection
+
         session = ScopingSession.objects.filter(request=prr).order_by("-created_at").first()
-        return Response({"session": _scoping_data(session) if session else None})
+        return Response({
+            "session": _scoping_data(session) if session else None,
+            "current_collection": current_collection(prr),
+        })
+
+    @extend_schema(
+        request=inline_serializer(
+            "Rescope",
+            fields={
+                "count_run_id": serializers.UUIDField(),
+                "expected_input_sha256": serializers.CharField(),
+                "reason": serializers.CharField(),
+            },
+        ),
+        responses={202: CollectionTaskSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="rescope")
+    def rescope(self, request, number=None):
+        """Collect a new scope and supersede the previous collection (#37)."""
+        from apps.records.scoping import rescope as rescope_request
+
+        prr = self.get_object()
+        try:
+            task = rescope_request(
+                prr,
+                count_run_id=request.data.get("count_run_id"),
+                expected_input_sha256=request.data.get("expected_input_sha256", ""),
+                actor=request.user,
+                reason=request.data.get("reason", ""),
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
+        return Response(
+            CollectionTaskSerializer(task, context={"request": request}).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
 
     @extend_schema(
         request=VaultCountRequestSerializer,

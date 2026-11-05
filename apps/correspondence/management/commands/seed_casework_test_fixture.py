@@ -131,6 +131,9 @@ FIXTURE_FLIGHT_RECORDS = (
     ("flight-lunch-menu", "Cafeteria lunch menu for the week of March 2.", "non_responsive", 0.97),
     ("flight-route-memo", "Memo about route 12 driver staffing.", "responsive", 0.71),
 )
+#: A case with a finished Vault collection and a newer, narrower proposed
+#: scope, for the re-scope flow (#37).
+FIXTURE_RESCOPE_REQUEST_NUMBER = "PRR-E2E-0014"
 FIXTURE_ESTIMATE_LETTER_INTENT = (
     "Route 12 bus video from March 3, 2026, between 3 and 4 p.m."
 )
@@ -1078,6 +1081,7 @@ def _seed_scoping_session(officer, request):
             terms=terms,
             custodian_emails=custodians,
             input_sha256=hashlib.sha256(terms.encode()).hexdigest(),
+            vault_matter_id=f"e2e-matter-{request.number}",
             total_count=total,
             account_counts=accounts,
             completed_at=_BASE_TIME,
@@ -1096,6 +1100,88 @@ def _seed_scoping_session(officer, request):
         proposal={"summary": "Spring enrollment planning mail.",
                   "required_search_terms": ["enrollment plan"], "search_terms": ["spring"]},
     )
+
+
+def _seed_rescope_case(officer):
+    """A finished Vault collection from a broad count, two unreviewed records
+    from it, and a newer officer re-run whose final count is narrower."""
+    from apps.records.models import ScopeIteration, ScopingSession
+
+    requester, _ = Requester.objects.get_or_create(
+        email="rescope@example.org",
+        defaults={"id": _fixture_uuid("rescope-requester"), "name": "Rescope Requester"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_RESCOPE_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("rescope-request"),
+            "requester": requester,
+            "description": "Board budget workshop email, February 2026.",
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    if not created:
+        return request
+
+    def count(terms, scope, custodians, total):
+        return VaultCountRun.objects.create(
+            request=request,
+            trigger=VaultCountRun.Trigger.AUTOMATIC,
+            state=VaultCountRun.State.COMPLETE,
+            search_scope=scope,
+            terms=terms,
+            custodian_emails=custodians,
+            input_sha256=hashlib.sha256(terms.encode()).hexdigest(),
+            vault_matter_id=f"e2e-matter-{request.number}",
+            total_count=total,
+            completed_at=_BASE_TIME,
+        )
+
+    broad = count('"budget workshop"', "entire_org", [], 2340)
+    task = CollectionTask.objects.create(
+        request=request,
+        kind=CollectionTask.Kind.VAULT_MAIL,
+        state=CollectionTask.State.COMPLETE,
+        source_vault_count=broad,
+        completed_at=_BASE_TIME,
+        instructions="Create the confirmed Google Vault Gmail export.",
+        search_terms=broad.terms,
+    )
+    for index in range(2):
+        label = f"rescope-mail-{index}"
+        RecordItem.objects.create(
+            pk=_fixture_uuid(label),
+            request=request,
+            collection_task=task,
+            source_system="fixture",
+            original_filename=f"synthetic-{label}.eml",
+            storage_key=f"fixtures/synthetic-{label}.eml",
+            content_length=128,
+            content_type="application/octet-stream",
+            sha256=hashlib.sha256(label.encode()).hexdigest(),
+        )
+    session = ScopingSession.objects.create(
+        request=request,
+        trigger=ScopingSession.Trigger.MANUAL,
+        actor=officer,
+        reason="The broad search pulled in the district newsletter.",
+        state=ScopingSession.State.COMPLETE,
+        max_iterations=4,
+        stop_reason="The scope is now the board office.",
+        completed_at=_BASE_TIME,
+    )
+    narrow = count(
+        '"budget workshop" AND -from:newsletter.example', "accounts", ["board@psd401.net"], 412,
+    )
+    ScopeIteration.objects.create(
+        session=session, number=1, count_run=narrow,
+        reason="Count the board office and leave the newsletter out.",
+        custodians=["board@psd401.net"],
+    )
+    return request
 
 
 def _seed_trust_ladder_case(officer):
@@ -2898,6 +2984,7 @@ class Command(BaseCommand):
             _seed_trust_ladder_case(officer)
             _seed_redaction_proposal_case(officer)
             _seed_review_flight_case(officer)
+            _seed_rescope_case(officer)
             _seed_email_intake_redirect_cases(officer, inbound_transport)
             _reconcile_fixture_inbound_work(request)
             _seed_role_work(

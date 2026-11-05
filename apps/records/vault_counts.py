@@ -569,10 +569,15 @@ def _scoping_count_finished(run: VaultCountRun) -> None:
         return
 
     def continue_after_commit():
-        from config.celery import app as celery_app
+        from typing import cast
+
+        from celery import Task
+
+        from .tasks import continue_scoping as continue_task
 
         try:
-            celery_app.send_task("apps.records.tasks.continue_scoping", args=[session_id])
+            # delay(), not send_task(): it honours eager mode in tests.
+            cast(Task, continue_task).delay(session_id)
         except Exception:
             logger.exception("Scoping could not be continued", extra={"session": session_id})
 
