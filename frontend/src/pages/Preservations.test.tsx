@@ -54,7 +54,7 @@ describe('Preservations — hold copy', () => {
 })
 
 const CONFIRMATION =
-  '2 cameras at Peninsula High School held from 2026-09-22 00:00 to 2026-09-23 00:00 '
+  '2 cameras at Example Ridge High School held from 2026-09-22 00:00 to 2026-09-23 00:00 '
   + 'Pacific time (Aware bookmarks, no expiry); 1 camera has a footage gap; 0 failed.'
 
 function heldPreservation(overrides: Record<string, unknown> = {}) {
@@ -65,9 +65,9 @@ function heldPreservation(overrides: Record<string, unknown> = {}) {
     window_start: '2026-09-22T07:00:00Z',
     window_end: '2026-09-23T07:00:00Z',
     detected_dates_note: '',
-    site_codes: ['PHS'],
+    site_codes: ['XRH'],
     site_resolution:
-      'Sites named in the request: Peninsula High School (PHS). Holding every camera in those Aware groups.',
+      'Sites named in the request: Example Ridge High School (XRH). Holding every camera in those Aware groups.',
     held_count: 2,
     confirmation_text: CONFIRMATION,
     request_closed: true,
@@ -76,12 +76,12 @@ function heldPreservation(overrides: Record<string, unknown> = {}) {
     release_reason: '',
     camera_holds: [
       {
-        id: 1, camera_id: 'cam-1', camera_name: 'Gym Entrance', site: 'PHS',
+        id: 1, camera_id: 'cam-1', camera_name: 'Gym Entrance', site: 'XRH',
         clip_id: 'bm-1', state: 'held', error: '', coverage_fraction: 1,
         coverage_note: '', excluded_at: null, excluded_by: null, exclusion_reason: '',
       },
       {
-        id: 2, camera_id: 'cam-2', camera_name: 'Staff Parking', site: 'PHS',
+        id: 2, camera_id: 'cam-2', camera_name: 'Staff Parking', site: 'XRH',
         clip_id: 'bm-2', state: 'gap', error: '', coverage_fraction: 0.4,
         coverage_note: 'Short coverage: head 0: 40%', excluded_at: null,
         excluded_by: null, exclusion_reason: '',
