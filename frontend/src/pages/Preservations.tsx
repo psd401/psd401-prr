@@ -71,7 +71,7 @@ const PRESERVATION_STATES = [
   'released',
 ] as const
 
-/** The release and widen endpoints reject reasons longer than this. */
+/** Release, widen and exclude reasons are capped at 500 on the server. */
 const MAX_REASON_LENGTH = 500
 
 // Exclusion narrows a live hold. A released hold has nothing left to narrow,
@@ -422,7 +422,7 @@ export function Preservations({
 
   function submitExclude(e: FormEvent) {
     e.preventDefault()
-    if (!excluding || !reason.trim()) return
+    if (!excluding || exclude.isPending || reasonTooShort(reason)) return
     exclude.mutate({
       preservationId: excluding.preservationId,
       requestNumber: excluding.requestNumber,
@@ -597,6 +597,7 @@ export function Preservations({
         open={canExclude && excluding !== null}
         title={excluding ? `Exclude ${excluding.hold.camera_name}` : ''}
         onClose={closeExclude}
+        dismissible={!exclude.isPending}
       >
         {excluding && (
           <form onSubmit={submitExclude} className="space-y-4">
@@ -604,15 +605,25 @@ export function Preservations({
               Camera <span className="font-heading font-bold">{excluding.hold.camera_name}</span> at{' '}
               {excluding.hold.site} will be excluded from this preservation hold.
             </p>
-            <Field label="Reason" hint="Required — recorded in the audit trail.">
-              <Textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} required />
+            <Field label="Reason" hint={reasonHint('recorded in the audit trail')}>
+              <Textarea
+                rows={3}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                minLength={MIN_REASON_LENGTH}
+                maxLength={MAX_REASON_LENGTH}
+                required
+              />
             </Field>
+            {reasonShortfall(reason) && (
+              <p aria-live="polite" className="text-sm text-ink-muted">{reasonShortfall(reason)}</p>
+            )}
             {exclude.isError && <ErrorNote error={exclude.error} />}
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={closeExclude}>
+              <Button type="button" variant="ghost" onClick={closeExclude} disabled={exclude.isPending}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={exclude.isPending || !reason.trim()}>
+              <Button type="submit" disabled={exclude.isPending || reasonTooShort(reason)}>
                 {exclude.isPending ? 'Excluding…' : 'Exclude camera'}
               </Button>
             </div>

@@ -58,6 +58,51 @@ describe('Preservations — state filters', () => {
   })
 })
 
+describe('Preservations — exclusion dialog', () => {
+  async function openExcludeDialog() {
+    const user = userEvent.setup()
+    renderPage(<Preservations roles={['records_officer']} />)
+    await screen.findByText('Staff Parking')
+    await user.click(screen.getAllByRole('button', { name: 'Exclude' })[1]!)
+    const dialog = await screen.findByRole('dialog')
+    return { user, dialog }
+  }
+
+  it('requires a 10-character reason and caps it at 500', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([heldPreservation()]))))
+    const { user, dialog } = await openExcludeDialog()
+    const reason = within(dialog).getByLabelText(/Reason/)
+    expect(reason).toHaveAttribute('maxLength', '500')
+    const submit = within(dialog).getByRole('button', { name: 'Exclude camera' })
+    await user.type(reason, '   short  ')
+    expect(submit).toBeDisabled()
+    await user.type(reason, 'but now long enough')
+    expect(submit).toBeEnabled()
+  })
+
+  it('cannot be cancelled while the exclusion is in flight', async () => {
+    let finish: (value: Response) => void = () => {}
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/exclude-camera/') && init?.method === 'POST') {
+        return new Promise<Response>((resolve) => { finish = resolve })
+      }
+      return Promise.resolve(fakeResponse(page([heldPreservation()])))
+    }))
+    const { user, dialog } = await openExcludeDialog()
+    await user.type(within(dialog).getByLabelText(/Reason/), 'Camera faces a private office.')
+    await user.click(within(dialog).getByRole('button', { name: 'Exclude camera' }))
+
+    expect(await within(dialog).findByRole('button', { name: 'Excluding…' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    finish(fakeResponse({ detail: 'Exclusion refused.' }, 400))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Exclusion refused.')
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeEnabled()
+  })
+})
+
 describe('Preservations — exclusion', () => {
   it('offers no Exclude once the hold is released or expired', async () => {
     const base = heldPreservation()
