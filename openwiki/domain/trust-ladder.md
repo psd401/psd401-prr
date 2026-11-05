@@ -1,32 +1,37 @@
 ---
 type: Domain
 title: "Trust Ladder: Sampled Batch Review"
-description: "Sampled batch approval of record responsiveness and the Ready-to-discard elusion check. Covers the ReviewBatch model, trust-policy settings, the review-batches staff API, and the invariants that keep a model from applying any outcome."
-tags: [domain, record-review, batch-review, trust-ladder, responsiveness]
+description: "Sampled batch approval of record responsiveness, the Ready-to-discard elusion check, and group acceptance of redaction proposals. Covers the ReviewBatch and RedactionBatch models, trust-policy settings, the review-batches and redaction-batches staff APIs, and the invariants that keep a model from applying any outcome."
+tags: [domain, record-review, batch-review, trust-ladder, responsiveness, redaction]
 openwiki:
   roles: [domain, workflow]
-  change_kinds: [batch-review, trust-policy, review-workflow]
-  source_paths: [apps/records/review_batches.py, apps/api/resources/review_batches.py, apps/records/models.py, apps/configuration/registry.py, frontend/src/case/BatchReview.tsx]
-  symbols: [ReviewBatch, create_cluster_batch, create_discard_batch, decide_batch, discard_candidates, policy, ReviewBatchViewSet]
-  test_paths: [apps/records/tests/test_review_batches.py, frontend/src/case/BatchReview.test.tsx]
+  change_kinds: [batch-review, trust-policy, review-workflow, redaction-batch]
+  source_paths: [apps/records/review_batches.py, apps/records/redaction_batches.py, apps/api/resources/review_batches.py, apps/api/resources/redaction_batches.py, apps/records/models.py, apps/configuration/registry.py, frontend/src/case/BatchReview.tsx, frontend/src/case/RedactionProposals.tsx]
+  symbols: [ReviewBatch, RedactionBatch, create_cluster_batch, create_discard_batch, decide_batch, discard_candidates, policy, ReviewBatchViewSet, proposal_groups, create_redaction_batch, decide_redaction_batch, build_ready_redacted_records, RedactionBatchViewSet]
+  test_paths: [apps/records/tests/test_review_batches.py, apps/records/tests/test_redaction_batches.py, frontend/src/case/BatchReview.test.tsx, frontend/src/case/RedactionProposals.test.tsx]
 ---
 
 # Trust Ladder: Sampled Batch Review
 
 The trust ladder lets a named reviewer decide many records in one action, but only after
 judging a random sample of them. The Records Officer chooses the policy. A model suggestion
-never applies on its own: the reviewer's judgment is what becomes the legal outcome.
+never applies on its own: the reviewer's judgment is what becomes the legal outcome. The
+same sampling rule governs two surfaces: responsiveness batches over records (this page's
+<!-- openwiki: broken internal link [#redaction-proposal-groups] heading anchor "redaction-proposal-groups" does not exist in /openwiki/domain/trust-ladder.md. Fix the href or restore the target, then delete this comment. -->
+main sections) and [redaction proposal groups](#redaction-proposal-groups), which accept
+proposed redaction boxes.
 
 ## Policy settings
 
 The policy lives in the in-app settings store ([configuration](../architecture/configuration.md)),
 is admin-only, and requires a written reason on each change. The registry in
-`apps/configuration/registry.py` declares the five settings:
+`apps/configuration/registry.py` declares the six settings:
 
 | Setting | Values | Default |
 |---|---|---|
 | `PRR_TRUST_RESPONSIVE_MODE` | `suggest`, `batch` (no automatic mode) | `suggest` |
 | `PRR_TRUST_NON_RESPONSIVE_MODE` | `suggest`, `batch`, `auto` | `suggest` |
+| `PRR_TRUST_REDACTION_MODE` | `suggest`, `batch` (no automatic mode) | `suggest` |
 | `PRR_TRUST_NON_RESPONSIVE_AUTO_MIN_CONFIDENCE` | 50-100 percent | 95 |
 | `PRR_TRUST_BATCH_SAMPLE_SIZE` | 1-200 records | 10 |
 | `PRR_TRUST_ELUSION_SAMPLE_SIZE` | 1-500 records | 30 |
