@@ -294,6 +294,87 @@ function WidenDialog({
   )
 }
 
+/**
+ * Release a closed request's hold, deleting its Aware bookmarks. Also retries
+ * the deletes that failed on an earlier release.
+ */
+function ReleaseDialog({
+  preservation,
+  pending,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  preservation: Preservation
+  pending: boolean
+  error: unknown
+  onClose: () => void
+  onSubmit: (reason: string) => void
+}) {
+  const [reason, setReason] = useState('')
+  const [attested, setAttested] = useState(false)
+  const action = hasReleaseFailures(preservation) ? 'Retry release' : 'Release preservation'
+
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    if (reasonTooShort(reason) || !attested) return
+    onSubmit(reason)
+  }
+
+  return (
+    <Modal
+      open
+      title={`${action} for ${preservation.request_number}`}
+      onClose={onClose}
+      dismissible={!pending}
+    >
+      <form onSubmit={submit} className="space-y-4">
+        <p className="text-sm text-ink-muted">
+          Releasing deletes every Aware bookmark on this hold. The footage then
+          ages out on each camera's normal schedule and cannot be recovered.
+        </p>
+        <Field
+          label="Reason"
+          hint={reasonHint('say why the footage no longer needs to be kept')}
+        >
+          <Textarea
+            rows={3}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            minLength={MIN_REASON_LENGTH}
+            maxLength={MAX_REASON_LENGTH}
+            required
+          />
+        </Field>
+        {reasonShortfall(reason) && (
+          <p className="text-sm text-ink-muted">{reasonShortfall(reason)}</p>
+        )}
+        <label className="flex items-start gap-2 text-sm text-ink">
+          <input
+            type="checkbox"
+            checked={attested}
+            onChange={(e) => setAttested(e.target.checked)}
+            required
+          />
+          <span>
+            I attest that no litigation hold, pending lawsuit, or reasonably
+            anticipated litigation covers this footage.
+          </span>
+        </label>
+        {error != null && <ErrorNote error={error} />}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={pending || reasonTooShort(reason) || !attested}>
+            {pending ? 'Releasing…' : 'Release and delete bookmarks'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 export function Preservations({
   roles,
   requestNumber,
@@ -309,8 +390,6 @@ export function Preservations({
   const [excluding, setExcluding] = useState<ExcludeTarget | null>(null)
   const [reason, setReason] = useState('')
   const [releasing, setReleasing] = useState<Preservation | null>(null)
-  const [releaseReason, setReleaseReason] = useState('')
-  const [attested, setAttested] = useState(false)
   const [widening, setWidening] = useState<Preservation | null>(null)
 
   const list = useQuery({
@@ -385,27 +464,13 @@ export function Preservations({
   }
 
   function openRelease(preservation: Preservation) {
-    setReleasing(preservation)
-    setReleaseReason('')
-    setAttested(false)
     release.reset()
+    setReleasing(preservation)
   }
 
   function closeRelease() {
     setReleasing(null)
-    setReleaseReason('')
-    setAttested(false)
     release.reset()
-  }
-
-  function submitRelease(e: FormEvent) {
-    e.preventDefault()
-    if (!releasing || reasonTooShort(releaseReason) || !attested) return
-    release.mutate({
-      preservationId: releasing.id,
-      requestNumber: releasing.request_number,
-      reason: releaseReason,
-    })
   }
 
   function openExclude(preservationId: number, requestNumber: string, hold: CameraHold) {
@@ -631,65 +696,21 @@ export function Preservations({
         )}
       </Modal>
 
-      <Modal
-        open={canExclude && releasing !== null}
-        title={
-          releasing
-            ? `${hasReleaseFailures(releasing) ? 'Retry release' : 'Release preservation'} for ${releasing.request_number}`
-            : ''
-        }
-        onClose={closeRelease}
-        dismissible={!release.isPending}
-      >
-        {releasing && (
-          <form onSubmit={submitRelease} className="space-y-4">
-            <p className="text-sm text-ink-muted">
-              Releasing deletes every Aware bookmark on this hold. The footage then
-              ages out on each camera's normal schedule and cannot be recovered.
-            </p>
-            <Field
-              label="Reason"
-              hint={reasonHint('say why the footage no longer needs to be kept')}
-            >
-              <Textarea
-                rows={3}
-                value={releaseReason}
-                onChange={(e) => setReleaseReason(e.target.value)}
-                minLength={MIN_REASON_LENGTH}
-                maxLength={MAX_REASON_LENGTH}
-                required
-              />
-            </Field>
-            {reasonShortfall(releaseReason) && (
-              <p className="text-sm text-ink-muted">{reasonShortfall(releaseReason)}</p>
-            )}
-            <label className="flex items-start gap-2 text-sm text-ink">
-              <input
-                type="checkbox"
-                checked={attested}
-                onChange={(e) => setAttested(e.target.checked)}
-                required
-              />
-              <span>
-                I attest that no litigation hold, pending lawsuit, or reasonably
-                anticipated litigation covers this footage.
-              </span>
-            </label>
-            {release.isError && <ErrorNote error={release.error} />}
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={closeRelease} disabled={release.isPending}>
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={release.isPending || reasonTooShort(releaseReason) || !attested}
-              >
-                {release.isPending ? 'Releasing…' : 'Release and delete bookmarks'}
-              </Button>
-            </div>
-          </form>
-        )}
-      </Modal>
+      {canExclude && releasing && (
+        <ReleaseDialog
+          preservation={releasing}
+          pending={release.isPending}
+          error={release.isError ? release.error : null}
+          onClose={closeRelease}
+          onSubmit={(releaseReason) =>
+            release.mutate({
+              preservationId: releasing.id,
+              requestNumber: releasing.request_number,
+              reason: releaseReason,
+            })
+          }
+        />
+      )}
 
       {canExclude && widening && (
         <WidenDialog
