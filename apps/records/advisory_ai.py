@@ -188,6 +188,9 @@ def validate_scope_refinement(raw: Any) -> dict[str, Any]:
             result[key] = _bounded_string_list(
                 raw[key], field=key, maximum_items=maximum, maximum_length=200,
             )
+        if not (result["required_search_terms"] or result["search_terms"]):
+            # Senders alone are not a search for what the request asked.
+            raise AdvisoryOutputInvalid("A refined scope needs at least one search term.")
         result.update(_validated_scope_fields(raw))
     return result
 

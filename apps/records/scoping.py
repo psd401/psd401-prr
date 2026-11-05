@@ -135,17 +135,24 @@ def start_scoping(request: PublicRecordsRequest, proposal: dict, *, trigger, act
         trigger=trigger,
         reason=session.reason,
     )
-    _queue_iteration(
-        session,
-        number=1,
-        scope=proposal,
-        reason=proposal.get("scope_rationale") or "The intent proposal's scope.",
-        dates=proposal_date_range(request, proposal),
-        actor=actor,
-        trigger=(
-            VaultCountRun.Trigger.MANUAL if actor is not None else VaultCountRun.Trigger.AUTOMATIC
-        ),
-    )
+    try:
+        _queue_iteration(
+            session,
+            number=1,
+            scope=proposal,
+            reason=proposal.get("scope_rationale") or "The intent proposal's scope.",
+            dates=proposal_date_range(request, proposal),
+            actor=actor,
+            trigger=(
+                VaultCountRun.Trigger.MANUAL if actor is not None else VaultCountRun.Trigger.AUTOMATIC
+            ),
+        )
+    except (ValidationError, VaultCountAlreadyRunning) as exc:
+        # Never leave a session "running" with nothing counting. (Not one
+        # transaction: the count is queued as it is created, so the worker
+        # must be able to read it straight away.)
+        _finish(session, ScopingSession.State.FAILED, f"The first count could not start: {exc}")
+        raise
     return session
 
 
@@ -166,18 +173,17 @@ def rerun_scoping(request: PublicRecordsRequest, *, actor, reason: str):
     )
     if intent is None:
         raise ValidationError("Scoping starts from a completed intent proposal; run one first.")
-    with transaction.atomic():
-        ScopingSession.objects.filter(
-            request=request, state=ScopingSession.State.RUNNING,
-        ).update(
-            state=ScopingSession.State.COMPLETE,
-            stop_reason="Replaced by a re-run.",
-            completed_at=timezone.now(),
-        )
-        return start_scoping(
-            request, intent.proposal, trigger=ScopingSession.Trigger.MANUAL,
-            actor=actor, reason=reason,
-        )
+    ScopingSession.objects.filter(
+        request=request, state=ScopingSession.State.RUNNING,
+    ).update(
+        state=ScopingSession.State.COMPLETE,
+        stop_reason="Replaced by a re-run.",
+        completed_at=timezone.now(),
+    )
+    return start_scoping(
+        request, intent.proposal, trigger=ScopingSession.Trigger.MANUAL,
+        actor=actor, reason=reason,
+    )
 
 
 def _finish(session, state, stop_reason):

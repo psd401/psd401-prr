@@ -88,6 +88,9 @@ class _ScopingFixture(TestCase):
 @patch("apps.records.tasks.execute_vault_count.delay")
 class ScopingTests(_ScopingFixture):
 
+    def test_senders_alone_are_never_a_query(self, _delay):
+        self.assertEqual(vault_query_from_intent([], [], exclude_senders=["noise.example"]), "")
+
     def test_the_query_names_senders_and_leaves_out_noise(self, _delay):
         self.assertEqual(
             vault_query_from_intent(
@@ -153,8 +156,33 @@ class ScopingTests(_ScopingFixture):
         self.assertEqual(session.state, ScopingSession.State.COMPLETE)
         self.assertIn("iteration limit", session.stop_reason)
 
+    @patch("apps.records.scoping.invoke_advisory_model")
+    def test_a_refinement_with_no_subject_terms_is_unusable(self, invoke, _delay):
+        invoke.return_value = {"decision": "refine", "reason": "Only senders.",
+                               "required_search_terms": [], "search_terms": [],
+                               "exclude_senders": ["noise.example"]}
+        session = start_scoping(self.request, PROPOSAL, trigger=ScopingSession.Trigger.AUTOMATIC)
+        _complete(ScopeIteration.objects.get(session=session).count_run, 50)
+        continue_scoping(session.pk)
+        session.refresh_from_db()
+        self.assertEqual(ScopeIteration.objects.filter(session=session).count(), 1)
+        self.assertIn("last count stands", session.stop_reason)
+
+    def test_a_session_whose_first_count_cannot_queue_is_not_left_running(self, delay):
+        from apps.records.vault_counts import VaultCountAlreadyRunning, request_vault_count
+
+        request_vault_count(
+            self.request.pk, actor=self.officer, terms='"bus"', custodian_emails=[],
+            search_scope=VaultCountRun.SearchScope.ENTIRE_ORG,
+        )
+        with self.assertRaises(VaultCountAlreadyRunning):
+            start_scoping(self.request, PROPOSAL, trigger=ScopingSession.Trigger.AUTOMATIC)
+        session = ScopingSession.objects.get()
+        self.assertEqual(session.state, ScopingSession.State.FAILED)
+        self.assertIn("could not start", session.stop_reason)
+
     @patch("apps.records.scoping.invoke_advisory_model", side_effect=AdvisoryOutputInvalid("bad"))
-    def test_an_unusable_refinement_keeps_the_last_count(self, _invoke, _delay):
+    def test_a_provider_failure_keeps_the_last_count(self, _invoke, _delay):
         session = start_scoping(self.request, PROPOSAL, trigger=ScopingSession.Trigger.AUTOMATIC)
         _complete(ScopeIteration.objects.filter(session=session).get().count_run, 50)
         continue_scoping(session.pk)

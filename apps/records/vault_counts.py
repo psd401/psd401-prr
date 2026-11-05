@@ -165,6 +165,9 @@ def vault_query_from_intent(
         term for term in quoted(alternative_terms)
         if term.casefold() not in required_keys
     ]
+    if not required and not alternatives:
+        # Senders alone never make a query: there is nothing to search for.
+        return ""
     parts = list(required)
     if len(alternatives) == 1:
         parts.append(alternatives[0])
