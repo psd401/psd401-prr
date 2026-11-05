@@ -875,10 +875,11 @@ class PRRClient:
         return {
             "proposal_type": "record_item_exemption_citations",
             "applied": False,
+            # No filename: it can name a student, and this result goes to the
+            # caller's model provider (see RECORD_ITEM_FIELDS).
             "record_item": {
                 "id": item["id"],
                 "request_number": item["request_number"],
-                "original_filename": item["original_filename"],
                 "review_state": item["review_state"],
             },
             "proposal": {

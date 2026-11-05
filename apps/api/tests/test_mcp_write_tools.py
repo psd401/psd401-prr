@@ -485,6 +485,8 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
         self.assertIn('"applied": false', task_proposal.lower())
         self.assertIn(self.student_citation.citation, citation_proposal)
         self.assertIn('"applied": false', citation_proposal.lower())
+        # The record's filename can name a student; it stays in the staff UI.
+        self.assertNotIn("student-record.pdf", citation_proposal)
 
         self.task.refresh_from_db()
         self.record_item.refresh_from_db()
