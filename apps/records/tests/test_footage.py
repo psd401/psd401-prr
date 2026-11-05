@@ -187,6 +187,7 @@ class HoldPathTests(TestCase):
         ):
             fp = triage.triage_footage(prr)
 
+        assert fp is not None
         fp.refresh_from_db()
         self.assertEqual(fp.state, FootagePreservation.State.MANUAL)
         notify_manual_hold.assert_called_once()
@@ -203,6 +204,7 @@ class HoldPathTests(TestCase):
 
         fp = triage.triage_footage(prr)
 
+        assert fp is not None
         fp.refresh_from_db()
         self.assertNotEqual(fp.state, FootagePreservation.State.HELD)
         self.assertEqual(fp.held_count, 0)
@@ -225,6 +227,7 @@ class HoldPathTests(TestCase):
 
         fp = triage.triage_footage(prr)
 
+        assert fp is not None
         fp.refresh_from_db()
         self.assertEqual(fp.state, FootagePreservation.State.MANUAL)
         self.assertEqual(fp.held_count, 0)
@@ -244,6 +247,7 @@ class HoldPathTests(TestCase):
 
         fp = triage.triage_footage(prr)
 
+        assert fp is not None
         fp.refresh_from_db()
         self.assertEqual(fp.state, FootagePreservation.State.MANUAL)
         notify_complete.assert_not_called()
@@ -269,6 +273,7 @@ class HoldPathTests(TestCase):
 
         fp = triage.triage_footage(prr)
 
+        assert fp is not None
         fp.refresh_from_db()
         self.assertEqual(fp.state, FootagePreservation.State.PARTIAL)
         self.assertEqual(fp.held_count, 2)
