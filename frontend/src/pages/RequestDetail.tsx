@@ -29,6 +29,7 @@ import {
   reasonTooShort,
 } from '../ui'
 import { proposedVaultQuery } from '../vaultQuery'
+import { preservationStateLabel, preservationStateTone } from '../preservationStatus'
 
 interface RequesterInfo {
   name: string
@@ -83,6 +84,8 @@ interface FootagePreservation {
   state: string
   /** What Aware confirmed held, for a human to copy; never sent. */
   confirmation_text: string | null
+  /** A released hold with cameras whose Aware bookmark delete failed. */
+  has_release_failures?: boolean
 }
 
 interface RequestDetail {
@@ -286,14 +289,11 @@ const TASK_STATE_LABELS: Record<string, string> = {
   failed: 'Failed',
 }
 
-const PRESERVATION_STATE_LABELS: Record<string, string> = {
-  pending: 'Pending — hold executing',
-  held: 'Held',
-  partial: 'Partly held — gaps or failures need review',
-  manual: 'Manual hold required',
-  no_cameras: 'No cameras in Aware at the requested site',
-  expired: 'Window outside retention',
-  released: 'Released',
+/** Badge wording and tone for the case footage card, matching Preservations. */
+function preservationBadge(p: FootagePreservation) {
+  // A release that left bookmarks behind is not done: say so, not "Released".
+  const state = p.state === 'released' && p.has_release_failures ? 'release_failed' : p.state
+  return { label: preservationStateLabel(state), tone: preservationStateTone(state) }
 }
 
 // States where footage may still be lost and a human must act now.
@@ -1772,11 +1772,11 @@ export function RequestDetail({
                   {ACTIVE_PRESERVATION_STATES.has(p.state) ? (
                     <Badge tone="red">
                       Footage may be overwritten —{' '}
-                      {PRESERVATION_STATE_LABELS[p.state] ?? p.state}
+                      {preservationBadge(p).label}
                     </Badge>
                   ) : (
-                    <Badge tone={p.state === 'held' ? 'green' : 'neutral'}>
-                      {PRESERVATION_STATE_LABELS[p.state] ?? p.state}
+                    <Badge tone={preservationBadge(p).tone}>
+                      {preservationBadge(p).label}
                     </Badge>
                   )}
                   {p.confirmation_text && (

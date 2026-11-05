@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router'
 import { api, unwrap, type Page } from '../api/client'
 import type { StaffRole } from '../api/auth'
+import { preservationStateLabel, preservationStateTone } from '../preservationStatus'
 import {
   Badge,
   Button,
@@ -91,48 +92,13 @@ function hasReleaseFailures(preservation: Preservation) {
   return preservation.camera_holds.some((h) => h.state === 'release_failed')
 }
 
-const STATE_TONES: Record<string, 'green' | 'amber' | 'red' | 'neutral'> = {
-  pending: 'amber',
-  held: 'green',
-  partial: 'amber',
-  manual: 'amber',
-  no_cameras: 'amber',
-  expired: 'red',
-  released: 'neutral',
-  excluded: 'neutral',
-  error: 'red',
-  failed: 'red',
-  gap: 'amber',
-  not_retained: 'amber',
-  release_failed: 'red',
-}
-
-// Every state that leaves footage unaccounted for says a human must act:
-// nothing here is resolved by waiting.
-const ADEQUATE_SEARCH = 'adequate-search review required'
-
-const STATE_LABELS: Record<string, string> = {
-  pending: 'Pending — hold executing',
-  held: 'Held',
-  partial: 'Partly held — gaps or failures need review',
-  manual: 'Manual hold required',
-  no_cameras: `No cameras in Aware at the requested site — ${ADEQUATE_SEARCH}`,
-  expired: `Window outside retention — ${ADEQUATE_SEARCH}`,
-  released: 'Released',
-  // Camera-level states
-  gap: `Footage gap — ${ADEQUATE_SEARCH}`,
-  not_retained: `No retained footage — ${ADEQUATE_SEARCH}`,
-  failed: 'Failed',
-  release_failed: 'Release failed — bookmark may still exist; retry the release',
-}
-
 /** Filter buttons use the badge label up to its "— detail" suffix. */
 function filterLabel(state: string) {
-  return (STATE_LABELS[state] ?? state).split(' — ')[0]
+  return preservationStateLabel(state).split(' — ')[0]
 }
 
 function StateBadge({ state }: { state: string }) {
-  return <Badge tone={STATE_TONES[state] ?? 'neutral'}>{STATE_LABELS[state] ?? state}</Badge>
+  return <Badge tone={preservationStateTone(state)}>{preservationStateLabel(state)}</Badge>
 }
 
 interface ExcludeTarget {

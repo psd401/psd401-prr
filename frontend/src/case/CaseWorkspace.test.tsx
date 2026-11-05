@@ -435,6 +435,46 @@ describe('CaseWorkspace', () => {
     )).toBeInTheDocument()
   })
 
+  it.each([
+    {
+      name: 'an expired window needs an adequate-search review',
+      preservation: { id: 9, state: 'expired', confirmation_text: null },
+      label: 'Window outside retention — adequate-search review required',
+      tone: 'nx-badge--danger',
+    },
+    {
+      name: 'a release whose bookmark deletes failed is not plainly "Released"',
+      preservation: {
+        id: 9, state: 'released', confirmation_text: null, has_release_failures: true,
+      },
+      label: 'Release failed — bookmark may still exist; retry the release',
+      tone: 'nx-badge--danger',
+    },
+    {
+      name: 'a clean release reads Released',
+      preservation: {
+        id: 9, state: 'released', confirmation_text: null, has_release_failures: false,
+      },
+      label: 'Released',
+      tone: 'nx-badge--plain',
+    },
+  ])('labels the case footage card like Preservations: $name', async ({ preservation, label, tone }) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/workspace-summary/')) {
+        return fakeResponse({ ...SUMMARY, requester: null })
+      }
+      if (url === '/api/staff/requests/PRR-2026-0001/') {
+        return fakeResponse({ ...DETAIL, requester: null, footage_preservations: [preservation] })
+      }
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    })
+    renderCase('/requests/PRR-2026-0001/collection', ['liaison'], fetchMock)
+
+    const badge = await screen.findByText(label)
+    expect(badge).toHaveClass('nx-badge', tone)
+  })
+
   it('shows what Aware confirmed held on the case summary', async () => {
     const confirmation =
       '3 cameras across the district held from 2026-09-22 00:00 to 2026-09-23 00:00 '
