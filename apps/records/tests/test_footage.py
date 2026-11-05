@@ -416,6 +416,19 @@ class HoldPathTests(TestCase):
         self.assertIn("after the window end", pruned.coverage_note)
         self.assertEqual(fp.state, FootagePreservation.State.PARTIAL)
 
+    def test_a_naive_oldest_footage_time_is_read_as_utc(self):
+        _, end = triage.calendar_day_window(
+            [timezone.localdate() - dt.timedelta(days=2)]
+        )
+        pruned_utc = end.astimezone(dt.UTC) - dt.timedelta(hours=1)
+        cam = camera("cam-1", "Gym", "PHS", pruned_to=pruned_utc.replace(tzinfo=None))
+        prr = make_request(f"video at Peninsula High School on {days_ago(2)}")
+        with aware([cam]) as m:
+            preserve(prr)
+
+        m.hold.assert_called_once()
+        self.assertEqual(m.hold.call_args.args[1], pruned_utc)
+
     def test_every_camera_not_retained_is_expired_with_one_checklist(self):
         _, end = triage.calendar_day_window(
             [timezone.localdate() - dt.timedelta(days=2)]

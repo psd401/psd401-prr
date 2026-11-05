@@ -987,7 +987,13 @@ def _hold_one_camera(fp, cam, ch, *, now) -> None:
     if end > now:
         notes.append("The window ends after the hold ran; later footage did not exist yet.")
 
-    pruned_to = cam.pruned_to.astimezone(dt.UTC) if cam.pruned_to else None
+    pruned_to = cam.pruned_to
+    if pruned_to is not None:
+        # Aware times are UTC; a naive one must not be read as server-local.
+        pruned_to = (
+            pruned_to.replace(tzinfo=dt.UTC) if timezone.is_naive(pruned_to)
+            else pruned_to.astimezone(dt.UTC)
+        )
     if pruned_to is None:
         hold_start = start
         notes.append("Aware reported no oldest-footage time; bookmarked from the window start.")
