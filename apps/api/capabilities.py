@@ -1710,6 +1710,24 @@ CAPABILITIES = (
         ],
     ),
     _capability(
+        "installments.build_package",
+        "Build the next release package in one action: open an installment "
+        "from every release-ready record, generate its exemption log when "
+        "needed, and prepare the package. Never releases or sends.",
+        "POST",
+        "/api/staff/requests/{number}/release-package/",
+        ["/requests/:number/releases"],
+        execution="human_confirmation",
+        risk="high",
+        constraints=[
+            "records_officer_authority",
+            "exemption_citation_required",
+            "integrity_verified",
+            "immutable_artifact",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
         "installments.generate_exemption_log",
         "Generate one immutable RCW 42.56.210(3) exemption and withholding log from approved review evidence.",
         "POST",

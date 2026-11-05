@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { StaffRole } from '../api/auth'
-import { api, unwrap, type Page } from '../api/client'
+import { Link } from 'react-router'
+import { api, ApiError, unwrap, type Page } from '../api/client'
 import {
   Badge,
   Button,
@@ -131,6 +132,19 @@ function stateBadge(row: Installment) {
   if (row.fee_paid_at) return <Badge tone="blue">Fee paid</Badge>
   if (Number(row.fee_amount) === 0) return <Badge tone="blue">Ready for release — no fee</Badge>
   return <Badge tone="amber">Awaiting payment</Badge>
+}
+
+/** Fee panels lead when a fee applies, and fold away when it is $0 or waived. */
+function FeePanels({ open, children }: { open: boolean; children: React.ReactNode }) {
+  if (open) return <>{children}</>
+  return (
+    <details className="mb-5">
+      <summary className="cursor-pointer text-sm font-semibold text-ink">
+        Fees and deposits — no fee applies
+      </summary>
+      <div className="mt-3">{children}</div>
+    </details>
+  )
 }
 
 const EMPTY_ASSESSMENT_FORM = {
@@ -325,6 +339,17 @@ export function Installments({
       await refreshReleaseState()
     },
   })
+  // Build package (#47): create, exemption log, and prepare in one server
+  // action. It never releases; a blocker names the case tab that fixes it.
+  const buildPackage = useMutation({
+    mutationFn: () => api<Installment>(
+      `/api/staff/requests/${requestNumber}/release-package/`,
+      { method: 'POST', body: {} },
+    ),
+    onSuccess: async () => {
+      await refreshReleaseState()
+    },
+  })
   // One action, because it was always one decision. The server releases the
   // package, drafts the notice from the installment, and sends it under the
   // same officer's name; nothing here is automated in the rule 6 sense.
@@ -497,6 +522,33 @@ export function Installments({
     ))
     : []
 
+  // The package the one-step flow works on: the newest installment that is
+  // neither released nor revoked. Build package finishes it before opening
+  // another.
+  const openPackage = rows
+    .filter((row) => !row.released_at && !row.revoked_at)
+    .sort((a, b) => b.sequence - a.sequence)[0]
+  const packageReady = Boolean(openPackage?.package_prepared_at)
+  const openBalance = openPackage ? Number(openPackage.fee_balance ?? openPackage.fee_amount) : 0
+  const awaitingPayment = packageReady && openBalance > 0 && !openPackage?.fee_paid_at
+  // Build package finishes an open installment as the officer chose it, so
+  // say plainly how many ready records it leaves for the next package.
+  const leftOut = openPackage
+    ? ready.filter((row) => !openPackage.record_item_ids.includes(row.id)).length
+    : 0
+  const packageRecords = openPackage
+    ? allReady.filter((row) => openPackage.record_item_ids.includes(row.id))
+    : []
+  // Fee, waiver-floor, and deposit panels lead only when a fee applies: an
+  // unpaid balance or an open deposit. A $0 or waived fee folds them away.
+  const feeApplies = !requestNumber || openGates.length > 0 || rows.some((row) => (
+    !row.revoked_at && !row.released_at && !row.fee_paid_at
+    && Number(row.fee_balance ?? row.fee_amount) > 0
+  ))
+  const buildBlocker = buildPackage.error instanceof ApiError
+    ? (buildPackage.error.data as { blocker?: { code: string; tab: string } } | null)?.blocker
+    : undefined
+
   function toggleRecord(id: string) {
     setSelected((current) => (
       current.includes(id)
@@ -508,244 +560,346 @@ export function Installments({
   return (
     <>
       {requestNumber && canPrepare && (
-        <Card
-          title="Ready to release"
-          actions={ready.length > 0 ? (
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 text-sm text-ink">
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={(event) =>
-                    setSelected(
-                      event.target.checked ? ready.map((row) => row.id) : [],
-                    )
-                  }
-                />
-                Select all {ready.length}
-              </label>
-              <Button
-                type="button"
-                disabled={selected.length === 0 || createInstallment.isPending}
-                onClick={() => {
-                  createInstallment.reset()
-                  createInstallment.mutate()
-                }}
-              >
-                {createInstallment.isPending
-                  ? 'Creating…'
-                  : `Create installment (${selected.length})`}
-              </Button>
-            </div>
-          ) : undefined}
-          className="mb-5"
-        >
-          {readyRecords.isPending ? (
-            <Spinner label="Loading releasable records…" />
-          ) : readyRecords.isError ? (
-            <ErrorNote error={readyRecords.error} />
-          ) : ready.length === 0 ? (
-            <EmptyState>
-              No records are ready to release. A record becomes ready once it
-              has been reviewed, any heightened-review citation has a second
-              approval, and any redactions have been rendered.
-            </EmptyState>
-          ) : (
-            <>
-              {createInstallment.isError && (
-                <ErrorNote error={createInstallment.error} />
+        <Card title="Release package" className="mb-5">
+          <ol className="space-y-5" aria-label="Release steps">
+            <li>
+              <p className="font-heading text-sm font-semibold text-ink">1. Build package</p>
+              <p className="mt-1 text-sm text-ink-muted">
+                {openPackage
+                  ? `Installment ${openPackage.sequence}: ${openPackage.item_count} record${openPackage.item_count === 1 ? '' : 's'}${packageReady ? ', package prepared.' : ', not prepared yet.'}`
+                  : `${ready.length} record${ready.length === 1 ? '' : 's'} ready to release.`}{' '}
+                {!openPackage && 'Builds an installment from every ready record, generates the exemption log when one is needed, and prepares the package. Nothing is sent.'}
+                {openPackage && !packageReady && 'Build package finishes this installment: it generates the exemption log when one is needed and prepares the package. Nothing is sent.'}
+              </p>
+              {leftOut > 0 && (
+                <p className="mt-1 text-sm font-semibold text-warning-ink">
+                  {leftOut} more ready record{leftOut === 1 ? ' is' : 's are'} not in this
+                  installment; build again after releasing it to package the rest.
+                </p>
               )}
-              <Table
-                columns={[
-                  {
-                    header: 'Include',
-                    cell: (r: ReleasableRecord) => (
-                      <input
-                        type="checkbox"
-                        aria-label={`Include ${r.original_filename}`}
-                        checked={selected.includes(r.id)}
-                        onChange={() => toggleRecord(r.id)}
-                      />
-                    ),
-                  },
-                  {
-                    header: 'Record',
-                    cell: (r: ReleasableRecord) => r.original_filename || r.id,
-                  },
-                  {
-                    header: 'Custodian',
-                    cell: (r: ReleasableRecord) => r.custodian || '—',
-                  },
-                  {
-                    header: 'Review',
-                    cell: (r: ReleasableRecord) => (
-                      r.review_state === 'withheld'
-                        ? <Badge tone="amber">Withheld</Badge>
-                        : <Badge tone="green">Responsive</Badge>
-                    ),
-                  },
-                  {
-                    header: 'Redactions',
-                    align: 'right' as const,
-                    cell: (r: ReleasableRecord) => r.redaction_count,
-                  },
-                ]}
-                rows={ready}
-                rowKey={(r) => r.id}
-              />
-            </>
-          )}
+              {!packageReady && (
+                <Button
+                  type="button"
+                  className="mt-2"
+                  disabled={buildPackage.isPending}
+                  onClick={() => {
+                    buildPackage.reset()
+                    buildPackage.mutate()
+                  }}
+                >
+                  {buildPackage.isPending ? 'Building…' : 'Build package'}
+                </Button>
+              )}
+              {buildPackage.isError && (
+                <div className="mt-2 space-y-1">
+                  <ErrorNote error={buildPackage.error} />
+                  {buildBlocker && buildBlocker.tab !== 'releases' && (
+                    <Link
+                      className="text-sm font-semibold text-accent underline-offset-2 hover:underline"
+                      to={`/requests/${requestNumber}/${buildBlocker.tab}`}
+                    >
+                      Go to {buildBlocker.tab.charAt(0).toUpperCase() + buildBlocker.tab.slice(1)} to fix this
+                    </Link>
+                  )}
+                </div>
+              )}
+            </li>
+            {openPackage && packageReady && (
+              <li>
+                <p className="font-heading text-sm font-semibold text-ink">2. Preview</p>
+                <p className="mt-1 text-sm text-ink-muted">
+                  {openPackage.has_exemptions
+                    ? 'The exemption log is included.'
+                    : 'No exemption log is needed.'}{' '}
+                  {openPackage.package_size !== null && `Package size ${openPackage.package_size.toLocaleString()} bytes. `}
+                  {openBalance > 0 && !openPackage.fee_paid_at
+                    ? `Fee due: $${openBalance.toFixed(2)}.`
+                    : 'No fee is due.'}
+                </p>
+                <ul className="mt-2 space-y-1 text-sm text-ink" aria-label="Records in this package">
+                  {packageRecords.map((record) => (
+                    <li key={record.id}>
+                      {record.original_filename || record.id}
+                      {record.review_state === 'withheld' && ' — withheld, listed in the exemption log'}
+                      {record.redaction_count > 0 && ` — ${record.redaction_count} redaction${record.redaction_count === 1 ? '' : 's'}`}
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            )}
+            {openPackage && packageReady && (
+              <li>
+                <p className="font-heading text-sm font-semibold text-ink">3. Release and send</p>
+                {awaitingPayment ? (
+                  <p className="mt-1 text-sm font-semibold text-warning-ink">
+                    Record the fee payment before releasing.
+                  </p>
+                ) : (
+                  <Button
+                    type="button"
+                    className="mt-2"
+                    onClick={() => {
+                      release.reset()
+                      setReleasedLink('')
+                      setReleasedNoticeId('')
+                      setIsFinal(false)
+                      setReleasing(openPackage)
+                    }}
+                  >
+                    Release and send
+                  </Button>
+                )}
+              </li>
+            )}
+          </ol>
         </Card>
       )}
-      <Card
-        title="Adopted fee schedule"
-        actions={canPrepare && !currentSchedule ? (
-          <Button type="button" onClick={() => {
-            activateSchedule.reset()
-            setActivatingSchedule(true)
-          }}>
-            Activate fee schedule
-          </Button>
-        ) : undefined}
-        className="mb-5"
-      >
-        {schedules.isError ? (
-          <ErrorNote error={schedules.error} />
-        ) : currentSchedule ? (
-          <div className="space-y-2 text-sm text-ink">
-            <p>
-              <span className="font-heading font-semibold">{currentSchedule.name}</span>{' '}
-              <Badge tone="green">Effective {currentSchedule.effective_on}</Badge>
-            </p>
-            <p>Statutory schedule: $0.15 photocopy page, $0.10 scanned page, $0.05 per four electronic files, and $0.10/GB.</p>
-            <p className="text-xs text-ink-muted">
-              Counsel: {currentSchedule.counsel_approval_reference} · Adoption: {currentSchedule.adoption_reference}
-            </p>
-          </div>
-        ) : (
-          <p className="text-sm text-ink-muted">
-            No fee schedule is active. Do not assess or communicate a fee until counsel approval and formal district adoption are recorded.
-          </p>
-        )}
-      </Card>
-      <Card
-        title="Fee waiver floor"
-        actions={canPrepare ? (
-          <Button type="button" variant="ghost" onClick={() => {
-            activateFloor.reset()
-            setActivatingFloor(true)
-          }}>
-            {currentFloor ? 'Replace floor' : 'Adopt waiver floor'}
-          </Button>
-        ) : undefined}
-        className="mb-5"
-      >
-        {waiverFloors.isError ? (
-          <ErrorNote error={waiverFloors.error} />
-        ) : currentFloor ? (
-          <div className="space-y-1 text-sm text-ink">
-            <p>
-              Assessments under{' '}
-              <span className="font-heading font-semibold">${currentFloor.amount}</span>{' '}
-              prompt a waiver. Nothing is waived automatically; a Records Officer
-              records the waiver and its reason on the assessment.
-            </p>
-            <p className="text-xs text-ink-muted">
-              Counsel: {currentFloor.counsel_reference} · Effective {currentFloor.effective_on}
-            </p>
-          </div>
-        ) : (
-          <p className="text-sm text-ink-muted">
-            No waiver floor is adopted, so no assessment will prompt a waiver.
-          </p>
-        )}
-      </Card>
-      {requestNumber && (
+      {requestNumber && canPrepare && (
+        <details className="mb-5">
+          <summary className="cursor-pointer text-sm font-semibold text-ink">
+            Choose records for a partial installment
+          </summary>
+          <Card
+            title="Ready to release"
+            actions={ready.length > 0 ? (
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-sm text-ink">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={(event) =>
+                      setSelected(
+                        event.target.checked ? ready.map((row) => row.id) : [],
+                      )
+                    }
+                  />
+                  Select all {ready.length}
+                </label>
+                <Button
+                  type="button"
+                  disabled={selected.length === 0 || createInstallment.isPending}
+                  onClick={() => {
+                    createInstallment.reset()
+                    createInstallment.mutate()
+                  }}
+                >
+                  {createInstallment.isPending
+                    ? 'Creating…'
+                    : `Create installment (${selected.length})`}
+                </Button>
+              </div>
+            ) : undefined}
+            className="mb-5"
+          >
+            {readyRecords.isPending ? (
+              <Spinner label="Loading releasable records…" />
+            ) : readyRecords.isError ? (
+              <ErrorNote error={readyRecords.error} />
+            ) : ready.length === 0 ? (
+              <EmptyState>
+                No records are ready to release. A record becomes ready once it
+                has been reviewed, any heightened-review citation has a second
+                approval, and any redactions have been rendered.
+              </EmptyState>
+            ) : (
+              <>
+                {createInstallment.isError && (
+                  <ErrorNote error={createInstallment.error} />
+                )}
+                <Table
+                  columns={[
+                    {
+                      header: 'Include',
+                      cell: (r: ReleasableRecord) => (
+                        <input
+                          type="checkbox"
+                          aria-label={`Include ${r.original_filename}`}
+                          checked={selected.includes(r.id)}
+                          onChange={() => toggleRecord(r.id)}
+                        />
+                      ),
+                    },
+                    {
+                      header: 'Record',
+                      cell: (r: ReleasableRecord) => r.original_filename || r.id,
+                    },
+                    {
+                      header: 'Custodian',
+                      cell: (r: ReleasableRecord) => r.custodian || '—',
+                    },
+                    {
+                      header: 'Review',
+                      cell: (r: ReleasableRecord) => (
+                        r.review_state === 'withheld'
+                          ? <Badge tone="amber">Withheld</Badge>
+                          : <Badge tone="green">Responsive</Badge>
+                      ),
+                    },
+                    {
+                      header: 'Redactions',
+                      align: 'right' as const,
+                      cell: (r: ReleasableRecord) => r.redaction_count,
+                    },
+                  ]}
+                  rows={ready}
+                  rowKey={(r) => r.id}
+                />
+              </>
+            )}
+          </Card>
+        </details>
+      )}
+      <FeePanels open={feeApplies}>
         <Card
-          title="Deposit gates"
-          actions={canPrepare ? (
-            <Button type="button" variant="ghost" onClick={() => {
-              applyGate.reset()
-              setApplyingGate(true)
+          title="Adopted fee schedule"
+          actions={canPrepare && !currentSchedule ? (
+            <Button type="button" onClick={() => {
+              activateSchedule.reset()
+              setActivatingSchedule(true)
             }}>
-              Require a deposit
+              Activate fee schedule
             </Button>
           ) : undefined}
           className="mb-5"
         >
-          {depositGates.isError ? (
-            <ErrorNote error={depositGates.error} />
-          ) : gateRows.length === 0 ? (
-            <p className="text-sm text-ink-muted">
-              No deposit is holding work on this case. A deposit gate stops
-              collection or production until the requester pays; it never closes
-              the case and never expires.
-            </p>
+          {schedules.isError ? (
+            <ErrorNote error={schedules.error} />
+          ) : currentSchedule ? (
+            <div className="space-y-2 text-sm text-ink">
+              <p>
+                <span className="font-heading font-semibold">{currentSchedule.name}</span>{' '}
+                <Badge tone="green">Effective {currentSchedule.effective_on}</Badge>
+              </p>
+              <p>Statutory schedule: $0.15 photocopy page, $0.10 scanned page, $0.05 per four electronic files, and $0.10/GB.</p>
+              <p className="text-xs text-ink-muted">
+                Counsel: {currentSchedule.counsel_approval_reference} · Adoption: {currentSchedule.adoption_reference}
+              </p>
+            </div>
           ) : (
-            <Table
-              columns={[
-                {
-                  header: 'Work held',
-                  cell: (g: FeeDepositGate) => DEPOSIT_SCOPE_LABELS[g.scope],
-                },
-                { header: 'Deposit', cell: (g: FeeDepositGate) => `$${g.amount}`, align: 'right' },
-                {
-                  header: 'Of estimate',
-                  cell: (g: FeeDepositGate) => `$${g.estimated_total}`,
-                  align: 'right',
-                },
-                { header: 'Requested', cell: (g: FeeDepositGate) => g.requested_on },
-                {
-                  header: 'State',
-                  cell: (g: FeeDepositGate) => (
-                    g.satisfied_at
-                      ? <Badge tone="green">Deposit paid</Badge>
-                      : g.lifted_at
-                        ? <Badge tone="blue">Lifted</Badge>
-                        : <Badge tone="amber">Holding work</Badge>
-                  ),
-                },
-                {
-                  header: 'Actions',
-                  cell: (g: FeeDepositGate) => (canPrepare && g.is_open ? (
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={() => {
-                          recordGatePayment.reset()
-                          setGatePaymentForm({
-                            amount: g.amount,
-                            method: 'check',
-                            reference: '',
-                            received_on: new Date().toISOString().slice(0, 10),
-                          })
-                          setPayingGate(g)
-                        }}
-                      >
-                        Record deposit
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={() => {
-                          liftGate.reset()
-                          setGateLiftReason('')
-                          setLiftingGate(g)
-                        }}
-                      >
-                        Lift
-                      </Button>
-                    </div>
-                  ) : <span className="text-xs text-ink-muted">—</span>),
-                },
-              ]}
-              rows={gateRows}
-              rowKey={(g) => g.id}
-            />
+            <p className="text-sm text-ink-muted">
+              No fee schedule is active. Do not assess or communicate a fee until counsel approval and formal district adoption are recorded.
+            </p>
           )}
         </Card>
-      )}
+        <Card
+          title="Fee waiver floor"
+          actions={canPrepare ? (
+            <Button type="button" variant="ghost" onClick={() => {
+              activateFloor.reset()
+              setActivatingFloor(true)
+            }}>
+              {currentFloor ? 'Replace floor' : 'Adopt waiver floor'}
+            </Button>
+          ) : undefined}
+          className="mb-5"
+        >
+          {waiverFloors.isError ? (
+            <ErrorNote error={waiverFloors.error} />
+          ) : currentFloor ? (
+            <div className="space-y-1 text-sm text-ink">
+              <p>
+                Assessments under{' '}
+                <span className="font-heading font-semibold">${currentFloor.amount}</span>{' '}
+                prompt a waiver. Nothing is waived automatically; a Records Officer
+                records the waiver and its reason on the assessment.
+              </p>
+              <p className="text-xs text-ink-muted">
+                Counsel: {currentFloor.counsel_reference} · Effective {currentFloor.effective_on}
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-ink-muted">
+              No waiver floor is adopted, so no assessment will prompt a waiver.
+            </p>
+          )}
+        </Card>
+        {requestNumber && (
+          <Card
+            title="Deposit gates"
+            actions={canPrepare ? (
+              <Button type="button" variant="ghost" onClick={() => {
+                applyGate.reset()
+                setApplyingGate(true)
+              }}>
+                Require a deposit
+              </Button>
+            ) : undefined}
+            className="mb-5"
+          >
+            {depositGates.isError ? (
+              <ErrorNote error={depositGates.error} />
+            ) : gateRows.length === 0 ? (
+              <p className="text-sm text-ink-muted">
+                No deposit is holding work on this case. A deposit gate stops
+                collection or production until the requester pays; it never closes
+                the case and never expires.
+              </p>
+            ) : (
+              <Table
+                columns={[
+                  {
+                    header: 'Work held',
+                    cell: (g: FeeDepositGate) => DEPOSIT_SCOPE_LABELS[g.scope],
+                  },
+                  { header: 'Deposit', cell: (g: FeeDepositGate) => `$${g.amount}`, align: 'right' },
+                  {
+                    header: 'Of estimate',
+                    cell: (g: FeeDepositGate) => `$${g.estimated_total}`,
+                    align: 'right',
+                  },
+                  { header: 'Requested', cell: (g: FeeDepositGate) => g.requested_on },
+                  {
+                    header: 'State',
+                    cell: (g: FeeDepositGate) => (
+                      g.satisfied_at
+                        ? <Badge tone="green">Deposit paid</Badge>
+                        : g.lifted_at
+                          ? <Badge tone="blue">Lifted</Badge>
+                          : <Badge tone="amber">Holding work</Badge>
+                    ),
+                  },
+                  {
+                    header: 'Actions',
+                    cell: (g: FeeDepositGate) => (canPrepare && g.is_open ? (
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => {
+                            recordGatePayment.reset()
+                            setGatePaymentForm({
+                              amount: g.amount,
+                              method: 'check',
+                              reference: '',
+                              received_on: new Date().toISOString().slice(0, 10),
+                            })
+                            setPayingGate(g)
+                          }}
+                        >
+                          Record deposit
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => {
+                            liftGate.reset()
+                            setGateLiftReason('')
+                            setLiftingGate(g)
+                          }}
+                        >
+                          Lift
+                        </Button>
+                      </div>
+                    ) : <span className="text-xs text-ink-muted">—</span>),
+                  },
+                ]}
+                rows={gateRows}
+                rowKey={(g) => g.id}
+              />
+            )}
+          </Card>
+        )}
+      </FeePanels>
       <Card title="Installments and releases">
         {rows.length === 0 ? (
           <EmptyState>Installments appear when records are released in batches.</EmptyState>

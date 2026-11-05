@@ -7,16 +7,21 @@ import tempfile
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
+from apps.api.identity import apply_staff_roles
+from apps.api.models import StaffRole
 from apps.correspondence.management.commands.seed_casework_test_fixture import (
     FIXTURE_FLIGHT_RECORDS,
     FIXTURE_FLIGHT_REQUEST_NUMBER,
     FIXTURE_REDACTION_RECORD_COUNT,
     FIXTURE_REDACTION_REQUEST_NUMBER,
+    FIXTURE_RELEASE_REQUEST_NUMBER,
     _seed_redaction_proposal_case,
+    _seed_release_case,
     _seed_review_flight_case,
 )
 from apps.records.models import RecordItem, RedactionProposal
 from apps.records.preview import preview_pdf_metadata
+from apps.records.release_package import build_release_package
 
 AI = {
     "PRR_AI_ADVISORY_ENABLED": True,
@@ -37,6 +42,7 @@ class FixturePdfCaseTests(TestCase):
     def test_without_the_local_store_nothing_is_seeded(self):
         self.assertIsNone(_seed_review_flight_case(self.officer))
         self.assertIsNone(_seed_redaction_proposal_case(self.officer))
+        self.assertIsNone(_seed_release_case(self.officer))
         self.assertFalse(RecordItem.objects.exists())
 
     def test_with_the_local_store_the_pdfs_open_and_seeding_is_repeatable(self):
@@ -61,3 +67,21 @@ class FixturePdfCaseTests(TestCase):
             self.assertEqual(
                 RecordItem.objects.count(), len(FIXTURE_FLIGHT_RECORDS) + FIXTURE_REDACTION_RECORD_COUNT,
             )
+
+    def test_the_release_case_builds_into_a_package_with_its_exemption_log(self):
+        # The one-step release flow (#47) depends on these records being
+        # release-ready and their stored bytes matching their digests.
+        apply_staff_roles(self.officer, [StaffRole.RECORDS_OFFICER])
+        with override_settings(
+            PRR_E2E_FILESYSTEM_OBJECT_STORE=self.root, PRR_TEST_FIXTURE_SEED_ENABLED=True,
+        ):
+            request = _seed_release_case(self.officer)
+            assert request is not None
+            self.assertEqual(request.number, FIXTURE_RELEASE_REQUEST_NUMBER)
+            self.assertEqual(_seed_release_case(self.officer), request)
+
+            installment = build_release_package(request.number, actor=self.officer)
+
+        self.assertEqual(installment.items.count(), 3)
+        self.assertNotEqual(installment.exemption_log_storage_key, "")
+        self.assertIsNotNone(installment.package_prepared_at)

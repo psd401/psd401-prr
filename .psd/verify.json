@@ -55,7 +55,8 @@
     "reviewer-keyboard-flight",
     "officer-scope-iterations",
     "officer-approve-and-collect",
-    "officer-rescope"
+    "officer-rescope",
+    "officer-one-step-release"
   ],
   "e2e_screenshots": {
     "staff-login-open-case": [
@@ -262,6 +263,10 @@
     "officer-rescope": [
       "officer-rescope-diff.png",
       "officer-rescope-superseded.png"
+    ],
+    "officer-one-step-release": [
+      "officer-one-step-release-ready.png",
+      "officer-one-step-release-preview.png"
     ]
   },
   "strictness": "block",

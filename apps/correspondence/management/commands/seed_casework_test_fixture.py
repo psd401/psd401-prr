@@ -134,6 +134,8 @@ FIXTURE_FLIGHT_RECORDS = (
 #: A case with a finished Vault collection and a newer, narrower proposed
 #: scope, for the re-scope flow (#37).
 FIXTURE_RESCOPE_REQUEST_NUMBER = "PRR-E2E-0014"
+# One-step release (#47): reviewed records waiting for "Build package".
+FIXTURE_RELEASE_REQUEST_NUMBER = "PRR-E2E-0015"
 FIXTURE_ESTIMATE_LETTER_INTENT = (
     "Route 12 bus video from March 3, 2026, between 3 and 4 p.m."
 )
@@ -1338,6 +1340,81 @@ def _seed_redaction_proposal_case(officer):
             rationale="An employee's personal cell number.",
             source_span_ids=["p1s1"],
             source_text_sha256=hashlib.sha256(label.encode()).hexdigest(),
+        )
+    return request
+
+
+def _seed_release_case(officer):
+    """Seed a case whose reviewed records wait for "Build package" (#47).
+
+    Two responsive PDFs and one withheld record with its citation, stored in
+    the e2e filesystem object store, so the one-step build generates a real
+    exemption log and prepares a real package.
+    """
+    import io
+
+    import pymupdf as fitz
+    from django.conf import settings as django_settings
+
+    if not getattr(django_settings, "PRR_E2E_FILESYSTEM_OBJECT_STORE", ""):
+        return None
+
+    from apps.records.models import ExemptionCitation
+    from apps.records.storage import generated_record_storage_key
+    from apps.secure_files import _object_store_client
+
+    requester, _ = Requester.objects.get_or_create(
+        email="release@example.org",
+        defaults={"id": _fixture_uuid("release-requester"), "name": "Release Requester"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_RELEASE_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("release-request"),
+            "requester": requester,
+            "description": "Facilities committee agendas for spring 2026.",
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    if not created:
+        return request
+    exemption, _ = ExemptionCitation.objects.get_or_create(
+        citation="RCW 42.56.250(4)",
+        defaults={"short_name": "Employee personal contact information"},
+    )
+    client = _object_store_client()
+    for index, state in enumerate((
+        RecordItem.ReviewState.RESPONSIVE,
+        RecordItem.ReviewState.RESPONSIVE,
+        RecordItem.ReviewState.WITHHELD,
+    )):
+        label = f"release-agenda-{index}"
+        document = fitz.open()
+        page = document.new_page(width=612, height=792)
+        page.insert_text((72, 96), f"Facilities committee agenda {index}.", fontsize=12)
+        pdf = document.tobytes()
+        document.close()
+        key = generated_record_storage_key(request.pk, original_filename=f"{label}.pdf")
+        client.put_object(
+            Bucket=django_settings.OBJECT_STORE["bucket"], Key=key,
+            Body=io.BytesIO(pdf), IfNoneMatch="*",
+        )
+        RecordItem.objects.create(
+            pk=_fixture_uuid(label),
+            request=request,
+            source_system="fixture",
+            original_filename=f"synthetic-{label}.pdf",
+            storage_key=key,
+            content_length=len(pdf),
+            content_type="application/pdf",
+            sha256=hashlib.sha256(pdf).hexdigest(),
+            review_state=state,
+            withholding_exemption=exemption if state == RecordItem.ReviewState.WITHHELD else None,
+            reviewed_by=officer,
+            reviewed_at=_BASE_TIME,
         )
     return request
 
@@ -2985,6 +3062,7 @@ class Command(BaseCommand):
             _seed_redaction_proposal_case(officer)
             _seed_review_flight_case(officer)
             _seed_rescope_case(officer)
+            _seed_release_case(officer)
             _seed_email_intake_redirect_cases(officer, inbound_transport)
             _reconcile_fixture_inbound_work(request)
             _seed_role_work(

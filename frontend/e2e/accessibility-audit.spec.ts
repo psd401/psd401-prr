@@ -352,6 +352,8 @@ async function auditSurfaces(page: Page, theme: Theme, records: AuditRecord[]) {
     level: 2,
     exact: true,
   })).toBeVisible()
+  // With no fee on the case, the fee panels are folded away (#47).
+  await page.getByText('Fees and deposits — no fee applies').click()
   await auditDialog(
     page,
     'Activate fee schedule',
