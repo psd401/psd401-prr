@@ -80,8 +80,10 @@ server's roles. `nav.ts` says that API role policies remain authoritative.
 ### Case tabs
 
 A case opens at `/requests/:number/:tab`. `CASE_TAB_ROLES` gives each tab its roles:
-`overview`, `messages`, `collection`, `records`, `releases`, and `activity`. A
-liaison, for example, sees messages and collection but not records or releases. A
+`overview`, `messages`, `collection`, `records`, `review`, `releases`, and `activity`. The
+`review` tab mounts the keyboard-first `ReviewFlight` screen, which is limited to records
+officers and reviewers ([record review](../domain/record-review-and-handling.md#keyboard-review-in-the-case-review-tab)).
+A liaison, for example, sees messages and collection but not records, review, or releases. A
 direct URL to a tab the user cannot use shows a denial and does not mount the tab
 (`CaseWorkspace.test.tsx`, "shows a useful denial without mounting an unauthorized direct tab").
 

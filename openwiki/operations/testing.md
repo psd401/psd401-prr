@@ -84,6 +84,22 @@ and serves Django on `127.0.0.1:8000` with `config.e2e_settings` and `PRR_AUTH_M
 The second server is the Vite dev server on port 4173. The e2e script deletes
 `.verification/e2e.sqlite3` on each start, so it never reuses earlier browser state.
 
+Two e2e-only stand-ins keep the browser run away from the real Vault and private bucket. Each
+one is honoured only while `PRR_TEST_FIXTURE_SEED_ENABLED` is also on, so a deployed
+environment cannot reach either one:
+
+- `config/e2e_settings.py` sets `PRR_E2E_FAKE_VAULT`. `_e2e_stand_in` in
+  [`apps/integrations/vault/client.py`](../../apps/integrations/vault/client.py) then answers
+  matter, count, and export calls with synthetic identifiers and totals. The focused test is
+  `apps/records/tests/test_vault_e2e_stand_in.py`, which also asserts that the real service is
+  called when either switch is off. See [collection and Vault](../domain/collection-and-vault.md).
+- `PRR_E2E_FILESYSTEM_OBJECT_STORE` makes `_object_store_client` in
+  [`apps/secure_files.py`](../../apps/secure_files.py) use a local directory instead of the
+  bucket. Its focused test is `apps/records/tests/test_filesystem_object_store.py`. See
+  [object storage and scanning](../architecture/object-storage-and-scanning.md#local-acceptance-store).
+
+Focused command: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_vault_e2e_stand_in apps.records.tests.test_filesystem_object_store --settings=config.test_settings`.
+
 ## Why the lanes are shaped this way
 
 - **Sharding is by app label.** `config/test_settings.py` uses SQLite `:memory:`, so each

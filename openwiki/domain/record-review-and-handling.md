@@ -6,9 +6,9 @@ tags: [domain, record-review, redaction, derivatives, handling, media, opaque-re
 openwiki:
   roles: [domain, workflow]
   change_kinds: [review-workflow, rendering, handling-paths]
-  source_paths: [apps/records/handling.py, apps/records/derivatives.py, apps/records/preview.py, apps/records/review.py, apps/records/opaque_review.py, apps/records/media_review.py, apps/records/clusters.py, apps/records/review_batches.py, apps/api/resources/records_misc.py, frontend/src/case/RecordClusters.tsx, frontend/src/case/BatchReview.tsx]
+  source_paths: [apps/records/handling.py, apps/records/derivatives.py, apps/records/preview.py, apps/records/review.py, apps/records/opaque_review.py, apps/records/media_review.py, apps/records/clusters.py, apps/records/review_batches.py, apps/api/resources/records_misc.py, frontend/src/case/RecordClusters.tsx, frontend/src/case/BatchReview.tsx, frontend/src/case/ReviewFlight.tsx]
   symbols: [handling_for, handling_for_item, build_derivative, review_record, bulk_review_records, bulk_review_selection, bulk_review_confirmed_selection, approve_second_review, render_redacted_record, record_opaque_disposition, create_media_redaction, render_media_redactions, cluster_records, RecordItemViewSet]
-  test_paths: [apps/records/tests/test_handling.py, apps/records/tests/test_derivatives.py, apps/records/tests/test_record_review.py, apps/records/tests/test_media_and_opaque_review.py, apps/records/tests/test_review_agreement.py, apps/api/tests/test_records_misc.py, apps/api/tests/test_bulk_review_by_filter.py]
+  test_paths: [apps/records/tests/test_handling.py, apps/records/tests/test_derivatives.py, apps/records/tests/test_record_review.py, apps/records/tests/test_media_and_opaque_review.py, apps/records/tests/test_review_agreement.py, apps/records/tests/test_undo_review.py, apps/api/tests/test_records_misc.py, apps/api/tests/test_bulk_review_by_filter.py, frontend/src/case/ReviewFlight.test.tsx]
   invariants:
     - A record's original bytes are never replaced; a reading copy or redacted copy is always a new derived object.
     - A record that cannot be rendered is never marked reviewed by default; a named human records a basis and reasoning.
@@ -145,6 +145,37 @@ rule: `test_undo_returns_a_first_decision_to_unreviewed`,
 `test_the_api_reports_a_refused_undo_as_a_400`.
 
 Minimal validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_undo_review --settings=config.test_settings`.
+
+## Keyboard review in the case Review tab
+
+`ReviewFlight` (`frontend/src/case/ReviewFlight.tsx`) is the case workspace's `review` tab:
+`CaseWorkspace.tsx` mounts it when the tab is `review`. `CASE_TAB_ROLES.review` in
+`frontend/src/nav.ts` limits the tab to records officers and reviewers. The screen lists one
+request's records beside their preview, and each key sends one decision:
+
+- `r` responsive, `n` non-responsive, `d` duplicate, `u` undo, `x` select, and `j` or `k` to move.
+  `⌘K` (or Ctrl+K) opens a command palette with the same actions. Plain keys are ignored while
+  the user is typing, while the palette is open, or with a modifier key.
+- A single decision posts to `POST /api/staff/record-items/{id}/review/`. With a selection, the
+  screen sends one `POST /api/staff/record-items/bulk-review/` with explicit `record_item_ids`.
+  That is the explicit-ID path, not the filter preview above. The client refuses a bulk duplicate,
+  because duplicates are decided one record at a time.
+- Undo keeps one stack entry per decision action, so a bulk decision is undone as a whole. Each
+  entry calls `POST .../undo-review/` for every record (see
+  [undoing your own decision](#undoing-your-own-decision)). A refused undo is reported and removed
+  from the stack, so the next `u` reaches the decision before it.
+- No decision is sent while the list is loading the next page, so the highlighted record is never
+  one that was already decided. The AI responsiveness suggestion comes from
+  `GET .../advisory-responsiveness/` and is shown inline. It is read only, and the reviewer still
+  presses a key ([advisory AI](advisory-ai.md)).
+- Clusters can be toggled beside the list ([record clusters](#record-clusters)).
+
+Focused tests are in `frontend/src/case/ReviewFlight.test.tsx`, for example "shows the AI label
+inline and decides, undoes, and moves by key", "decides a selection together and refuses a bulk
+duplicate", "undoes a bulk decision as a whole and drops a refused undo from the stack", and
+"takes no decision while the next page is still loading". The server rules are in
+`apps/records/tests/test_undo_review.py` and `apps/api/tests/test_bulk_review_by_filter.py`. Run
+the client check with `cd frontend && bun run test -- src/case/ReviewFlight.test.tsx`.
 
 ## Bulk decisions over a filter
 
