@@ -195,6 +195,17 @@ class RescopeTests(_Fixture):
             rescope(self.request, count_run_id=run.pk, expected_input_sha256=run.input_sha256,
                     actor=self.officer, reason="The new scope leaves out the newsletter.")
 
+    def test_a_superseded_collection_is_not_the_current_one(self, delay):
+        # Re-scope A to B, then B fails: A was replaced, so nothing is the
+        # current collection and the officer approves and collects again.
+        self._collected()
+        _session, run = self._session(trigger=ScopingSession.Trigger.MANUAL, total=12)
+        new = rescope(self.request, count_run_id=run.pk, expected_input_sha256=run.input_sha256,
+                      actor=self.officer, reason="The new scope leaves out the newsletter.")
+        CollectionTask.objects.filter(pk=new.pk).update(state=CollectionTask.State.FAILED)
+
+        self.assertIsNone(current_collection(self.request))
+
     def test_the_api_shows_the_diff_and_rescopes(self, delay):
         old = self._collected()
         _session, new_run = self._session(trigger=ScopingSession.Trigger.MANUAL, total=12)

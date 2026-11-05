@@ -283,15 +283,16 @@ def rescope(request, *, count_run_id, expected_input_sha256, actor, reason):
 
 
 def _live_collections(request):
-    """Vault mail collections that have not failed.
+    """Vault mail collections that have neither failed nor been superseded.
 
-    A failed export never finishes, so it is never the collection a re-scope
-    replaces; the officer approves and collects again instead.
+    A failed export never finishes, and a superseded one was already replaced,
+    so neither is the collection a re-scope replaces; with none left the
+    officer approves and collects again instead.
     """
     from .models import CollectionTask
 
     return CollectionTask.objects.filter(
-        request=request, kind=CollectionTask.Kind.VAULT_MAIL,
+        request=request, kind=CollectionTask.Kind.VAULT_MAIL, supersessions__isnull=True,
     ).exclude(state=CollectionTask.State.FAILED)
 
 
