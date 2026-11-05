@@ -433,7 +433,13 @@ class _Api:
             raw=True,
             may_land=True,
         )
-        return _decode(response, f"Alta POST {path}"), response.headers.get("Location", "")
+        location = response.headers.get("Location", "")
+        try:
+            return _decode(response, f"Alta POST {path}"), location
+        except AltaError:
+            # Accepted, so the object exists; the caller reads its id from
+            # Location or treats the write as uncertain.
+            return None, location
 
     def delete(self, path: str) -> Any:
         return self._call("DELETE", path, timeout=WRITE_TIMEOUT_SECONDS, ok=(200, 204))
@@ -704,9 +710,9 @@ def _post_bookmark(
         ) from None
     bookmark_id = _created_bookmark_id(created, location, api_base=api.base)
     if not bookmark_id:
-        raise AltaError(
-            "Alta accepted the bookmark but returned no id; check the device "
-            "for an unlisted hold before trying again."
+        raise AltaWriteUncertain(
+            "Alta accepted the bookmark but returned no id. A bookmark may exist "
+            f"anyway: check Alta device {camera.id} for it before retrying."
         )
     logger.info(
         "Created Alta bookmark %s on device %s for %d head(s).",

@@ -273,6 +273,24 @@ class CreateBookmarkTests(_BookmarkTestCase):
                 with self.assertRaisesRegex(client.AltaError, "id"):
                     self._hold()
 
+    def test_an_accepted_create_without_an_id_may_have_landed(self):
+        """Alta said yes, so a bookmark exists; only its id is unknown."""
+        for answer in (fakes.response(201, {}), fakes.response(201, "<html>ok</html>")):
+            with self.subTest(answer=answer.content):
+                self.tenant.on("POST", "/bookmarks", answer)
+                with self.assertRaises(client.AltaWriteUncertain) as raised:
+                    self._hold()
+                self.assertIn("may exist", str(raised.exception))
+
+    def test_a_non_json_201_with_a_bookmark_location_is_accepted(self):
+        self.tenant.on(
+            "POST",
+            "/bookmarks",
+            fakes.response(201, "Created", headers=_created_at("bm-text")),
+        )
+
+        self.assertEqual(self._hold().id, "bm-text")
+
     def test_a_bad_request_reports_the_kind_and_message(self):
         self.tenant.on(
             "POST",
