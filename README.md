@@ -99,7 +99,7 @@ Enforced by the schema and the test suite, not by policy:
 - Records-system registry mapping district systems to custodians, retention
   profiles, triage keywords, and adequate-search checklists;
   intake auto-routes matching requests into per-system collection tasks
-- Camera-footage triage with Avigilon Alta saved-clip holds, urgent
+- Camera-footage triage with Avigilon Alta bookmark holds, urgent
   preservation emails, and a human-only adequate-search/response path
 - Hourly escalating deadline watchdog, estimate watchdog, stall detector
 
@@ -305,8 +305,10 @@ review checks. They do not control or authorize production deployment.
       `docs/google-identity-bootstrap.md`
 - [ ] Vault service account with domain-wide delegation (scopes in
       `apps/integrations/vault/client.py` docstring)
-- [ ] Run `manage.py verify_alta` against the district Avigilon tenant
-      (endpoint paths carry VERIFY markers)
+- [ ] Set `ALTA_API_BASE`, `ALTA_API_USERNAME`, and `ALTA_API_PASSWORD`,
+      run `manage.py verify_alta` (read-only) against the district Aware
+      tenant, then once with `--smoke-bookmark <device guid>` to create,
+      check, and delete one 10-minute bookmark
 - [ ] Verify bus-video vendor retention window (see
       `docs/custodian-gap-analysis.md`), assign custodian emails in the
       registry
