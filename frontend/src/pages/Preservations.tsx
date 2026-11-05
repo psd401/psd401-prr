@@ -102,6 +102,7 @@ function StateBadge({ state }: { state: string }) {
 
 interface ExcludeTarget {
   preservationId: number
+  requestNumber: string
   hold: CameraHold
 }
 
@@ -177,27 +178,34 @@ export function Preservations({
     },
   })
 
+  // The request detail card shows the hold state and confirmation text too;
+  // leaving it cached would keep saying "Held" after a release.
+  function refreshAfterChange(requestNumber: string) {
+    qc.invalidateQueries({ queryKey: ['preservations'] })
+    qc.invalidateQueries({ queryKey: ['request', requestNumber] })
+  }
+
   const exclude = useMutation({
-    mutationFn: ({ preservationId, holdId, reason }: { preservationId: number; holdId: number; reason: string }) =>
+    mutationFn: ({ preservationId, holdId, reason }: { preservationId: number; requestNumber: string; holdId: number; reason: string }) =>
       api<CameraHold>(`/api/staff/preservations/${preservationId}/exclude-camera/`, {
         method: 'POST',
         body: { camera_hold_id: holdId, reason },
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['preservations'] })
+    onSuccess: (_hold, { requestNumber }) => {
+      refreshAfterChange(requestNumber)
       toast('success', 'Camera excluded from preservation hold.')
       closeExclude()
     },
   })
 
   const release = useMutation({
-    mutationFn: ({ preservationId, reason }: { preservationId: number; reason: string }) =>
+    mutationFn: ({ preservationId, reason }: { preservationId: number; requestNumber: string; reason: string }) =>
       api<Preservation>(`/api/staff/preservations/${preservationId}/release/`, {
         method: 'POST',
         body: { reason, attest_no_litigation_hold: true },
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['preservations'] })
+    onSuccess: (_preservation, { requestNumber }) => {
+      refreshAfterChange(requestNumber)
       toast('success', 'Preservation hold released; Aware bookmarks are being deleted.')
       closeRelease()
     },
@@ -220,11 +228,15 @@ export function Preservations({
   function submitRelease(e: FormEvent) {
     e.preventDefault()
     if (!releasing || reasonTooShort(releaseReason) || !attested) return
-    release.mutate({ preservationId: releasing.id, reason: releaseReason })
+    release.mutate({
+      preservationId: releasing.id,
+      requestNumber: releasing.request_number,
+      reason: releaseReason,
+    })
   }
 
-  function openExclude(preservationId: number, hold: CameraHold) {
-    setExcluding({ preservationId, hold })
+  function openExclude(preservationId: number, requestNumber: string, hold: CameraHold) {
+    setExcluding({ preservationId, requestNumber, hold })
     setReason('')
     exclude.reset()
   }
@@ -238,7 +250,12 @@ export function Preservations({
   function submitExclude(e: FormEvent) {
     e.preventDefault()
     if (!excluding || !reason.trim()) return
-    exclude.mutate({ preservationId: excluding.preservationId, holdId: excluding.hold.id, reason })
+    exclude.mutate({
+      preservationId: excluding.preservationId,
+      requestNumber: excluding.requestNumber,
+      holdId: excluding.hold.id,
+      reason,
+    })
   }
 
   function changeStateFilter(value: string) {
@@ -383,7 +400,7 @@ export function Preservations({
                       align: 'right',
                       cell: (h: CameraHold) =>
                         h.excluded_at || h.state === 'released' || !canExclude ? null : (
-                          <Button variant="ghost" onClick={() => openExclude(p.id, h)}>
+                          <Button variant="ghost" onClick={() => openExclude(p.id, p.request_number, h)}>
                             Exclude
                           </Button>
                         ),

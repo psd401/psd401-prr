@@ -1,10 +1,29 @@
 // ABOUTME: Regression tests for the preservation surface — state filters and hold copy.
 // ABOUTME: A manual hold must never claim an email was sent without delivery evidence.
-import { screen, waitFor, within } from '@testing-library/react'
+import type { ReactNode } from 'react'
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fakeResponse, page, renderPage } from '../test/pageHarness'
+import { ToastProvider } from '../ui'
+import { fakeResponse, page, queryClient, renderPage } from '../test/pageHarness'
 import { Preservations } from './Preservations'
+
+/** renderPage, but with a QueryClient the test can spy on. */
+function renderWithClient(ui: ReactNode, client: QueryClient) {
+  return render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <MemoryRouter>{ui}</MemoryRouter>
+      </ToastProvider>
+    </QueryClientProvider>,
+  )
+}
+
+function invalidatedKeys(spy: ReturnType<typeof vi.spyOn>) {
+  return spy.mock.calls.map(([filters]) => (filters as { queryKey?: unknown[] })?.queryKey)
+}
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -185,6 +204,58 @@ describe('Preservations — release', () => {
         reason: 'Request fulfilled; the requester confirmed receipt.',
         attest_no_litigation_hold: true,
       })
+    })
+  })
+})
+
+describe('Preservations — cache refresh after a change', () => {
+  it('refreshes the request detail after a release so it stops saying "Held"', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/release/') && init?.method === 'POST') {
+        return fakeResponse(heldPreservation({ state: 'released', confirmation_text: null }))
+      }
+      return fakeResponse(page([heldPreservation()]))
+    }))
+    const client = queryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const user = userEvent.setup()
+    renderWithClient(<Preservations roles={['records_officer']} />, client)
+
+    await user.click(await screen.findByRole('button', { name: /Release hold/ }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText(/Reason/), 'Request fulfilled and closed.')
+    await user.click(within(dialog).getByRole('checkbox', { name: /litigation hold/i }))
+    await user.click(within(dialog).getByRole('button', { name: 'Release and delete bookmarks' }))
+
+    await waitFor(() => {
+      const keys = invalidatedKeys(invalidate)
+      expect(keys).toContainEqual(['preservations'])
+      expect(keys).toContainEqual(['request', 'PRR-2026-0007'])
+    })
+  })
+
+  it('refreshes the request detail after a camera exclusion', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/exclude-camera/') && init?.method === 'POST') {
+        return fakeResponse(heldPreservation().camera_holds[1])
+      }
+      return fakeResponse(page([heldPreservation({ request_closed: false, releasable: false })]))
+    }))
+    const client = queryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const user = userEvent.setup()
+    renderWithClient(<Preservations roles={['records_officer']} />, client)
+
+    await screen.findByText('Staff Parking')
+    await user.click(screen.getAllByRole('button', { name: 'Exclude' })[1])
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText(/Reason/), 'Camera faces a private office.')
+    await user.click(within(dialog).getByRole('button', { name: 'Exclude camera' }))
+
+    await waitFor(() => {
+      const keys = invalidatedKeys(invalidate)
+      expect(keys).toContainEqual(['preservations'])
+      expect(keys).toContainEqual(['request', 'PRR-2026-0007'])
     })
   })
 })
