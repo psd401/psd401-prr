@@ -620,6 +620,33 @@ class EstimateRevisionTests(TestCase):
             [],
         )
 
+    def test_no_management_command_lets_go_of_footage(self):
+        """A cron-run command is as automatic as a task: none may release a
+        hold, exclude a camera, or delete an Aware bookmark through the
+        public entry points (verify_alta removes only its own test mark)."""
+        import ast
+
+        def call_names(source):
+            return {
+                (
+                    node.func.attr
+                    if isinstance(node.func, ast.Attribute)
+                    else getattr(node.func, "id", "")
+                )
+                for node in ast.walk(ast.parse(source))
+                if isinstance(node, ast.Call)
+            }
+
+        guarded = {"exclude_camera", "release_preservation", "delete_bookmark"}
+        self.assertTrue(guarded <= call_names("x.release_preservation(); exclude_camera(); y.delete_bookmark()"))
+        command_paths = sorted(
+            (Path(settings.BASE_DIR) / "apps").glob("**/management/commands/*.py")
+        )
+        self.assertTrue(command_paths)
+        for path in command_paths:
+            with self.subTest(command=path.name):
+                self.assertFalse(guarded & call_names(path.read_text()))
+
     def test_no_automated_path_exists(self):
         """No background task may call either human-only revision entry point."""
         import ast
