@@ -10,6 +10,7 @@ import datetime as dt
 from io import StringIO
 from unittest import mock
 
+import requests
 from django.core.management import call_command
 from django.core.management.base import CommandError
 
@@ -196,6 +197,21 @@ class SmokeBookmarkTests(fakes.TenantTestCase):
 
         with self.assertRaisesRegex(CommandError, "device_infos"):
             self._run()
+
+    def test_a_create_that_may_have_landed_says_to_check_the_device(self):
+        for answer in (fakes.response(503), requests.Timeout("slow")):
+            with self.subTest(answer=type(answer).__name__):
+                self.tenant.on("POST", "/bookmarks", answer)
+
+                with self.assertRaises(CommandError) as raised:
+                    self._run()
+
+                message = str(raised.exception)
+                self.assertIn("may exist", message)
+                self.assertIn(DEVICE, message)
+                self.assertIn("before retrying", message)
+                self.assertIn(client.SMOKE_NAME, message)
+                self.assertEqual(self.tenant.calls_to("DELETE", "/bookmarks/bm-smoke"), [])
 
     def test_a_failed_delete_names_the_bookmark_to_remove_by_hand(self):
         self.tenant.on("DELETE", "/bookmarks/bm-smoke", fakes.response(500))

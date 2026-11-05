@@ -212,19 +212,48 @@ class CreateBookmarkTests(_BookmarkTestCase):
     def test_a_server_error_on_create_is_not_retried(self):
         self.tenant.on("POST", "/bookmarks", fakes.response(503))
 
-        with self.assertRaisesRegex(client.AltaError, "503"):
+        with self.assertRaisesRegex(client.AltaError, "503") as raised:
             self._hold()
 
         self.assertEqual(len(self.tenant.calls_to("POST", "/bookmarks")), 1)
         self.sleep.assert_not_called()
+        self._assert_may_exist(raised.exception)
 
     def test_a_timeout_on_create_is_not_retried(self):
         self.tenant.on("POST", "/bookmarks", requests.Timeout("slow"))
 
-        with self.assertRaises(client.AltaError):
+        with self.assertRaises(client.AltaError) as raised:
             self._hold()
 
         self.assertEqual(len(self.tenant.calls_to("POST", "/bookmarks")), 1)
+        self._assert_may_exist(raised.exception)
+
+    def test_every_server_error_on_create_may_have_landed(self):
+        for status in (500, 502, 504):
+            with self.subTest(status=status):
+                self.tenant.on("POST", "/bookmarks", fakes.response(status))
+                with self.assertRaises(client.AltaError) as raised:
+                    self._hold()
+                self._assert_may_exist(raised.exception)
+
+    def test_a_refused_create_does_not_claim_a_bookmark_may_exist(self):
+        for answer in (
+            fakes.response(400, {"kind": "BAD_REQUEST"}),
+            fakes.response(403, {"kind": "PERMISSION_DENIED"}),
+        ):
+            with self.subTest(status=answer.status_code):
+                self.tenant.on("POST", "/bookmarks", answer)
+                with self.assertRaises(client.AltaError) as raised:
+                    self._hold()
+                self.assertNotIsInstance(raised.exception, client.AltaWriteUncertain)
+                self.assertNotIn("may exist", str(raised.exception))
+
+    def _assert_may_exist(self, exc):
+        self.assertIsInstance(exc, client.AltaWriteUncertain)
+        message = str(exc)
+        self.assertIn("may exist", message)
+        self.assertIn("guid-1", message)
+        self.assertIn("before retrying", message)
 
     def test_an_expired_session_on_create_logs_in_and_sends_it_once_more(self):
         """A 401 is refused before the create runs, so resending cannot

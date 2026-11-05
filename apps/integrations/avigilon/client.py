@@ -108,6 +108,11 @@ class AltaPermissionDenied(AltaError):
     """403: the account lacks a permission. Never retried."""
 
 
+class AltaWriteUncertain(AltaError):
+    """A create timed out or failed server-side (5xx): it may have landed,
+    so the target must be checked by hand before the write is retried."""
+
+
 class AltaNotFound(AltaError):
     """A JSON 404 NOT_FOUND: the object does not exist.
 
@@ -404,9 +409,16 @@ class _Api:
         """POST a create; return its decoded body and its Location header.
 
         Never retried on 5xx or a timeout: the write may have landed, and a
-        second create would be a second bookmark."""
+        second create would be a second bookmark. Those failures raise
+        :class:`AltaWriteUncertain`."""
         response = self._call(
-            "POST", path, body=body, timeout=WRITE_TIMEOUT_SECONDS, ok=(200, 201), raw=True
+            "POST",
+            path,
+            body=body,
+            timeout=WRITE_TIMEOUT_SECONDS,
+            ok=(200, 201),
+            raw=True,
+            may_land=True,
         )
         return _decode(response, f"Alta POST {path}"), response.headers.get("Location", "")
 
@@ -423,8 +435,12 @@ class _Api:
         retry_transient: bool = False,
         ok: tuple[int, ...] = (200,),
         raw: bool = False,
+        may_land: bool = False,
     ) -> Any:
+        """``may_land``: the request is a write that a timeout or a 5xx does
+        not prove was refused; those raise :class:`AltaWriteUncertain`."""
         where = f"Alta {method} {path}"
+        transport_error = AltaWriteUncertain if may_land else AltaError
         if not self._cookie:
             self._cookie = _session_cookie(self._http, self._config)
         delays = iter(READ_RETRY_DELAYS if retry_transient else ())
@@ -440,7 +456,7 @@ class _Api:
                     allow_redirects=False,
                 )
             except requests.RequestException as exc:
-                raise AltaError(f"{where} failed ({type(exc).__name__}).") from None
+                raise transport_error(f"{where} failed ({type(exc).__name__}).") from None
             _reject_redirect(response)
             status = response.status_code
             if status == 401:
@@ -458,6 +474,8 @@ class _Api:
                     continue
             if status in ok:
                 return response if raw else _decode(response, where)
+            if may_land and status >= 500:
+                raise AltaWriteUncertain(str(_status_error(response, where)))
             raise _status_error(response, where)
 
 
@@ -661,7 +679,13 @@ def _post_bookmark(
             for sid in heads
         ],
     }
-    created, location = api.create("/bookmarks", body)
+    try:
+        created, location = api.create("/bookmarks", body)
+    except AltaWriteUncertain as exc:
+        raise AltaWriteUncertain(
+            f"{exc} A bookmark may exist anyway: check Alta device {camera.id} "
+            "for it before retrying."
+        ) from None
     bookmark_id = _created_bookmark_id(created, location, api_base=api.base)
     if not bookmark_id:
         raise AltaError(

@@ -18,6 +18,12 @@ def _run(operation, *args):
         return operation(*args)
     except alta.AltaNotConfigured as e:
         raise CommandError(f"Not configured: {e}") from None
+    except alta.AltaWriteUncertain as e:
+        # Only the smoke create raises this: its bookmark may exist.
+        raise CommandError(
+            f"API error: {e} Look for a bookmark named {alta.SMOKE_NAME!r} and "
+            "delete it by hand."
+        ) from None
     except alta.AltaError as e:
         raise CommandError(f"API error: {e}") from None
     except Exception as e:  # noqa: BLE001 - never echo an unknown error's text
