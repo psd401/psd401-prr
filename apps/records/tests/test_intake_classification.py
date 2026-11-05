@@ -185,7 +185,9 @@ class IntakeEmailEvidenceTests(_Fixture):
         self.assertTrue(evidence["has_reply_headers"])
         self.assertTrue(evidence["subject_marks_reply"])
         self.assertFalse(evidence["subject_marks_forward"])
-        self.assertEqual(evidence["sender_domain"], "news.example.org")
+        # The sender's own domain is never sent: it can identify the requester.
+        self.assertNotIn("sender_domain", evidence)
+        self.assertFalse(evidence["sender_is_district"])
         # The case it replies to is offered, so the model may name it.
         self.assertIn(earlier.number, [row["number"] for row in payload["candidate_cases"]])
 
@@ -207,6 +209,14 @@ class IntakeEmailEvidenceTests(_Fixture):
         payload = self._payload(new)
         self.assertEqual(payload["email_evidence"]["replies_to_cases"], [])
         self.assertNotIn(litigation.number, [row["number"] for row in payload["candidate_cases"]])
+
+    @override_settings(PRR_DISTRICT_EMAIL_DOMAINS=["news.example.org"])
+    def test_a_district_sender_is_flagged_without_naming_the_domain(self):
+        new = self._case(days_ago=0)
+        self._emailed(new)
+        evidence = self._payload(new)["email_evidence"]
+        self.assertTrue(evidence["sender_is_district"])
+        self.assertNotIn("news.example.org", str(evidence))
 
     def test_a_web_form_case_has_no_email_evidence(self):
         new = self._case(days_ago=0)

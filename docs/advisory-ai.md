@@ -173,7 +173,8 @@ sent, so the input does not change while the run waits. Kinds never mix
 (AGENTS.md rule 13).
 
 For a case opened from an email, the model also sees `email_evidence`
-(schema version 2, #33): the sender's domain; whether the subject presents as
+(schema version 2, #33): whether a district address sent it (never the
+sender's domain, which can identify the requester); whether the subject presents as
 a reply or a forward; whether the email carried reply headers; which list or
 automated-mail headers it carried (`auto-submitted`, `list-id`,
 `list-unsubscribe`, `precedence`, named but never quoted); and

@@ -556,7 +556,8 @@ _INTAKE_MAX_THREAD_CASES = 20
 def _intake_email_evidence(request) -> dict[str, Any] | None:
     """Header and thread facts about the email that created this case (#33).
 
-    Facts only, fixed at intake: the sender's domain, whether the email
+    Facts only, fixed at intake: whether a district address sent it (never
+    the sender's domain, which can identify the requester), whether the email
     presents as a reply or a forward, which list or bulk headers it carried
     (named, never quoted), and which earlier cases of the same matter kind
     it replies to -- an In-Reply-To or References id, or the Gmail thread, of
@@ -567,6 +568,8 @@ def _intake_email_evidence(request) -> dict[str, Any] | None:
         Correspondence,
         InboundCorrespondenceReceipt,
     )
+
+    from .record_tags import district_email_domains
 
     receipt = (
         InboundCorrespondenceReceipt.objects.filter(
@@ -612,7 +615,10 @@ def _intake_email_evidence(request) -> dict[str, Any] | None:
         .order_by("request__number")
     )
     return {
-        "sender_domain": sender.rpartition("@")[2].lower()[:255],
+        # Whether staff sent it, never the sender's own domain: a personal or
+        # family domain can identify the requester (PR #93 review).
+        "sender_is_district": sender.rpartition("@")[2].lower()
+        in district_email_domains(),
         "subject_marks_reply": bool(_REPLY_SUBJECT.match(subject)),
         "subject_marks_forward": bool(_FORWARD_SUBJECT.match(subject)),
         "has_reply_headers": bool(receipt.in_reply_to or receipt.references),
