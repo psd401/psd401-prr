@@ -13,7 +13,7 @@ const caseNumber = 'PRR-E2E-0014'
 test('officer-rescope', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page)
-  await page.goto(`/requests/${caseNumber}/collection`)
+  await page.goto(`/requests/${caseNumber}/scope`)
 
   await expect(page.getByText(/current collection has 2,340 messages; the proposed scope has 412 messages/)).toBeVisible()
   const approve = page.getByRole('button', { name: 'Approve re-scope' })
@@ -27,7 +27,7 @@ test('officer-rescope', async ({ page }) => {
   await approve.click()
   await expect(page.getByRole('note').filter({ hasText: /Collecting this scope/ })).toBeVisible()
 
-  await page.goto(`/requests/${caseNumber}/records`)
+  await page.goto(`/requests/${caseNumber}/review?view=records`)
   // Superseded records leave review on purpose; they sit one filter away.
   await page.getByRole('button', { name: 'Superseded', exact: true }).click()
   await expect(page.getByText('synthetic-rescope-mail-0.eml')).toBeVisible()

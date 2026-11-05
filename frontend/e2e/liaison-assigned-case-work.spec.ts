@@ -7,19 +7,19 @@ import { fixtureRequestNumber, login } from './message-workspace.helpers.js'
 test('liaison-assigned-case-work', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page, 'e2e-liaison', 'e2e-liaison-local-only')
-  await page.goto(`/requests/${fixtureRequestNumber}/collection`)
+  await page.goto(`/requests/${fixtureRequestNumber}/collect`)
 
   await expect(page).toHaveURL(
-    new RegExp(`/requests/${fixtureRequestNumber}/collection$`),
+    new RegExp(`/requests/${fixtureRequestNumber}/collect$`),
   )
   await expect(page.getByRole('heading', {
-    name: 'Collection',
+    name: 'Collect',
     level: 2,
     exact: true,
   })).toBeFocused()
   await expect(page.getByText('Restricted', { exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Messages' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Records' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: /^Review:/ })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Add search assignment' })).toHaveCount(0)
 
   const taskState = page.getByRole('combobox').filter({ has: page.locator('option[value="pending"]') }).last()

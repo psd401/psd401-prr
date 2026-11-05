@@ -36,11 +36,11 @@ const KIND_LABELS: Record<Kind, string> = {
 
 /** The case tab where a batch's evidence lives. */
 const KIND_TABS: Record<Kind, string> = {
-  review: 'records',
-  supersede: 'collection',
-  scope_and_collect: 'collection',
-  redaction_group: 'review',
-  intake_label: 'overview',
+  review: 'review?view=records',
+  supersede: 'collect',
+  scope_and_collect: 'scope',
+  redaction_group: 'redact',
+  intake_label: 'intake',
 }
 
 const MIN_REJECTION_REASON = 10

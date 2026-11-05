@@ -119,7 +119,8 @@ test('officer-statutory-response-and-templates', async ({ page }) => {
   })
 
   // The courtesy receipt must not have satisfied the statutory response.
-  await page.getByRole('link', { name: 'Overview', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Case stages' })
+    .getByRole('link', { name: /^Intake:/ }).click()
   await expect(
     page.getByRole('list', { name: 'Statutory response steps' })
       .getByText('Prepare the acknowledgment draft'),

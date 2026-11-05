@@ -17,6 +17,7 @@ from apps.api.identity import apply_staff_roles
 from apps.api.models import StaffRole
 from apps.audit.models import AuditLog
 from apps.records.models import (
+    CollectionTask,
     ExemptionCitation,
     PublicRecordsRequest,
     RecordItem,
@@ -205,6 +206,28 @@ class BulkReviewByFilterTests(TestCase):
 
         stranger.refresh_from_db()
         self.assertEqual(stranger.review_state, RecordItem.ReviewState.UNREVIEWED)
+
+    def test_a_collection_filter_limits_the_decision_to_that_collection(self):
+        # "View records" on a Collect stage card (#45) lists one collection;
+        # deciding every match there must not reach the case's other records.
+        first = CollectionTask.objects.create(
+            request=self.prr, kind=CollectionTask.Kind.VAULT_MAIL,
+        )
+        second = CollectionTask.objects.create(
+            request=self.prr, kind=CollectionTask.Kind.MANUAL,
+        )
+        mine = self._item(1, collection_task=first)
+        theirs = self._item(2, collection_task=second)
+
+        preview = self._preview(collection_task=str(first.pk))
+        self.assertEqual(preview.json()["eligible_count"], 1)
+        response = self._confirm(preview, collection_task=str(first.pk))
+        self.assertEqual(response.status_code, 200, response.content)
+
+        mine.refresh_from_db()
+        theirs.refresh_from_db()
+        self.assertEqual(mine.review_state, RecordItem.ReviewState.NON_RESPONSIVE)
+        self.assertEqual(theirs.review_state, RecordItem.ReviewState.UNREVIEWED)
 
     def test_only_review_roles_may_preview_or_decide(self):
         self._item(1)

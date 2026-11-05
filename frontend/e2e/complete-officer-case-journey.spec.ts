@@ -45,17 +45,42 @@ test('complete-officer-case-journey', async ({ page }) => {
       .first(),
   ).toBeVisible()
 
-  await page.getByRole('link', { name: 'Collection', exact: true }).click()
+  // The stage rail (#45): every stage reachable, each led by its decision.
+  const rail = page.getByRole('navigation', { name: 'Case stages' })
+  const stage = (name: string) => rail.getByRole('link', { name: new RegExp(`^${name}:`) })
+
+  await stage('Scope').click()
+  await expect(page.getByRole('region', { name: 'Scope decision' })).toBeVisible()
+  const scopeStep = page.getByText('Scope: request intent and Vault count')
+  await expect(scopeStep).toBeVisible()
+  if (!(await page.getByText('Google Vault scope count').isVisible())) await scopeStep.click()
   await expect(page.getByText('Google Vault scope count')).toBeVisible()
-  await page.getByRole('link', { name: 'Records', exact: true }).click()
+
+  await stage('Collect').click()
+  await expect(page.getByRole('region', { name: 'Collect decision' })).toBeVisible()
+  const collections = page.getByRole('list', { name: 'Collections' })
+  await expect(collections.getByText('—', { exact: true })).toHaveCount(0)
+  await expect(collections.getByRole('link', { name: 'View records' }).first()).toBeVisible()
+
+  await stage('Review').click()
+  await page.getByRole('button', { name: 'Record list' }).click()
   await expect(page.getByText('synthetic-review-record.pdf')).toBeVisible()
-  await page.getByRole('link', { name: 'Releases', exact: true }).click()
+
+  await stage('Redact').click()
+  await expect(page.getByRole('region', { name: 'Redact decision' })).toBeVisible()
+
+  await stage('Release').click()
+  await expect(page.getByRole('region', { name: 'Release decision' })).toBeVisible()
+
+  await stage('Close').click()
   await expect(page.getByText('Read-only blocker report.', { exact: false })).toBeVisible()
-  // The case timeline is the Running log on Overview now; there is no second
-  // tab rendering the same feed.
-  await page.getByRole('link', { name: 'Overview', exact: true }).click()
+
+  // The case timeline is the Running log on Intake.
+  await stage('Intake').click()
   await expect(page.getByText('Running log')).toBeVisible()
   await expect(page.getByText('Loading case activity…')).toHaveCount(0)
+  await stage('Collect').click()
+  await expect(page.getByRole('list', { name: 'Collections' })).toBeVisible()
 
   await page.screenshot({
     path: path.resolve('../.verification/complete-officer-case-journey.png'),

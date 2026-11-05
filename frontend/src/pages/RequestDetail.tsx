@@ -316,13 +316,18 @@ export function RequestDetail({
   mode,
 }: {
   roles: StaffRole[]
-  mode: 'overview' | 'collection'
+  /** Which stage of the rail (#45) this mounts for: Intake is the overview. */
+  mode: 'overview' | 'scope' | 'collection' | 'close'
 }) {
   const { number } = useParams<{ number: string }>()
   const canManageRequest = roles.includes('records_officer')
   const canCloseCase = roles.some((role) => CASE_WORK_ROLES.includes(role))
   const showOverview = mode === 'overview'
+  const showScope = mode === 'scope'
   const showCollection = mode === 'collection'
+  // The Close stage carries the same lifecycle actions as Intake, so the
+  // closing decision sits where the closure readiness report is read.
+  const showClose = mode === 'close'
   const qc = useQueryClient()
   const toast = useToast()
   const navigate = useNavigate()
@@ -379,7 +384,7 @@ export function RequestDetail({
     queryFn: () => api<AdvisoryLatest>(
       `/api/staff/requests/${number}/advisory-intent/`,
     ),
-    enabled: !!number && canManageRequest && showCollection,
+    enabled: !!number && canManageRequest && showScope,
     refetchInterval: (query) => {
       const state = query.state.data?.latest?.state
       return state === 'pending' || state === 'running' ? 2000 : false
@@ -391,7 +396,7 @@ export function RequestDetail({
     queryFn: () => api<VaultCountLatest>(
       `/api/staff/requests/${number}/vault-counts/`,
     ),
-    enabled: !!number && canManageRequest && showCollection,
+    enabled: !!number && canManageRequest && showScope,
     refetchInterval: (query) => {
       const state = query.state.data?.latest?.state
       return state === 'pending' || state === 'running' ? 2000 : false
@@ -864,7 +869,7 @@ export function RequestDetail({
       ? reasonHint('document the basis for abandonment')
       : reasonHint('this is recorded on the timeline and in the audit trail')
   const emailIntakeReceiptId = r.email_intake_receipt_id
-  const showActionZone = showOverview
+  const showActionZone = (showOverview || showClose)
     && !terminalRequest
     && (canManageRequest || canCloseCase)
 
@@ -964,7 +969,7 @@ export function RequestDetail({
             sits directly under the request text because that text is what
             justifies the decision, and directly above Deadlines because the
             clock is what makes it urgent. */}
-        {showActionZone && canManageRequest && !terminalRequest && (
+        {showActionZone && showOverview && canManageRequest && !terminalRequest && (
           <div className="lg:col-span-2">
             <IntakeClassificationCard
               number={r.number}
@@ -1027,7 +1032,7 @@ export function RequestDetail({
         {/* A merged duplicate has no next action here at all: its emails and
             its five-day obligation live on the case of record, and reopening
             it would leave an empty case with a retired number. */}
-        {showOverview && terminalRequest && r.merged_into && (
+        {(showOverview || showClose) && terminalRequest && r.merged_into && (
           <div className="lg:col-span-2 rounded-md border border-line bg-surface-sunken px-4 py-3 text-sm text-ink">
             This case was merged into{' '}
             <Link className="font-semibold underline" to={`/requests/${r.merged_into}`}>
@@ -1038,7 +1043,7 @@ export function RequestDetail({
             duplicate and cannot be reopened.
           </div>
         )}
-        {showOverview && canManageRequest && terminalRequest && !r.merged_into && (
+        {(showOverview || showClose) && canManageRequest && terminalRequest && !r.merged_into && (
           <div className="lg:col-span-2 flex flex-wrap items-center justify-end gap-3">
             <p className="mr-auto text-sm text-ink-muted">
               This request is closed. Reopening it is recorded on the timeline
@@ -1069,7 +1074,7 @@ export function RequestDetail({
           </div>
         )}
 
-        {showCollection && canManageRequest && (
+        {showScope && canManageRequest && (
           <Card title="Request-intent advisory" className="lg:col-span-2">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="max-w-3xl">
@@ -1198,7 +1203,7 @@ export function RequestDetail({
           </Card>
         )}
 
-        {showCollection && canManageRequest && (
+        {showScope && canManageRequest && (
           <Card title="Google Vault scope count" className="lg:col-span-2">
             <p className="text-sm text-ink-muted">
               Count possible Gmail messages for human-reviewed terms, district
@@ -1414,7 +1419,7 @@ export function RequestDetail({
                         : 'Review the failed export or ingest evidence under Collection tasks before choosing the next action.'}
                     </p>
                     <Link
-                      to={`/requests/${r.number}/collection`}
+                      to={`/requests/${r.number}/collect`}
                       className="mt-2 inline-block underline"
                     >
                       Open Collection tasks
@@ -1426,11 +1431,11 @@ export function RequestDetail({
                     <p className="font-semibold">Vault export queued.</p>
                     <p className="mt-1 text-ink-muted">
                       Follow it in{' '}
-                      <Link to={`/requests/${r.number}/collection`} className="text-accent underline">
+                      <Link to={`/requests/${r.number}/collect`} className="text-accent underline">
                         Collection tasks
                       </Link>
                       . After ingestion, classify the exported messages in{' '}
-                      <Link to={`/requests/${r.number}/records`} className="text-accent underline">
+                      <Link to={`/requests/${r.number}/review?view=records`} className="text-accent underline">
                         Record items
                       </Link>
                       .
@@ -1744,7 +1749,7 @@ export function RequestDetail({
             />
           )}
           <Link
-            to={`/requests/${r.number}/collection`}
+            to={`/requests/${r.number}/collect`}
             className="mt-4 inline-block text-sm font-semibold text-accent underline-offset-2 hover:underline"
           >
             Open collection work

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { StaffRole } from '../api/auth'
 import { Link } from 'react-router'
 import { api, ApiError, unwrap, type Page } from '../api/client'
+import { caseTabPath, stageLabel } from '../nav'
 import {
   Badge,
   Button,
@@ -596,9 +597,9 @@ export function Installments({
                   {buildBlocker && buildBlocker.tab !== 'releases' && (
                     <Link
                       className="text-sm font-semibold text-accent underline-offset-2 hover:underline"
-                      to={`/requests/${requestNumber}/${buildBlocker.tab}`}
+                      to={caseTabPath(requestNumber, buildBlocker.tab)}
                     >
-                      Go to {buildBlocker.tab.charAt(0).toUpperCase() + buildBlocker.tab.slice(1)} to fix this
+                      Go to {stageLabel(buildBlocker.tab)} to fix this
                     </Link>
                   )}
                 </div>
