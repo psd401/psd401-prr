@@ -1,7 +1,7 @@
 // ABOUTME: Footage preservation holds screen — the retention race dashboard.
 // ABOUTME: Cards per Aware bookmark hold: cameras, exclusions, confirmation, release.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router'
 import { api, unwrap, type Page } from '../api/client'
 import type { StaffRole } from '../api/auth'
@@ -145,10 +145,19 @@ function coverageLabel(fraction: number | null) {
   return fraction === null ? '—' : `${Math.round(fraction * 100)}%`
 }
 
+/** How long the "Copied" note stays before the live region clears. */
+const COPIED_RESET_MS = 3000
+
 /** Text a Records Officer may paste into a letter. Copy only: never sent. */
 function ConfirmationText({ text }: { text: string }) {
   const toast = useToast()
   const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), COPIED_RESET_MS)
+    return () => window.clearTimeout(timer)
+  }, [copied])
 
   async function copy() {
     try {
@@ -164,14 +173,15 @@ function ConfirmationText({ text }: { text: string }) {
     <div className="mb-4 rounded-md border border-line bg-surface-sunken px-3 py-2">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="text-sm text-ink">{text}</p>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={copy}
-          aria-label={copied ? 'Copied' : 'Copy confirmation'}
-        >
-          {copied ? 'Copied' : 'Copy'}
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Always mounted so screen readers hear the change. */}
+          <span role="status" aria-live="polite" className="text-xs text-ink-muted">
+            {copied ? 'Copied' : ''}
+          </span>
+          <Button type="button" variant="ghost" onClick={copy} aria-label="Copy confirmation">
+            Copy
+          </Button>
+        </div>
       </div>
       <p className="mt-1 text-xs text-ink-muted">
         For correspondence you write. This text is never sent automatically.
@@ -190,6 +200,9 @@ function HoldActions({
   onRelease: () => void
   onWiden: () => void
 }) {
+  // Accessible names carry the request number: the all-preservations list
+  // shows many cards, and identical names make the buttons indistinguishable.
+  const releaseLabel = hasReleaseFailures(preservation) ? 'Retry release' : 'Release hold'
   return (
     <>
       {preservation.widenable && (
@@ -202,8 +215,12 @@ function HoldActions({
         </Button>
       )}
       {preservation.releasable && (
-        <Button variant="ghost" onClick={onRelease}>
-          {hasReleaseFailures(preservation) ? 'Retry release' : 'Release hold'}
+        <Button
+          variant="ghost"
+          onClick={onRelease}
+          aria-label={`${releaseLabel} — ${preservation.request_number}`}
+        >
+          {releaseLabel}
         </Button>
       )}
     </>

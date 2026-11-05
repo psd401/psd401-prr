@@ -2,7 +2,7 @@
 // ABOUTME: A manual hold must never claim an email was sent without delivery evidence.
 import type { ReactNode } from 'react'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -207,7 +207,62 @@ describe('Preservations — Aware bookmark holds', () => {
     expect(screen.getByText(/never sent automatically/i)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Copy confirmation' }))
     expect(writeText).toHaveBeenCalledWith(CONFIRMATION)
-    expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument()
+  })
+
+  it('announces "Copied" politely and clears it a few seconds later', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([heldPreservation()]))))
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: vi.fn(async () => undefined) },
+      })
+      renderPage(<Preservations roles={['records_officer']} />)
+
+      await user.click(await screen.findByRole('button', { name: 'Copy confirmation' }))
+      const box = screen.getByText(CONFIRMATION).parentElement!
+      const status = within(box).getByRole('status')
+      expect(status).toHaveAttribute('aria-live', 'polite')
+      await waitFor(() => expect(status).toHaveTextContent('Copied'))
+
+      await act(async () => { vi.advanceTimersByTime(5000) })
+      expect(status).toHaveTextContent('')
+      // The button keeps one stable name; the live region carries the news.
+      expect(screen.getByRole('button', { name: 'Copy confirmation' })).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows a toast when the clipboard refuses the copy', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([heldPreservation()]))))
+    const user = userEvent.setup()
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn(async () => { throw new Error('denied') }) },
+    })
+    renderPage(<Preservations roles={['records_officer']} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Copy confirmation' }))
+    expect(await screen.findByText('Copy failed — select the text and copy it by hand.'))
+      .toBeInTheDocument()
+    expect(screen.queryByText('Copied')).not.toBeInTheDocument()
+  })
+
+  it('gives each hold action a name that includes its request number', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([
+      heldPreservation({ id: 7, request_number: 'PRR-2026-0007', widenable: true }),
+      heldPreservation({ id: 8, request_number: 'PRR-2026-0008', widenable: true }),
+    ]))))
+    renderPage(<Preservations roles={['records_officer']} />)
+
+    for (const number of ['PRR-2026-0007', 'PRR-2026-0008']) {
+      expect(await screen.findByRole('button', { name: `Release hold — ${number}` }))
+        .toBeInTheDocument()
+      expect(screen.getByRole('button', { name: `Widen to district-wide — ${number}` }))
+        .toBeInTheDocument()
+    }
   })
 
   it('shows no confirmation when nothing is confirmed held', async () => {
@@ -282,7 +337,7 @@ describe('Preservations — release', () => {
     const user = userEvent.setup()
     renderPage(<Preservations roles={['records_officer']} />)
 
-    await user.click(await screen.findByRole('button', { name: 'Release hold' }))
+    await user.click(await screen.findByRole('button', { name: /Release hold/ }))
     const dialog = await screen.findByRole('dialog')
     const submit = within(dialog).getByRole('button', { name: 'Release and delete bookmarks' })
     expect(submit).toBeDisabled()
