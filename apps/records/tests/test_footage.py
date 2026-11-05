@@ -13,7 +13,7 @@ from apps.api.identity import apply_staff_roles
 from apps.api.models import StaffRole
 from apps.audit.models import AuditLog
 from apps.integrations.avigilon import client as alta
-from apps.records import tasks, triage
+from apps.records import footage_sites, tasks, triage
 from apps.records.models import (
     CameraHold,
     FootagePreservation,
@@ -43,10 +43,22 @@ FAKE_CAMERAS = [
     camera("cam-2", "Staff Parking", "PHS"),
     camera("cam-3", "Main Office", "KMS"),
 ]
+# An invented school: its Aware group exists in FAKE_GROUPS with no cameras.
+EMPTY_SITE = footage_sites.Site(
+    "ZZE", "Zephyr Hollow Elementary School", ("Zephyr Hollow",),
+)
 FAKE_GROUPS = [
     alta.DeviceGroup(id=f"group-{code}", name=code)
-    for code in ("PHS", "KMS", "HHE")
+    for code in ("PHS", "KMS", EMPTY_SITE.code)
 ]
+
+
+@contextlib.contextmanager
+def with_empty_site():
+    """Make EMPTY_SITE resolvable from request text for the duration."""
+    with mock.patch.object(footage_sites, "SITES", (*footage_sites.SITES, EMPTY_SITE)), \
+         mock.patch.dict(footage_sites._BY_CODE, {EMPTY_SITE.code: EMPTY_SITE}):
+        yield
 
 
 def head(source, fraction, start, end, error=""):
@@ -313,27 +325,26 @@ class HoldPathTests(TestCase):
         self.assertGreaterEqual(window_days, 9)               # ~full retention held
         self.assertIn("No dates parseable", fp.detected_dates_note)
 
-    def test_harbor_heights_with_no_cameras_is_never_held(self):
-        # Harbor Heights, 2026-09-23: the HHE group exists with no devices.
+    def test_a_named_site_with_no_cameras_is_never_held(self):
         prr = make_request(
-            f"All video from Harbor Heights Elementary on {days_ago(1)}; "
+            f"All video from Zephyr Hollow Elementary on {days_ago(1)}; "
             "please preserve it and confirm the hold in writing."
         )
-        with aware() as m, \
+        with with_empty_site(), aware() as m, \
              mock.patch("apps.records.tasks.notifications.notify_adequate_search_review") as review, \
              mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold") as manual, \
              mock.patch("apps.records.tasks.notifications.notify_footage_hold_complete") as complete:
             fp = preserve(prr)
 
         self.assertEqual(fp.state, FootagePreservation.State.NO_CAMERAS)
-        self.assertEqual(fp.site_codes, ["HHE"])
+        self.assertEqual(fp.site_codes, ["ZZE"])
         self.assertEqual(fp.held_count, 0)
         m.hold.assert_not_called()
         self.assertFalse(fp.camera_holds.exists())
         review.assert_called_once()
-        self.assertEqual(review.call_args.kwargs["no_camera_sites"], ["HHE"])
+        self.assertEqual(review.call_args.kwargs["no_camera_sites"], ["ZZE"])
         manual.assert_called_once()
-        self.assertEqual(manual.call_args.kwargs["site_codes"], ["HHE"])
+        self.assertEqual(manual.call_args.kwargs["site_codes"], ["ZZE"])
         complete.assert_not_called()
         notes = " ".join(prr.events.values_list("note", flat=True)).lower()
         self.assertNotIn("held", notes)
@@ -358,15 +369,15 @@ class HoldPathTests(TestCase):
 
     def test_one_named_site_with_no_cameras_keeps_preservation_partial(self):
         prr = make_request(
-            f"video at Peninsula High School and Harbor Heights on {days_ago(1)}"
+            f"video at Peninsula High School and Zephyr Hollow on {days_ago(1)}"
         )
-        with aware() as m, \
+        with with_empty_site(), aware() as m, \
              mock.patch("apps.records.tasks.notifications.notify_adequate_search_review") as review:
             fp = preserve(prr)
 
         self.assertEqual(fp.state, FootagePreservation.State.PARTIAL)
         self.assertEqual(m.hold.call_count, 2)
-        self.assertEqual(review.call_args.kwargs["no_camera_sites"], ["HHE"])
+        self.assertEqual(review.call_args.kwargs["no_camera_sites"], ["ZZE"])
 
     def test_window_older_than_flat_retention_still_checks_each_camera(self):
         # Some cameras keep far more than the setting; a flat floor is wrong.
@@ -1424,17 +1435,19 @@ class ConfirmationTextTests(TestCase):
                 pruned_to=dt.datetime(2026, 10, 1, tzinfo=dt.UTC),
             ),
         ]
-        fp = self._preserve(
-            "video at Peninsula High School and Harbor Heights on 2026-09-22",
-            cameras=cameras,
-        )
+        with with_empty_site():
+            fp = self._preserve(
+                "video at Peninsula High School and Zephyr Hollow on 2026-09-22",
+                cameras=cameras,
+            )
+            text = triage.preservation_confirmation_text(fp)
         self.assertEqual(fp.state, FootagePreservation.State.PARTIAL)
         self.assertEqual(
-            triage.preservation_confirmation_text(fp),
+            text,
             f"1 camera at Peninsula High School held {self.WINDOW} "
             "(Aware bookmarks, no expiry); 0 cameras have footage gaps; "
             "1 with no retained footage for the window; 0 failed; "
-            "none held at Harbor Heights Elementary School.",
+            "none held at Zephyr Hollow Elementary School.",
         )
 
     def test_excluded_cameras_are_not_counted_as_held(self):
