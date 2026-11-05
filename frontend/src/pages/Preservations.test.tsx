@@ -58,6 +58,30 @@ describe('Preservations — state filters', () => {
   })
 })
 
+describe('Preservations — exclusion', () => {
+  it('offers no Exclude once the hold is released or expired', async () => {
+    const base = heldPreservation()
+    for (const [state, cameraState] of [
+      ['released', 'failed'],
+      ['released', 'release_failed'],
+      ['expired', 'not_retained'],
+    ] as const) {
+      vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([
+        heldPreservation({
+          state,
+          releasable: false,
+          confirmation_text: null,
+          camera_holds: [{ ...base.camera_holds[1], state: cameraState }],
+        }),
+      ]))))
+      const view = renderPage(<Preservations roles={['records_officer']} />)
+      await screen.findByText('Staff Parking')
+      expect(screen.queryByRole('button', { name: 'Exclude' })).not.toBeInTheDocument()
+      view.unmount()
+    }
+  })
+})
+
 describe('Preservations — states that need a human', () => {
   it('says a human must act, in a warning tone, for every unresolved state', async () => {
     const base = heldPreservation()

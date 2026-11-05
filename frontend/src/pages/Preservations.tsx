@@ -74,6 +74,18 @@ const PRESERVATION_STATES = [
 /** The release and widen endpoints reject reasons longer than this. */
 const MAX_REASON_LENGTH = 500
 
+// Exclusion narrows a live hold. A released hold has nothing left to narrow,
+// and an expired one never bookmarked anything; the server does not check
+// this, so the UI must not offer it.
+const FINISHED_PRESERVATION_STATES = new Set(['released', 'expired'])
+const FINISHED_CAMERA_STATES = new Set(['released', 'release_failed'])
+
+function excludable(preservation: Preservation, hold: CameraHold) {
+  return !hold.excluded_at
+    && !FINISHED_CAMERA_STATES.has(hold.state)
+    && !FINISHED_PRESERVATION_STATES.has(preservation.state)
+}
+
 /** A release already ran but some Aware bookmarks may still exist. */
 function hasReleaseFailures(preservation: Preservation) {
   return preservation.camera_holds.some((h) => h.state === 'release_failed')
@@ -544,7 +556,7 @@ export function Preservations({
                       header: '',
                       align: 'right',
                       cell: (h: CameraHold) =>
-                        h.excluded_at || h.state === 'released' || !canExclude ? null : (
+                        !canExclude || !excludable(p, h) ? null : (
                           <Button variant="ghost" onClick={() => openExclude(p.id, p.request_number, h)}>
                             Exclude
                           </Button>
