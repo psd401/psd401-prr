@@ -20,7 +20,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from apps.api.identity import StaffRole, apply_staff_roles
-from apps.configuration import runtime, services, values
+from apps.configuration import runtime, services, values, verification
 from apps.configuration.models import AppSecret, AppSetting, SettingVerification
 from apps.configuration.registry import SECRET_KEYS, SETTINGS_BY_KEY
 
@@ -33,7 +33,8 @@ MOVED_DEFAULTS = {
     "CLAMAV_PORT": 3310,
     "CLAMAV_TIMEOUT_SECONDS": 30,
     "ALTA_API_BASE": "",
-    "ALTA_API_TOKEN": "",
+    "ALTA_API_USERNAME": "",
+    "ALTA_API_PASSWORD": "",
     "PORTAL_BASE_URL": "https://prr.psd401.net",
     "PRA_SUPERVISOR_EMAIL": "publicrecords@psd401.net",
     "PRA_OFFICER_EMAIL": "publicrecords@psd401.net",
@@ -71,8 +72,13 @@ class RegistrationTests(TestCase):
             with self.subTest(key=key):
                 self.assertEqual(SETTINGS_BY_KEY[key].default, default)
 
-    def test_the_alta_token_is_write_only(self):
-        self.assertIn("ALTA_API_TOKEN", SECRET_KEYS)
+    def test_the_alta_password_is_write_only_and_the_account_is_not(self):
+        self.assertIn("ALTA_API_PASSWORD", SECRET_KEYS)
+        self.assertNotIn("ALTA_API_USERNAME", SECRET_KEYS)
+
+    def test_the_retired_alta_token_is_no_longer_a_setting(self):
+        """Aware has no API tokens; holds sign in with an account."""
+        self.assertNotIn("ALTA_API_TOKEN", SETTINGS_BY_KEY)
 
     def test_the_from_address_is_not_an_environment_setting(self):
         """Production refuses every generic Django send, so the from address
@@ -140,9 +146,27 @@ class ShapeTests(_StoreTestCase):
 
     def test_the_alta_address_must_be_https(self):
         with self.assertRaises(ValidationError):
-            self._set("ALTA_API_BASE", "http://psd401.alta.avigilon.com")
+            self._set("ALTA_API_BASE", "http://example.us4.aware.avasecurity.com")
 
-        self._set("ALTA_API_BASE", "https://psd401.alta.avigilon.com/api/v1")
+        self._set("ALTA_API_BASE", "https://example.us4.aware.avasecurity.com")
+
+    def test_the_alta_address_is_the_origin_only(self):
+        """The client adds /api/v1; a stored path would double it."""
+        for refused in (
+            "https://example.us4.aware.avasecurity.com/api/v1",
+            "https://example.us4.aware.avasecurity.com/",
+            "https://user:pw@example.us4.aware.avasecurity.com",
+            "https://example.us4.aware.avasecurity.com?x=1",
+        ):
+            with self.subTest(value=refused), self.assertRaises(ValidationError):
+                self._set("ALTA_API_BASE", refused)
+
+    def test_the_alta_account_has_no_spaces(self):
+        with self.assertRaises(ValidationError):
+            self._set("ALTA_API_USERNAME", "prr holds@example.org")
+
+        self._set("ALTA_API_USERNAME", "prr-holds@example.org")
+        self.assertEqual(runtime.get("ALTA_API_USERNAME"), "prr-holds@example.org")
 
     def test_the_scanner_port_is_a_real_port(self):
         with self.assertRaises(ValidationError):
@@ -206,17 +230,20 @@ class TakesEffectWithoutARestartTests(_StoreTestCase):
         self.assertTrue(probe_clamav(_connection_factory=factory))
         self.assertEqual(reached, [("clamav.internal", 3311)])
 
-    def test_the_stored_alta_token_is_the_bearer_sent(self):
+    def test_the_stored_alta_account_is_the_one_that_signs_in(self):
         from apps.integrations.avigilon import client
 
-        self._set("ALTA_API_BASE", "https://psd401.alta.avigilon.com")
+        self._set("ALTA_API_BASE", "https://example.us4.aware.avasecurity.com")
+        self._set("ALTA_API_USERNAME", "prr-holds@example.org")
         services.set_secret(
-            "ALTA_API_TOKEN", "alta-bearer", actor=self.admin, reason=REASON
+            "ALTA_API_PASSWORD", "alta-password", actor=self.admin, reason=REASON
         )
 
-        session = client._session()
+        config = client._config()
 
-        self.assertEqual(session.headers["Authorization"], "Bearer alta-bearer")
+        self.assertEqual(config.base, "https://example.us4.aware.avasecurity.com")
+        self.assertEqual(config.username, "prr-holds@example.org")
+        self.assertEqual(config.password, "alta-password")
 
     def test_a_stored_stall_threshold_is_the_one_the_watchdog_uses(self):
         self._set("STALL_THRESHOLD_DAYS", 45)
@@ -241,9 +268,11 @@ class BootstrapTests(TestCase):
                 runtime.get("FACILITIES_EMAIL"), "records@psd401.net"
             )
 
-    def test_the_deployed_alta_token_is_carried_until_one_is_stored(self):
-        with patch.dict("os.environ", {"ALTA_API_TOKEN": "deployed-token"}):
-            self.assertEqual(runtime.get_secret("ALTA_API_TOKEN"), "deployed-token")
+    def test_the_deployed_alta_password_is_carried_until_one_is_stored(self):
+        with patch.dict("os.environ", {"ALTA_API_PASSWORD": "deployed-password"}):
+            self.assertEqual(
+                runtime.get_secret("ALTA_API_PASSWORD"), "deployed-password"
+            )
         self.assertFalse(AppSecret.objects.exists())
 
     def test_the_deployed_holiday_list_is_parsed(self):
@@ -271,3 +300,71 @@ class ScannerVerificationTests(_StoreTestCase):
                 self._set("CLAMAV_HOST", "clamav")
 
         self.assertTrue(SettingVerification.objects.get(key="CLAMAV_HOST").ok)
+
+
+class AltaVerificationTests(_StoreTestCase):
+    """Saving the Alta address, account, or password signs in and reads the
+    device groups once; the verdict is recorded under the address."""
+
+    def setUp(self):
+        super().setUp()
+        from apps.integrations.avigilon.tests import fakes
+
+        self.fakes = fakes
+        self.tenant = fakes.FakeAware()
+        self.tenant.on("GET", "/deviceGroups", fakes.groups())
+        session = patch(
+            "apps.integrations.avigilon.client.requests.Session",
+            side_effect=self.tenant.new_session,
+        )
+        session.start()
+        self.addCleanup(session.stop)
+
+    def _configure(self, password):
+        with self.captureOnCommitCallbacks(execute=True):
+            self._set("ALTA_API_BASE", self.fakes.BASE)
+            self._set("ALTA_API_USERNAME", self.fakes.USERNAME)
+        with self.captureOnCommitCallbacks(execute=True):
+            services.set_secret(
+                "ALTA_API_PASSWORD", password, actor=self.admin, reason=REASON
+            )
+        return SettingVerification.objects.get(key="ALTA_API_BASE")
+
+    def test_an_address_without_an_account_is_unverified_without_a_request(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            self._set("ALTA_API_BASE", self.fakes.BASE)
+
+        record = SettingVerification.objects.get(key="ALTA_API_BASE")
+        self.assertFalse(record.ok)
+        self.assertIn("account", record.detail)
+        self.assertEqual(self.tenant.calls, [])
+
+    def test_a_password_that_signs_in_is_marked_verified(self):
+        record = self._configure(self.fakes.PASSWORD)
+
+        self.assertTrue(record.ok)
+        self.assertEqual(record.detail, "")
+        self.assertEqual(self.tenant.logins, 1)
+        self.assertEqual(
+            {c["method"] for c in self.tenant.api_calls()}, {"GET"}
+        )
+
+    def test_a_wrong_password_is_saved_and_marked_unverified(self):
+        record = self._configure("not-the-password")
+
+        self.assertTrue(AppSecret.objects.filter(key="ALTA_API_PASSWORD").exists())
+        self.assertFalse(record.ok)
+        self.assertIn("ALTA_API_PASSWORD", record.detail)
+        self.assertNotIn("not-the-password", record.detail)
+
+    def test_every_alta_key_shares_one_verdict(self):
+        state = verification.state_for(
+            ["ALTA_API_BASE", "ALTA_API_USERNAME", "ALTA_API_PASSWORD"]
+        )
+        self.assertEqual(set(state), {"ALTA_API_BASE", "ALTA_API_USERNAME", "ALTA_API_PASSWORD"})
+
+        self._configure(self.fakes.PASSWORD)
+
+        state = verification.state_for(["ALTA_API_USERNAME", "ALTA_API_PASSWORD"])
+        self.assertTrue(state["ALTA_API_USERNAME"]["ok"])
+        self.assertTrue(state["ALTA_API_PASSWORD"]["ok"])

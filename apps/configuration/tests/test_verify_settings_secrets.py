@@ -32,7 +32,7 @@ class VerifySettingsSecretsTests(TestCase):
 
     def test_reports_counts_when_every_stored_secret_opens(self):
         _store("PRR_GOOGLE_OIDC_CLIENT_SECRET", "GOCSPX-sensitive-value")
-        _store("ALTA_API_TOKEN", "alta-sensitive-value")
+        _store("ALTA_API_PASSWORD", "alta-sensitive-value")
         _store("CLEARED_SECRET", "")
 
         output = self._run()
@@ -55,3 +55,19 @@ class VerifySettingsSecretsTests(TestCase):
         self.assertIn("PRR_GOOGLE_OIDC_CLIENT_SECRET", message)
         self.assertIn("0 of 1", message)
         self.assertNotIn("sensitive-value", message)
+
+    def test_a_retired_secret_is_reported_by_name_and_not_judged(self):
+        """A key the registry no longer has (the old Alta token) cannot be
+        cleared from the Settings page, so a row left under an old encryption
+        key must not fail every later deploy."""
+        _store("PRR_GOOGLE_OIDC_CLIENT_SECRET", "GOCSPX-sensitive-value")
+        other_key = secrets.Fernet.generate_key().decode("ascii")
+        with override_settings(PRR_SETTINGS_ENCRYPTION_KEY=other_key):
+            _store("ALTA_API_TOKEN", "retired-sensitive-value")
+
+        output = self._run()
+
+        self.assertIn("1 of 1 stored secrets decrypt", output)
+        self.assertIn("ALTA_API_TOKEN", output)
+        self.assertIn("retired", output)
+        self.assertNotIn("sensitive-value", output)

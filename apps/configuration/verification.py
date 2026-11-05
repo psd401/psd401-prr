@@ -94,20 +94,40 @@ def _malware_scanner(_value) -> tuple[bool, str]:
     return VERIFIED, ""
 
 
+def _alta_api(_value) -> tuple[bool, str]:
+    from apps.configuration import runtime
+
+    if not runtime.get("ALTA_API_BASE"):
+        return UNVERIFIED, "No Alta address is configured."
+    if not runtime.get("ALTA_API_USERNAME"):
+        return UNVERIFIED, "No Alta service account is configured."
+    if not runtime.secret_is_set("ALTA_API_PASSWORD"):
+        return UNVERIFIED, "No Alta service-account password is set."
+    from apps.integrations.avigilon import client as alta
+
+    try:
+        # Sign in and read the device groups: one small GET, nothing written.
+        alta.list_device_groups()
+    except Exception as exc:  # noqa: BLE001
+        return UNVERIFIED, _sanitize(exc)
+    return VERIFIED, ""
+
+
 def _sanitize(exc: Exception) -> str:
     """One readable sentence, with nothing a provider put in the exception.
 
     The integrations raise their own sanitized errors — ``GmailUnavailable``,
-    ``VaultUnavailable``, ``GoogleDirectoryUnavailable`` — and those messages
-    are written for staff. Anything else is reported by type alone rather
-    than by a message that may carry a request body or a token.
+    ``VaultUnavailable``, ``GoogleDirectoryUnavailable``, ``AltaError`` — and
+    those messages are written for staff. Anything else is reported by type
+    alone rather than by a message that may carry a request body or a token.
     """
     from apps.api.identity import GoogleDirectoryUnavailable
+    from apps.integrations.avigilon.client import AltaError
     from apps.integrations.gmail.client import GmailUnavailable
     from apps.integrations.vault.client import VaultUnavailable
 
     if isinstance(
-        exc, (GmailUnavailable, VaultUnavailable, GoogleDirectoryUnavailable)
+        exc, (GmailUnavailable, VaultUnavailable, GoogleDirectoryUnavailable, AltaError)
     ):
         return str(exc)[:500]
     return (
@@ -126,6 +146,9 @@ CHECKS = {
     "PRR_GOOGLE_GROUP_CREDENTIALS_FILE": _google_group_reader,
     "CLAMAV_HOST": _malware_scanner,
     "CLAMAV_PORT": _malware_scanner,
+    "ALTA_API_BASE": _alta_api,
+    "ALTA_API_USERNAME": _alta_api,
+    "ALTA_API_PASSWORD": _alta_api,
 }
 
 #: The key whose verification record a check writes. Two settings can only
@@ -139,6 +162,9 @@ RECORDS_UNDER = {
     "PRR_GOOGLE_GROUP_CREDENTIALS_FILE": "PRR_GOOGLE_GROUP_CREDENTIALS_FILE",
     "CLAMAV_HOST": "CLAMAV_HOST",
     "CLAMAV_PORT": "CLAMAV_HOST",
+    "ALTA_API_BASE": "ALTA_API_BASE",
+    "ALTA_API_USERNAME": "ALTA_API_BASE",
+    "ALTA_API_PASSWORD": "ALTA_API_BASE",
 }
 
 

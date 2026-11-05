@@ -415,6 +415,9 @@ def set_secret(
         new_value=new_state,
         reason=clean_reason,
     )
+    # After commit, as in set_value; the check reads the stored secret
+    # itself, so no plaintext is handed to it.
+    transaction.on_commit(lambda: verification.verify(key))
     return row
 
 
