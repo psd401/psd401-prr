@@ -12,6 +12,7 @@ import {
   EmptyState,
   ErrorNote,
   Field,
+  MIN_REASON_LENGTH,
   Modal,
   Spinner,
   Table,
@@ -69,6 +70,9 @@ const PRESERVATION_STATES = [
   'expired',
   'released',
 ] as const
+
+/** The release and widen endpoints reject reasons longer than this. */
+const MAX_REASON_LENGTH = 500
 
 /** A release already ran but some Aware bookmarks may still exist. */
 function hasReleaseFailures(preservation: Preservation) {
@@ -462,6 +466,7 @@ export function Preservations({
             : ''
         }
         onClose={closeRelease}
+        dismissible={!release.isPending}
       >
         {releasing && (
           <form onSubmit={submitRelease} className="space-y-4">
@@ -477,6 +482,8 @@ export function Preservations({
                 rows={3}
                 value={releaseReason}
                 onChange={(e) => setReleaseReason(e.target.value)}
+                minLength={MIN_REASON_LENGTH}
+                maxLength={MAX_REASON_LENGTH}
                 required
               />
             </Field>
@@ -497,7 +504,7 @@ export function Preservations({
             </label>
             {release.isError && <ErrorNote error={release.error} />}
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={closeRelease}>
+              <Button type="button" variant="ghost" onClick={closeRelease} disabled={release.isPending}>
                 Cancel
               </Button>
               <Button

@@ -242,6 +242,62 @@ describe('Preservations — release', () => {
   })
 })
 
+describe('Preservations — release dialog', () => {
+  async function openReleaseDialog() {
+    const user = userEvent.setup()
+    renderPage(<Preservations roles={['records_officer']} />)
+    await user.click(await screen.findByRole('button', { name: /Release hold/ }))
+    const dialog = await screen.findByRole('dialog')
+    return { user, dialog }
+  }
+
+  it('shows a server refusal inside the dialog', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/release/') && init?.method === 'POST') {
+        return fakeResponse({ detail: 'This request was merged into another; release that one.' }, 400)
+      }
+      return fakeResponse(page([heldPreservation()]))
+    }))
+    const { user, dialog } = await openReleaseDialog()
+    await user.type(within(dialog).getByLabelText(/Reason/), 'Request fulfilled and closed.')
+    await user.click(within(dialog).getByRole('checkbox', { name: /litigation hold/i }))
+    await user.click(within(dialog).getByRole('button', { name: 'Release and delete bookmarks' }))
+
+    expect(await within(dialog).findByRole('alert'))
+      .toHaveTextContent('This request was merged into another; release that one.')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('caps the reason at the server limit of 500 characters', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([heldPreservation()]))))
+    const { dialog } = await openReleaseDialog()
+    expect(within(dialog).getByLabelText(/Reason/)).toHaveAttribute('maxLength', '500')
+  })
+
+  it('cannot be cancelled while the release is in flight', async () => {
+    let finish: (value: Response) => void = () => {}
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/release/') && init?.method === 'POST') {
+        return new Promise<Response>((resolve) => { finish = resolve })
+      }
+      return Promise.resolve(fakeResponse(page([heldPreservation()])))
+    }))
+    const { user, dialog } = await openReleaseDialog()
+    await user.type(within(dialog).getByLabelText(/Reason/), 'Request fulfilled and closed.')
+    await user.click(within(dialog).getByRole('checkbox', { name: /litigation hold/i }))
+    await user.click(within(dialog).getByRole('button', { name: 'Release and delete bookmarks' }))
+
+    expect(await within(dialog).findByRole('button', { name: 'Releasing…' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    finish(fakeResponse({ detail: 'Release refused.' }, 400))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Release refused.')
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeEnabled()
+  })
+})
+
 describe('Preservations — cache refresh after a change', () => {
   it('refreshes the request detail after a release so it stops saying "Held"', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
