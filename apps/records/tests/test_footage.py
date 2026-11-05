@@ -170,6 +170,66 @@ class HoldPathTests(TestCase):
             ).exists()
         )
 
+    @mock.patch(
+        "apps.records.tasks.notifications.notify_footage_manual_hold",
+        return_value=True,
+    )
+    def test_transport_error_degrades_to_urgent_manual_hold(self, notify_manual_hold):
+        # A timeout or HTTP error from Aware must never leave the hold PENDING
+        # with nobody told: the retention clock keeps running (rule 7).
+        import requests
+
+        day = (timezone.localdate() - dt.timedelta(days=2)).isoformat()
+        prr = make_request(f"video from the main office camera on {day}")
+        with mock.patch(
+            "apps.integrations.avigilon.client.list_cameras",
+            side_effect=requests.ConnectionError("connector unreachable"),
+        ):
+            fp = triage.triage_footage(prr)
+
+        fp.refresh_from_db()
+        self.assertEqual(fp.state, FootagePreservation.State.MANUAL)
+        notify_manual_hold.assert_called_once()
+
+    @mock.patch(
+        "apps.records.tasks.notifications.notify_footage_manual_hold",
+        return_value=True,
+    )
+    @mock.patch("apps.integrations.avigilon.client.list_cameras", return_value=[])
+    def test_zero_cameras_is_never_reported_held(self, _m_list, notify_manual_hold):
+        # Harbor Heights, 2026-09-23: nothing to hold must not read as "Held".
+        day = (timezone.localdate() - dt.timedelta(days=2)).isoformat()
+        prr = make_request(f"all camera footage at the school on {day}")
+
+        fp = triage.triage_footage(prr)
+
+        fp.refresh_from_db()
+        self.assertNotEqual(fp.state, FootagePreservation.State.HELD)
+        self.assertEqual(fp.held_count, 0)
+        notify_manual_hold.assert_called_once()
+
+    @mock.patch(
+        "apps.records.tasks.notifications.notify_footage_manual_hold",
+        return_value=True,
+    )
+    @mock.patch(
+        "apps.integrations.avigilon.client.create_clip_hold",
+        side_effect=RuntimeError("bookmark rejected"),
+    )
+    @mock.patch("apps.integrations.avigilon.client.list_cameras", return_value=FAKE_CAMERAS)
+    def test_every_camera_failing_degrades_to_urgent_manual_hold(
+        self, _m_list, _m_clip, notify_manual_hold,
+    ):
+        day = (timezone.localdate() - dt.timedelta(days=2)).isoformat()
+        prr = make_request(f"camera footage of the gym on {day}")
+
+        fp = triage.triage_footage(prr)
+
+        fp.refresh_from_db()
+        self.assertEqual(fp.state, FootagePreservation.State.MANUAL)
+        self.assertEqual(fp.held_count, 0)
+        notify_manual_hold.assert_called_once()
+
 
 @override_settings(
     CELERY_TASK_ALWAYS_EAGER=True,
