@@ -39,15 +39,54 @@ describe('Preservations — state filters', () => {
     vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([]))))
     renderPage(<Preservations roles={['admin']} />)
 
-    await screen.findByRole('button', { name: 'All' })
-    for (const state of [
-      'Pending', 'Held', 'Partial', 'Manual', 'No cameras', 'Expired', 'Released',
+    const filters = await screen.findByRole('group', { name: 'Preservation state filters' })
+    within(filters).getByRole('button', { name: 'All' })
+    // Filter names come from the same labels as the state badges.
+    for (const label of [
+      'Pending',
+      'Held',
+      'Partly held',
+      'Manual hold required',
+      'No cameras in Aware at the requested site',
+      'Window outside retention',
+      'Released',
     ]) {
-      expect(
-        screen.getByRole('button', { name: new RegExp(`^${state}$`, 'i') }),
-      ).toBeInTheDocument()
+      expect(within(filters).getByRole('button', { name: label })).toBeInTheDocument()
     }
-    expect(screen.queryByRole('button', { name: /^active$/i })).not.toBeInTheDocument()
+    expect(within(filters).queryByRole('button', { name: /^active$/i })).not.toBeInTheDocument()
+    expect(within(filters).queryByRole('button', { name: /_/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('Preservations — states that need a human', () => {
+  it('says a human must act, in a warning tone, for every unresolved state', async () => {
+    const base = heldPreservation()
+    const camera = (id: number, state: string) => ({
+      ...base.camera_holds[0], id, camera_name: `Camera ${id}`, state,
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([
+      heldPreservation({ id: 1, state: 'no_cameras', camera_holds: [] }),
+      heldPreservation({ id: 2, state: 'expired', camera_holds: [] }),
+      heldPreservation({
+        id: 3,
+        state: 'partial',
+        camera_holds: [camera(31, 'gap'), camera(32, 'not_retained'), camera(33, 'release_failed')],
+      }),
+    ]))))
+    renderPage(<Preservations roles={['admin']} />)
+
+    for (const label of [
+      'No cameras in Aware at the requested site — adequate-search review required',
+      'Window outside retention — adequate-search review required',
+      'Partly held — gaps or failures need review',
+      'Footage gap — adequate-search review required',
+      'No retained footage — adequate-search review required',
+      'Release failed — bookmark may still exist; retry the release',
+    ]) {
+      const badge = await screen.findByText(label)
+      expect(badge).toHaveClass('nx-badge')
+      expect(badge).not.toHaveClass('nx-badge--plain')
+    }
   })
 })
 
@@ -125,7 +164,7 @@ describe('Preservations — Aware bookmark holds', () => {
       .toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'Aware bookmark' })).toBeInTheDocument()
     expect(screen.getByText('bm-2')).toBeInTheDocument()
-    expect(screen.getByText('Footage gap')).toBeInTheDocument()
+    expect(screen.getByText('Footage gap — adequate-search review required')).toBeInTheDocument()
     expect(screen.getByText('40%')).toBeInTheDocument()
     expect(screen.getByText('Short coverage: head 0: 40%')).toBeInTheDocument()
   })

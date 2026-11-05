@@ -91,21 +91,32 @@ const STATE_TONES: Record<string, 'green' | 'amber' | 'red' | 'neutral'> = {
   error: 'red',
   failed: 'red',
   gap: 'amber',
-  not_retained: 'neutral',
+  not_retained: 'amber',
+  release_failed: 'red',
 }
+
+// Every state that leaves footage unaccounted for says a human must act:
+// nothing here is resolved by waiting.
+const ADEQUATE_SEARCH = 'adequate-search review required'
 
 const STATE_LABELS: Record<string, string> = {
   pending: 'Pending — hold executing',
   held: 'Held',
   partial: 'Partly held — gaps or failures need review',
   manual: 'Manual hold required',
-  no_cameras: 'No cameras in Aware at the requested site',
-  expired: 'Window outside retention',
+  no_cameras: `No cameras in Aware at the requested site — ${ADEQUATE_SEARCH}`,
+  expired: `Window outside retention — ${ADEQUATE_SEARCH}`,
   released: 'Released',
   // Camera-level states
-  gap: 'Footage gap',
-  not_retained: 'No retained footage',
+  gap: `Footage gap — ${ADEQUATE_SEARCH}`,
+  not_retained: `No retained footage — ${ADEQUATE_SEARCH}`,
   failed: 'Failed',
+  release_failed: 'Release failed — bookmark may still exist; retry the release',
+}
+
+/** Filter buttons use the badge label up to its "— detail" suffix. */
+function filterLabel(state: string) {
+  return (STATE_LABELS[state] ?? state).split(' — ')[0]
 }
 
 function StateBadge({ state }: { state: string }) {
@@ -424,11 +435,10 @@ export function Preservations({
           <Button
             key={s}
             variant={activeStateFilter === s ? 'primary' : 'ghost'}
-            className="capitalize"
             onClick={() => changeStateFilter(s)}
             aria-pressed={activeStateFilter === s}
           >
-            {s.replace('_', ' ')}
+            {filterLabel(s)}
           </Button>
         ))}
       </div>
