@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -167,3 +167,13 @@ class BuildReleasePackageApiTests(_Fixture):
         body = response.json()
         self.assertEqual(body["blocker"], {"code": "no_ready_records", "tab": "review"})
         self.assertTrue(body["detail"])
+
+    def test_a_downstream_refusal_comes_back_as_its_own_message(self):
+        with patch(
+            "apps.records.release_package.build_release_package",
+            side_effect=ValidationError("An exemption log is required before this installment can be prepared."),
+        ):
+            response = self.api.post(f"/api/staff/requests/{self.prr.number}/release-package/", {}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("blocker", response.json())
+        self.assertIn("exemption log is required", str(response.json()))
