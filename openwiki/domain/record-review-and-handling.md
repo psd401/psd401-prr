@@ -117,6 +117,35 @@ Invariants that tests enforce:
 - Review and redaction evidence is read-only in the admin
   (`test_review_and_production_evidence_is_read_only_in_admin` in `test_feature_audit_regressions.py`).
 
+### Undoing your own decision
+
+`undo_review(record_item_id, actor=...)` in `apps/records/review.py` reverts the actor's
+own latest decision on one record. The staff endpoint is
+`POST /api/staff/record-items/{id}/undo-review/` (`RecordItemViewSet.undo_review` in
+[`apps/api/resources/records_misc.py`](../../apps/api/resources/records_misc.py)), and its
+capability is `record_items.undo_review`. The record returns to the state the decision's
+`record.reviewed` audit row recorded as `before`:
+
+- The state is `unreviewed`, or the actor's own earlier responsive, non-responsive, or
+  duplicate decision, which is re-recorded in the actor's name.
+- Only the reviewer who made the latest decision may undo it. An earlier decision by
+  another reviewer is never re-attributed; the record must be reviewed again.
+- A decision that involves `withheld`, on either side, is never undone. A record with
+  active redactions must have them voided first. A superseded prior state is not restored.
+- The undo writes a `record.review_undone` audit row. It schedules work reconciliation and
+  stores a new "none" decision, so the agreement report stops counting the undone decision
+  (see [advisory AI](advisory-ai.md#ai-human-agreement)).
+
+Focused tests are in `apps/records/tests/test_undo_review.py`. Its names describe each
+rule: `test_undo_returns_a_first_decision_to_unreviewed`,
+`test_undo_restores_your_own_previous_decision`,
+`test_another_reviewers_earlier_decision_is_not_restored_in_your_name`,
+`test_a_withheld_record_is_never_restored_by_undo`, and
+`test_a_record_with_active_redactions_is_not_undone`. The API status mapping is
+`test_the_api_reports_a_refused_undo_as_a_400`.
+
+Minimal validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_undo_review --settings=config.test_settings`.
+
 ## Bulk decisions over a filter
 
 A reviewer can record one responsiveness outcome (`responsive` or `non_responsive`) for every

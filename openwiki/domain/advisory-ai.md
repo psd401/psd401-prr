@@ -184,7 +184,8 @@ and each requires `PRR_AI_ADVISORY_ENABLED`:
 - `PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED`. A new request prepares its intent
   proposal after intake commits and after every attachment has a final malware
   verdict. A completed proposal that maps to an active Vault-backed system queues
-  an entire-organization count. See [Collection and Vault](collection-and-vault.md).
+  the start of iterative scoping, which queues Vault counts only. See
+  [iterative scoping](collection-and-vault.md#iterative-scoping-from-intake-intent).
 - `PRR_AI_AUTOMATIC_CASE_TITLES_ENABLED`. Every new case gets a title run after
   intake commits. It does not wait on scanning, since it reads no files.
 - `PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED`. Each new case is classified
