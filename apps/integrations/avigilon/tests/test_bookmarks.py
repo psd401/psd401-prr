@@ -24,6 +24,10 @@ END = dt.datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
 TIMELINE = "/store/timelineInformation"
 
 
+def _created_at(bookmark_id):
+    return {"Location": f"/api/v1/bookmarks/{bookmark_id}"}
+
+
 def _camera(*sources, server_group=fakes.SERVER_GROUP):
     return client.Camera(
         id="guid-1",
@@ -65,7 +69,8 @@ def _stores_by_head(segments):
 class _BookmarkTestCase(fakes.TenantTestCase):
     def setUp(self):
         super().setUp()
-        self.tenant.on("POST", "/bookmarks", fakes.response(201, {"id": "bm-1"}))
+        # Live tenant, 2026-11-05: 201, empty body, id only in Location.
+        self.tenant.on("POST", "/bookmarks", fakes.response(201, headers=_created_at("bm-1")))
         self.tenant.on("POST", TIMELINE, {"stores": []})
         now = mock.patch.object(
             client, "_now", return_value=dt.datetime(2026, 11, 5, 18, 0, tzinfo=UTC)
@@ -146,6 +151,34 @@ class CreateBookmarkTests(_BookmarkTestCase):
         (entry,) = self._posted()["device_infos"]
         self.assertEqual(entry["start_time"], "2026-11-05T11:00:00Z")
         self.assertEqual(entry["end_time"], "2026-11-05T12:00:01Z")
+
+    def test_the_id_comes_from_the_location_of_an_empty_201(self):
+        self.tenant.on(
+            "POST", "/bookmarks", fakes.response(201, headers=_created_at("c7f8e364-abac"))
+        )
+
+        self.assertEqual(self._hold().id, "c7f8e364-abac")
+
+    def test_an_absolute_location_on_the_configured_origin_is_accepted(self):
+        location = fakes.BASE + "/api/v1/bookmarks/bm-abs"
+        self.tenant.on("POST", "/bookmarks", fakes.response(201, headers={"Location": location}))
+
+        self.assertEqual(self._hold().id, "bm-abs")
+
+    def test_a_location_that_is_not_one_bookmark_raises(self):
+        for location in (
+            "/api/v1/devices/bm-1",
+            "/api/v1/bookmarks/",
+            "/api/v1/bookmarks/a/b",
+            "/api/v1/bookmarks/bm-1?x=1",
+            "https://elsewhere.example.com/api/v1/bookmarks/bm-1",
+        ):
+            with self.subTest(location=location):
+                self.tenant.on(
+                    "POST", "/bookmarks", fakes.response(201, headers={"Location": location})
+                )
+                with self.assertRaisesRegex(client.AltaError, "id"):
+                    self._hold()
 
     def test_a_200_with_an_id_is_accepted(self):
         self.tenant.on("POST", "/bookmarks", {"id": "bm-200"})

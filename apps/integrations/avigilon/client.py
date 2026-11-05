@@ -40,7 +40,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import requests
 from django.core.cache import cache
@@ -384,6 +384,10 @@ class _Api:
         self._config = config
         self._cookie = ""
 
+    @property
+    def base(self) -> str:
+        return self._config.base
+
     def get(self, path: str, *, timeout: float = READ_TIMEOUT_SECONDS) -> Any:
         return self._call("GET", path, timeout=timeout, retry_transient=True)
 
@@ -391,10 +395,15 @@ class _Api:
         """A POST that only reads, so it is as safe to retry as a GET."""
         return self._call("POST", path, body=body, retry_transient=True)
 
-    def write_post(self, path: str, body: dict) -> Any:
-        # Never retried on 5xx or a timeout: the write may have landed, and
-        # a second create would be a second bookmark.
-        return self._call("POST", path, body=body, timeout=WRITE_TIMEOUT_SECONDS, ok=(200, 201))
+    def create(self, path: str, body: dict) -> tuple[Any, str]:
+        """POST a create; return its decoded body and its Location header.
+
+        Never retried on 5xx or a timeout: the write may have landed, and a
+        second create would be a second bookmark."""
+        response = self._call(
+            "POST", path, body=body, timeout=WRITE_TIMEOUT_SECONDS, ok=(200, 201), raw=True
+        )
+        return _decode(response, f"Alta POST {path}"), response.headers.get("Location", "")
 
     def delete(self, path: str) -> Any:
         return self._call("DELETE", path, timeout=WRITE_TIMEOUT_SECONDS, ok=(200, 204))
@@ -408,6 +417,7 @@ class _Api:
         timeout: float = READ_TIMEOUT_SECONDS,
         retry_transient: bool = False,
         ok: tuple[int, ...] = (200,),
+        raw: bool = False,
     ) -> Any:
         where = f"Alta {method} {path}"
         if not self._cookie:
@@ -442,7 +452,7 @@ class _Api:
                     _sleep(delay)
                     continue
             if status in ok:
-                return _decode(response, where)
+                return response if raw else _decode(response, where)
             raise _status_error(response, where)
 
 
@@ -629,8 +639,8 @@ def _post_bookmark(
             for sid in heads
         ],
     }
-    created = api.write_post("/bookmarks", body)
-    bookmark_id = str(created.get("id") or "").strip() if isinstance(created, dict) else ""
+    created, location = api.create("/bookmarks", body)
+    bookmark_id = _created_bookmark_id(created, location, api_base=api.base)
     if not bookmark_id:
         raise AltaError(
             "Alta accepted the bookmark but returned no id; check the device "
@@ -643,6 +653,25 @@ def _post_bookmark(
         len(heads),
     )
     return bookmark_id
+
+
+def _created_bookmark_id(created: Any, location: str, *, api_base: str) -> str:
+    """The new bookmark's id: from a JSON body if one came back, else from
+    Location. The live tenant (2026-11-05) answers 201 with an empty body and
+    ``Location: /api/v1/bookmarks/<id>``. Anything else in Location (another
+    host, another resource, extra segments, a query) yields no id."""
+    if isinstance(created, dict) and str(created.get("id") or "").strip():
+        return str(created["id"]).strip()
+    parts = urlsplit(location.strip())
+    if parts.query or parts.fragment:
+        return ""
+    if (parts.scheme or parts.netloc) and f"{parts.scheme}://{parts.netloc}".lower() != api_base.lower():
+        return ""
+    prefix = API_PREFIX + "/bookmarks/"
+    if not parts.path.startswith(prefix):
+        return ""
+    bookmark_id = unquote(parts.path[len(prefix):])
+    return "" if not bookmark_id.strip() or "/" in bookmark_id else bookmark_id.strip()
 
 
 def _refuse_unholdable(camera: Camera) -> None:
