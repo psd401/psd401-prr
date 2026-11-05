@@ -59,7 +59,7 @@ class CollectionTaskSerializer(serializers.ModelSerializer):
         fields = [
             "id", "request", "request_number",
             "system_name", "system_slug", "system_urgent_hold",
-            "kind", "state", "instructions", "custodian_emails", "search_terms",
+            "kind", "state", "trigger", "instructions", "custodian_emails", "search_terms",
             "date_range_start", "date_range_end",
             "source_vault_count_id",
             "assigned_to_id", "assigned_to_username", "due_date",

@@ -559,6 +559,24 @@ CAPABILITIES = (
         ],
     ),
     _capability(
+        "requests.rescope",
+        "Collect a newly approved scope and supersede the previous finished "
+        "Vault collection's unreviewed records, with the officer's reason.",
+        "POST",
+        "/api/staff/requests/{number}/rescope/",
+        ["/requests/:number/collection"],
+        execution="human_confirmation",
+        risk="high",
+        constraints=[
+            "accountable_human_actor",
+            "records_officer_authority",
+            "reviewed_vault_count",
+            "substantive_reason",
+            "external_side_effects",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
         "requests.vault_counts.read",
         "Read the latest human-scoped Google Vault Gmail count and its provenance.",
         "GET",

@@ -680,6 +680,13 @@ class CollectionTask(models.Model):
     system = models.ForeignKey("RecordSystem", null=True, blank=True,
                                on_delete=models.SET_NULL, related_name="collection_tasks")
     kind = models.CharField(max_length=20, choices=Kind.choices)
+    class Trigger(models.TextChoices):
+        MANUAL = "manual", "Manual"
+        #: Started by the trust policy from a completed automatic scoping
+        #: session's final count (#37, rule 11). Recorded and shown.
+        AUTOMATIC = "automatic", "Automatic"
+
+    trigger = models.CharField(max_length=20, choices=Trigger.choices, default=Trigger.MANUAL)
     state = models.CharField(max_length=20, choices=State.choices, default=State.PENDING)
     instructions = models.TextField(blank=True)
     custodian_emails = models.JSONField(default=list, blank=True)

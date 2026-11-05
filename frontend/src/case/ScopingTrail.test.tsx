@@ -66,3 +66,57 @@ it('says when scoping stopped on a failed count', async () => {
   expect(screen.getByText('count failed')).toBeInTheDocument()
   expect(screen.getByRole('status')).toHaveTextContent('Scoping stopped: The count failed (provider_timeout).')
 })
+
+function setupWith(body: unknown) {
+  const posts: { url: string; body: unknown }[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === 'POST') {
+      posts.push({ url: String(input), body: JSON.parse(String(init.body)) })
+      return { ok: true, status: 202, text: async () => '{}' } as Response
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify(body) } as Response
+  }))
+  render(<QueryClientProvider client={new QueryClient()}><ScopingTrail number="PRR-2026-0001" /></QueryClientProvider>)
+  return { posts, user: userEvent.setup() }
+}
+
+const FINAL = { ...iteration(2, 120, 'Tightened.', 'accounts'), count_run_id: 'run-2', input_sha256: 'h2' }
+const DONE = {
+  id: 1, trigger: 'automatic', actor: null, reason: '', state: 'complete', stop_reason: 'Specific.',
+  max_iterations: 4, iterations: [FINAL], final: FINAL,
+}
+
+it('approves the proposed scope and collects it in one action', async () => {
+  const { posts, user } = setupWith({ session: DONE, current_collection: null })
+  await user.click(await screen.findByRole('button', { name: 'Approve and collect' }))
+  expect(screen.getByText(/with a hold on the named mailboxes/)).toBeInTheDocument()
+  await waitFor(() => expect(posts).toEqual([{
+    url: '/api/staff/requests/PRR-2026-0001/vault-collection/',
+    body: { count_run_id: 'run-2', expected_input_sha256: 'h2', confirmed: true },
+  }]))
+})
+
+it('says when the trust policy already started the collection', async () => {
+  setupWith({
+    session: DONE,
+    current_collection: { task_id: 7, state: 'running', trigger: 'automatic', count_run_id: 'run-2', total: 120 },
+  })
+  expect(await screen.findByText(/Collecting this scope \(running\), started automatically by the trust policy/)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Approve and collect' })).not.toBeInTheDocument()
+})
+
+it('shows the re-scope diff and needs a reason to approve it', async () => {
+  const { posts, user } = setupWith({
+    session: DONE,
+    current_collection: { task_id: 7, state: 'complete', trigger: 'manual', count_run_id: 'run-1', total: 2340 },
+  })
+  expect(await screen.findByText(/current collection has 2,340 messages; the proposed scope has 120 messages/)).toBeInTheDocument()
+  const approve = screen.getByRole('button', { name: 'Approve re-scope' })
+  expect(approve).toBeDisabled()
+  await user.type(screen.getByLabelText(/Why change the scope/), 'The newsletter made up most of the old collection.')
+  await user.click(approve)
+  await waitFor(() => expect(posts).toEqual([{
+    url: '/api/staff/requests/PRR-2026-0001/rescope/',
+    body: { count_run_id: 'run-2', expected_input_sha256: 'h2', reason: 'The newsletter made up most of the old collection.' },
+  }]))
+})

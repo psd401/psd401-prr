@@ -7,6 +7,8 @@ import { Badge, Button, Card, ErrorNote, Field, Textarea } from '../ui'
 
 interface Iteration {
   number: number
+  count_run_id: string
+  input_sha256: string
   reason: string
   query: string
   search_scope: 'accounts' | 'entire_org'
@@ -41,10 +43,46 @@ function totalText(iteration: Iteration) {
   return iteration.state === 'failed' ? 'count failed' : 'counting…'
 }
 
+interface CurrentCollection {
+  task_id: number
+  state: string
+  trigger: 'manual' | 'automatic'
+  count_run_id: string | null
+  total: number | null
+}
+
 export function ScopingTrail({ number }: { number: string }) {
   const qc = useQueryClient()
   const [reason, setReason] = useState('')
   const [open, setOpen] = useState(false)
+  const [rescopeReason, setRescopeReason] = useState('')
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['scoping', number] })
+    qc.invalidateQueries({ queryKey: ['collection-tasks'] })
+  }
+  const collect = useMutation({
+    mutationFn: (scope: Iteration) =>
+      api(`/api/staff/requests/${number}/vault-collection/`, {
+        method: 'POST',
+        body: { count_run_id: scope.count_run_id, expected_input_sha256: scope.input_sha256, confirmed: true },
+      }),
+    onSuccess: refresh,
+  })
+  const rescope = useMutation({
+    mutationFn: (scope: Iteration) =>
+      api(`/api/staff/requests/${number}/rescope/`, {
+        method: 'POST',
+        body: {
+          count_run_id: scope.count_run_id,
+          expected_input_sha256: scope.input_sha256,
+          reason: rescopeReason,
+        },
+      }),
+    onSuccess: () => {
+      setRescopeReason('')
+      refresh()
+    },
+  })
   const rerun = useMutation({
     mutationFn: () =>
       api(`/api/staff/requests/${number}/scoping/`, {
@@ -61,10 +99,16 @@ export function ScopingTrail({ number }: { number: string }) {
   // Read below the mutation so each API literal keeps its own method.
   const latest = useQuery({
     queryKey: ['scoping', number],
-    queryFn: () => api<{ session: Session | null }>(`/api/staff/requests/${number}/scoping/`),
+    queryFn: () =>
+      api<{ session: Session | null; current_collection: CurrentCollection | null }>(
+        `/api/staff/requests/${number}/scoping/`,
+      ),
     refetchInterval: (query) => (query.state.data?.session?.state === 'running' ? 4000 : false),
   })
   const session = latest.data?.session ?? null
+  const collection = latest.data?.current_collection ?? null
+  const final = session?.state === 'complete' ? session.final : null
+  const collectsFinal = Boolean(final && collection?.count_run_id === final.count_run_id)
   return (
     <Card title="Scope iterations">
       {latest.isError && <ErrorNote error={latest.error} />}
@@ -109,6 +153,48 @@ export function ScopingTrail({ number }: { number: string }) {
             )}
             {session.state === 'failed' && !session.final && `Scoping stopped: ${session.stop_reason}`}
           </div>
+          {final && !collection && (
+            <div className="mb-4 space-y-2">
+              <Button type="button" disabled={collect.isPending} onClick={() => collect.mutate(final)}>
+                Approve and collect
+              </Button>
+              <p className="text-sm text-ink-muted">
+                Starts the Vault export of this scope in your name
+                {final.search_scope === 'accounts' ? ', with a hold on the named mailboxes' : ''}.
+              </p>
+              {collect.isError && <ErrorNote error={collect.error} />}
+            </div>
+          )}
+          {collection && collectsFinal && (
+            <p className="mb-4 text-sm text-ink" role="note">
+              Collecting this scope ({collection.state})
+              {collection.trigger === 'automatic' ? ', started automatically by the trust policy' : ''}.
+            </p>
+          )}
+          {final && collection && !collectsFinal && (
+            <div className="mb-4 space-y-2 rounded-lg border border-line px-3 py-2">
+              <p className="text-sm text-ink">
+                <span className="font-semibold">Re-scope:</span> the current collection has{' '}
+                {collection.total?.toLocaleString() ?? 'an unknown number of'} messages; the proposed scope
+                has {totalText(final)}.
+                {collection.state !== 'complete' && ' Re-scoping waits until the current collection finishes.'}
+              </p>
+              <Field label="Why change the scope (at least 20 characters)">
+                <Textarea rows={2} value={rescopeReason} onChange={(event) => setRescopeReason(event.target.value)} />
+              </Field>
+              {rescope.isError && <ErrorNote error={rescope.error} />}
+              <Button
+                type="button"
+                disabled={rescopeReason.trim().length < 20 || rescope.isPending || collection.state !== 'complete'}
+                onClick={() => rescope.mutate(final)}
+              >
+                Approve re-scope
+              </Button>
+              <p className="text-sm text-ink-muted">
+                Collects the proposed scope and supersedes the current collection&apos;s unreviewed records.
+              </p>
+            </div>
+          )}
         </>
       )}
       {open ? (

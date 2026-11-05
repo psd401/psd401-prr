@@ -49,6 +49,7 @@ from .models import (
 )
 from .vault_counts import (
     VaultCountAlreadyRunning,
+    _scoping_count_finished,
     proposal_date_range,
     request_vault_count,
     vault_count_enabled,
@@ -103,6 +104,11 @@ def _queue_iteration(session, *, number, scope, reason, dates, actor, trigger) -
         sender_domains=list(scope.get("sender_domains") or []),
         exclude_senders=list(scope.get("exclude_senders") or []),
     )
+    # A fast worker can finish the count before this row exists, when the
+    # count's own hand-off found no session; hand it on now instead.
+    run.refresh_from_db(fields=["state"])
+    if run.state in (VaultCountRun.State.COMPLETE, VaultCountRun.State.FAILED):
+        _scoping_count_finished(run)
     audit(
         "scoping.iteration_queued",
         target=session.request.number,
@@ -191,6 +197,13 @@ def _finish(session, state, stop_reason):
     session.stop_reason = stop_reason[:500]
     session.completed_at = timezone.now()
     session.save(update_fields=["state", "stop_reason", "completed_at"])
+    if (
+        state == ScopingSession.State.COMPLETE
+        and session.trigger == ScopingSession.Trigger.AUTOMATIC
+        and runtime.get("PRR_TRUST_SCOPE_MODE") == "auto"
+    ):
+        session_id = session.pk
+        transaction.on_commit(lambda: _collect_automatically(session_id))
     audit(
         "scoping.session_finished",
         target=session.request.number,
@@ -199,6 +212,100 @@ def _finish(session, state, stop_reason):
         iterations=ScopeIteration.objects.filter(session=session).count(),
         stop_reason=session.stop_reason,
     )
+
+
+def _final_count(session) -> VaultCountRun | None:
+    final = (
+        ScopeIteration.objects.filter(session=session, count_run__state=VaultCountRun.State.COMPLETE)
+        .select_related("count_run")
+        .order_by("-number")
+        .first()
+    )
+    return final.count_run if final else None
+
+
+def _collect_automatically(session_id) -> None:
+    """Trust policy ``auto`` (#37): export the final scope of a finished
+    automatic session. Any reason not to (a zero count, an existing
+    collection, a deposit gate) leaves the officer's one-click path."""
+    from .vault_collections import queue_automatic_vault_collection
+
+    session = ScopingSession.objects.get(pk=session_id)
+    run = _final_count(session)
+    if run is None or not run.total_count:
+        return
+    try:
+        queue_automatic_vault_collection(run.pk)
+    except ValidationError:
+        logger.info("Automatic collection not started", extra={"session": session_id})
+
+
+def rescope(request, *, count_run_id, expected_input_sha256, actor, reason):
+    """Collect a new scope and supersede the previous collection (#37).
+
+    The officer approves with a reason. The new collection is queued first
+    (it validates the reviewed count), then the finished previous Vault
+    collection's unreviewed records are superseded (#28). Returns the new
+    collection task.
+    """
+    from .collection_supersession import MIN_SUPERSESSION_REASON, supersede_collection
+    from .models import CollectionTask
+    from .vault_collections import queue_vault_collection
+
+    reason = str(reason or "").strip()
+    if len(reason) < MIN_SUPERSESSION_REASON:
+        raise ValidationError(
+            f"Say why the scope is changing (at least {MIN_SUPERSESSION_REASON} characters)."
+        )
+    current = (
+        CollectionTask.objects.filter(request=request, kind=CollectionTask.Kind.VAULT_MAIL)
+        .order_by("-created_at")
+        .first()
+    )
+    if current is None or current.state != CollectionTask.State.COMPLETE:
+        raise ValidationError(
+            "Re-scoping replaces a finished Vault collection; approve and collect instead, "
+            "or wait for the current collection to finish."
+        )
+    if not VaultCountRun.objects.filter(pk=count_run_id, request=request).exists():
+        raise ValidationError("Choose a completed count for this request.")
+    new = queue_vault_collection(
+        count_run_id, actor=actor, expected_input_sha256=expected_input_sha256,
+    ).task
+    if new.pk == current.pk:
+        raise ValidationError("That count is already the current collection.")
+    supersede_collection(current.pk, actor=actor, reason=reason)
+    audit(
+        "vault.collection.rescoped",
+        target=request.number,
+        actor=actor,
+        previous_collection_task_id=current.pk,
+        collection_task_id=new.pk,
+        reason=reason,
+    )
+    return new
+
+
+def current_collection(request) -> dict | None:
+    """The latest Vault collection on the request, for the re-scope diff."""
+    from .models import CollectionTask
+
+    task = (
+        CollectionTask.objects.filter(request=request, kind=CollectionTask.Kind.VAULT_MAIL)
+        .select_related("source_vault_count")
+        .order_by("-created_at")
+        .first()
+    )
+    if task is None:
+        return None
+    run = task.source_vault_count
+    return {
+        "task_id": task.pk,
+        "state": task.state,
+        "trigger": task.trigger,
+        "count_run_id": str(run.pk) if run else None,
+        "total": run.total_count if run else None,
+    }
 
 
 def _scope_key(scope: dict) -> tuple:

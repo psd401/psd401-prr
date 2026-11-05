@@ -96,8 +96,30 @@ def _vault_service():
     )
 
 
+def _e2e_stand_in() -> bool:
+    """A deterministic stand-in for Vault in browser acceptance runs only.
+
+    Only ``config.e2e_settings`` sets ``PRR_E2E_FAKE_VAULT``, and it is
+    honoured only while the test-fixture switch is on as well, so no deployed
+    environment reaches it. It answers the calls the count and collection
+    paths make with synthetic identifiers and totals, and never anything else.
+    """
+    return bool(
+        getattr(settings, "PRR_E2E_FAKE_VAULT", False)
+        and getattr(settings, "PRR_TEST_FIXTURE_SEED_ENABLED", False)
+    )
+
+
+def _e2e_id(prefix: str, *parts) -> str:
+    import hashlib
+
+    return f"e2e-{prefix}-" + hashlib.sha256("|".join(map(str, parts)).encode()).hexdigest()[:12]
+
+
 def ensure_matter(request_number: str, description: str, *, actor=None) -> str:
     """Create (or reuse) the Vault matter for a PRR. Returns matterId."""
+    if _e2e_stand_in():
+        return _e2e_id("matter", request_number)
     svc = _vault_service()
     matter_name = f"{request_number} — Public Records Request"
     matching_matters = []
@@ -179,6 +201,8 @@ def ensure_mail_hold(
     A provider call can succeed before the worker records its ID. Reusing the
     stable name keeps a retry from multiplying legal holds.
     """
+    if _e2e_stand_in():
+        return _e2e_id("hold", matter_id, name, *sorted(custodian_emails))
     svc = _vault_service()
     matching_holds = []
     page_token = None
@@ -262,6 +286,8 @@ def ensure_mail_export(
     connection before retaining the export ID. A retry therefore resolves the
     stable per-count name first instead of creating duplicate exports.
     """
+    if _e2e_stand_in():
+        return _e2e_id("export", matter_id, name, terms)
     svc = _vault_service()
     matching_exports = []
     page_token = None
@@ -342,6 +368,24 @@ def start_mail_count(
     entire_org: bool = False,
 ) -> dict:
     """Start a count-only Gmail search; no hold, export, or saved query."""
+    if _e2e_stand_in():
+        accounts = custodian_emails or ["records@psd401.net"]
+        total = 128 if entire_org else 37 * len(accounts)
+        return {
+            "name": _e2e_id("operation", matter_id, terms),
+            "done": True,
+            "response": {
+                "totalCount": str(total),
+                "mailCountResult": {
+                    "queriedAccountsCount": str(len(accounts)),
+                    "matchingAccountsCount": str(len(accounts)),
+                    "accountCounts": [
+                        {"account": {"email": email}, "count": str(total // len(accounts))}
+                        for email in accounts
+                    ],
+                },
+            },
+        }
     svc = _vault_service()
     return svc.matters().count(
         matterId=matter_id,
@@ -396,5 +440,7 @@ def create_drive_export(
 def get_export(matter_id: str, export_id: str) -> dict:
     """Poll export status. status becomes COMPLETED; cloudStorageSink.files
     then lists bucket/object names to download via Cloud Storage."""
+    if _e2e_stand_in():
+        return {"id": export_id, "status": "IN_PROGRESS"}
     svc = _vault_service()
     return svc.matters().exports().get(matterId=matter_id, exportId=export_id).execute()

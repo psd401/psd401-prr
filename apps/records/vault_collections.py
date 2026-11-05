@@ -49,18 +49,82 @@ def queue_vault_collection(
     expected_input_sha256: str,
 ) -> VaultCollectionQueueResult:
     """Create one durable task and enqueue provider work after human review."""
+    return _queue_vault_collection(
+        count_run_id,
+        actor=actor,
+        expected_input_sha256=expected_input_sha256,
+        trigger=CollectionTask.Trigger.MANUAL,
+    )
+
+
+def queue_automatic_vault_collection(count_run_id) -> VaultCollectionQueueResult:
+    """Start the export from an automatic scoping session's final count (#37).
+
+    The rule 11 amendment: only with ``PRR_TRUST_SCOPE_MODE`` set to ``auto``,
+    only from the final completed count of a finished *automatic* scoping
+    session, and only on a request with no Vault collection yet. No actor;
+    the task is recorded ``trigger=automatic``. Holds are unchanged.
+    """
+    from apps.configuration import runtime
+
+    from .models import ScopeIteration, ScopingSession
+
+    if runtime.get("PRR_TRUST_SCOPE_MODE") != "auto":
+        raise ValidationError("The trust policy does not start collections automatically.")
+    iteration = (
+        ScopeIteration.objects.select_related("session", "count_run")
+        .filter(count_run_id=count_run_id)
+        .first()
+    )
+    if (
+        iteration is None
+        or iteration.session.trigger != ScopingSession.Trigger.AUTOMATIC
+        or iteration.session.state != ScopingSession.State.COMPLETE
+    ):
+        raise ValidationError(
+            "Only a finished automatic scoping session's final count is collected automatically."
+        )
+    final = (
+        ScopeIteration.objects.filter(
+            session=iteration.session, count_run__state=VaultCountRun.State.COMPLETE,
+        )
+        .order_by("-number")
+        .first()
+    )
+    if final is None or final.pk != iteration.pk:
+        raise ValidationError("Only the session's final count is collected automatically.")
+    if CollectionTask.objects.filter(
+        request=iteration.count_run.request, kind=CollectionTask.Kind.VAULT_MAIL,
+    ).exists():
+        raise ValidationError("This request already has a Vault collection.")
+    return _queue_vault_collection(
+        count_run_id,
+        actor=None,
+        expected_input_sha256=iteration.count_run.input_sha256,
+        trigger=CollectionTask.Trigger.AUTOMATIC,
+    )
+
+
+def _queue_vault_collection(
+    count_run_id,
+    *,
+    actor,
+    expected_input_sha256: str,
+    trigger: str,
+) -> VaultCollectionQueueResult:
     if not vault_count_enabled():
         raise ValidationError("Google Vault collection is not configured.")
     expected_hash = str(expected_input_sha256 or "").strip().lower()
     created = False
     with transaction.atomic():
-        actor = _require_current_records_officer(
-            actor=actor,
-            message=(
-                "Current Records Officer authority is required to start a "
-                "Vault collection."
-            ),
-        )
+        if trigger != CollectionTask.Trigger.AUTOMATIC:
+            actor = _require_current_records_officer(
+                actor=actor,
+                message=(
+                    "Current Records Officer authority is required to start a "
+                    "Vault collection."
+                ),
+            )
         run = (
             VaultCountRun.objects.select_for_update()
             .select_related("request")
@@ -117,6 +181,7 @@ def queue_vault_collection(
                 kind=CollectionTask.Kind.VAULT_MAIL,
                 state=CollectionTask.State.PENDING,
                 source_vault_count=run,
+                trigger=trigger,
                 instructions=_instructions(run),
                 custodian_emails=run.custodian_emails,
                 search_terms=run.terms,
@@ -134,6 +199,7 @@ def queue_vault_collection(
                 input_sha256=run.input_sha256,
                 search_scope=run.search_scope,
                 possible_message_count=run.total_count,
+                trigger=trigger,
             )
 
     from apps.work_queue.integration import (
