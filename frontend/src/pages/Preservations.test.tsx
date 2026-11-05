@@ -302,6 +302,93 @@ describe('Preservations — release dialog', () => {
   })
 })
 
+describe('Preservations — widen to district-wide', () => {
+  function narrowed(overrides: Record<string, unknown> = {}) {
+    return heldPreservation({ request_closed: false, releasable: false, widenable: true, ...overrides })
+  }
+
+  it('offers widening only to a Records Officer on a widenable hold', async () => {
+    for (const [roles, overrides] of [
+      [['admin'], {}],
+      [['records_officer'], { widenable: false }],
+    ] as const) {
+      vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([narrowed(overrides)]))))
+      const view = renderPage(<Preservations roles={[...roles]} />)
+      await screen.findByText('Footage preservation')
+      expect(screen.queryByRole('button', { name: /Widen/ })).not.toBeInTheDocument()
+      view.unmount()
+    }
+  })
+
+  it('widens with a substantive reason and refreshes the hold and the request', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/widen/') && init?.method === 'POST') {
+        return fakeResponse(narrowed({ widenable: false, site_codes: [] }))
+      }
+      return fakeResponse(page([narrowed()]))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const client = queryClient()
+    const invalidate = spyOnInvalidate(client)
+    const user = userEvent.setup()
+    renderWithClient(<Preservations roles={['records_officer']} />, client)
+
+    await user.click(await screen.findByRole('button', { name: /Widen to district-wide.*PRR-2026-0007/ }))
+    const dialog = await screen.findByRole('dialog')
+    const reason = within(dialog).getByLabelText(/Reason/)
+    expect(reason).toHaveAttribute('maxLength', '500')
+    const submit = within(dialog).getByRole('button', { name: 'Widen hold' })
+    await user.type(reason, 'too short')
+    expect(submit).toBeDisabled()
+    await user.type(reason, ' — the requester named the wrong school.')
+    expect(submit).toBeEnabled()
+    await user.click(submit)
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/widen/'))
+      expect(call).toBeDefined()
+      expect(String(call![0])).toBe('/api/staff/preservations/7/widen/')
+      expect(call![1]?.method).toBe('POST')
+      expect(JSON.parse(String(call![1]?.body))).toEqual({
+        reason: 'too short — the requester named the wrong school.',
+      })
+    })
+    await waitFor(() => {
+      const keys = invalidatedKeys(invalidate)
+      expect(keys).toContainEqual(['preservations'])
+      expect(keys).toContainEqual(['request', 'PRR-2026-0007'])
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('keeps the dialog open while pending and shows a server refusal', async () => {
+    let finish: (value: Response) => void = () => {}
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/widen/') && init?.method === 'POST') {
+        return new Promise<Response>((resolve) => { finish = resolve })
+      }
+      return Promise.resolve(fakeResponse(page([narrowed()])))
+    }))
+    const user = userEvent.setup()
+    renderPage(<Preservations roles={['records_officer']} />)
+
+    await user.click(await screen.findByRole('button', { name: /Widen to district-wide/ }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText(/Reason/), 'The incident location is unknown.')
+    await user.click(within(dialog).getByRole('button', { name: 'Widen hold' }))
+
+    expect(await within(dialog).findByRole('button', { name: 'Widening…' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    finish(fakeResponse({ detail: 'This hold is already district-wide.' }, 400))
+    expect(await within(dialog).findByRole('alert'))
+      .toHaveTextContent('This hold is already district-wide.')
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeEnabled()
+  })
+})
+
 describe('Preservations — cache refresh after a change', () => {
   it('refreshes the request detail after a release so it stops saying "Held"', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

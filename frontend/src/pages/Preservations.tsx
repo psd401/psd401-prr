@@ -157,6 +157,103 @@ function ConfirmationText({ text }: { text: string }) {
   )
 }
 
+/** Records Officer controls in a preservation card's header. */
+function HoldActions({
+  preservation,
+  onRelease,
+  onWiden,
+}: {
+  preservation: Preservation
+  onRelease: () => void
+  onWiden: () => void
+}) {
+  return (
+    <>
+      {preservation.widenable && (
+        <Button
+          variant="ghost"
+          onClick={onWiden}
+          aria-label={`Widen to district-wide — ${preservation.request_number}`}
+        >
+          Widen to district-wide
+        </Button>
+      )}
+      {preservation.releasable && (
+        <Button variant="ghost" onClick={onRelease}>
+          {hasReleaseFailures(preservation) ? 'Retry release' : 'Release hold'}
+        </Button>
+      )}
+    </>
+  )
+}
+
+/**
+ * Widen a site-narrowed hold to every camera in the district. Used when the
+ * site the requester named turns out to be wrong or unknown.
+ */
+function WidenDialog({
+  preservation,
+  pending,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  preservation: Preservation
+  pending: boolean
+  error: unknown
+  onClose: () => void
+  onSubmit: (reason: string) => void
+}) {
+  const [reason, setReason] = useState('')
+
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    if (pending || reasonTooShort(reason)) return
+    onSubmit(reason)
+  }
+
+  return (
+    <Modal
+      open
+      title={`Widen preservation for ${preservation.request_number}`}
+      onClose={onClose}
+      dismissible={!pending}
+    >
+      <form onSubmit={submit} className="space-y-4">
+        <p className="text-sm text-ink-muted">
+          This hold covers only the sites named in the request. Widening it
+          bookmarks every camera in the district for the same window.
+        </p>
+        <Field
+          label="Reason"
+          hint={reasonHint('say why the named sites may not cover the footage')}
+        >
+          <Textarea
+            rows={3}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            minLength={MIN_REASON_LENGTH}
+            maxLength={MAX_REASON_LENGTH}
+            required
+          />
+        </Field>
+        {reasonShortfall(reason) && (
+          <p aria-live="polite" className="text-sm text-ink-muted">{reasonShortfall(reason)}</p>
+        )}
+        {error != null && <ErrorNote error={error} />}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={pending || reasonTooShort(reason)}>
+            {pending ? 'Widening…' : 'Widen hold'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 export function Preservations({
   roles,
   requestNumber,
@@ -174,6 +271,7 @@ export function Preservations({
   const [releasing, setReleasing] = useState<Preservation | null>(null)
   const [releaseReason, setReleaseReason] = useState('')
   const [attested, setAttested] = useState(false)
+  const [widening, setWidening] = useState<Preservation | null>(null)
 
   const list = useQuery({
     queryKey: ['preservations', requestNumber ?? 'all', activeStateFilter],
@@ -222,6 +320,29 @@ export function Preservations({
       closeRelease()
     },
   })
+
+  const widen = useMutation({
+    mutationFn: ({ preservationId, reason }: { preservationId: number; requestNumber: string; reason: string }) =>
+      api<Preservation>(`/api/staff/preservations/${preservationId}/widen/`, {
+        method: 'POST',
+        body: { reason },
+      }),
+    onSuccess: (_preservation, { requestNumber }) => {
+      refreshAfterChange(requestNumber)
+      toast('success', 'Preservation hold widened to district-wide.')
+      closeWiden()
+    },
+  })
+
+  function openWiden(preservation: Preservation) {
+    widen.reset()
+    setWidening(preservation)
+  }
+
+  function closeWiden() {
+    setWidening(null)
+    widen.reset()
+  }
 
   function openRelease(preservation: Preservation) {
     setReleasing(preservation)
@@ -332,10 +453,12 @@ export function Preservations({
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <StateBadge state={p.state} />
-                  {canExclude && p.releasable && (
-                    <Button variant="ghost" onClick={() => openRelease(p)}>
-                      {hasReleaseFailures(p) ? 'Retry release' : 'Release hold'}
-                    </Button>
+                  {canExclude && (
+                    <HoldActions
+                      preservation={p}
+                      onRelease={() => openRelease(p)}
+                      onWiden={() => openWiden(p)}
+                    />
                   )}
                 </div>
               </div>
@@ -517,6 +640,22 @@ export function Preservations({
           </form>
         )}
       </Modal>
+
+      {canExclude && widening && (
+        <WidenDialog
+          preservation={widening}
+          pending={widen.isPending}
+          error={widen.isError ? widen.error : null}
+          onClose={closeWiden}
+          onSubmit={(widenReason) =>
+            widen.mutate({
+              preservationId: widening.id,
+              requestNumber: widening.request_number,
+              reason: widenReason,
+            })
+          }
+        />
+      )}
     </>
   )
 }
