@@ -169,7 +169,10 @@ class ScopingTests(_ScopingFixture):
         self.assertIn("last count stands", session.stop_reason)
 
     def test_a_session_whose_first_count_cannot_queue_is_not_left_running(self, delay):
-        from apps.records.vault_counts import VaultCountAlreadyRunning, request_vault_count
+        from apps.records.vault_counts import (
+            VaultCountAlreadyRunning,
+            request_vault_count,
+        )
 
         request_vault_count(
             self.request.pk, actor=self.officer, terms='"bus"', custodian_emails=[],
