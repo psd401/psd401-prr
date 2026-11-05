@@ -271,9 +271,18 @@ class CoverageTests(_BookmarkTestCase):
         self.assertEqual(head, client.HeadCoverage("1", 0.5))
 
     def test_no_coverage(self):
+        """An explicit empty stores list is a confirmed 0%, with no error."""
         (head,) = self._coverage({})
 
         self.assertEqual(head, client.HeadCoverage("1", 0.0))
+
+    def test_a_timeline_without_stores_is_unconfirmed_not_zero(self):
+        self.tenant.on("POST", TIMELINE, {"timeline": []})
+
+        (head,) = self._hold().coverage
+
+        self.assertEqual(head.covered_fraction, 0.0)
+        self.assertIn("no stores", head.error)
 
     def test_each_head_is_measured_on_its_own(self):
         coverage = self._coverage(
@@ -366,6 +375,8 @@ class CoverageTests(_BookmarkTestCase):
             "bad request": fakes.response(400, {"kind": "BAD_REQUEST"}),
             "not an object": fakes.response(200, ["stores"]),
             "stores not a list": {"stores": "none"},
+            "no stores key": {},
+            "stores null": {"stores": None},
             "store without a start": {"stores": [{"store_end_time": _iso(END)}]},
             "unparseable time": {"stores": [_store("soon", _iso(END))]},
             "transport": requests.ConnectionError("reset"),

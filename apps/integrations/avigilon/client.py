@@ -742,7 +742,11 @@ def _covered_fraction(
         )
         if not isinstance(payload, dict):
             raise AltaError("the timeline response is not an object")
-        stores = payload.get("stores") or []
+        # Only an explicit list confirms anything; an empty one is a real 0%.
+        # A missing or null key could not be read, so it is not counted as 0%.
+        stores = payload.get("stores")
+        if stores is None:
+            raise AltaError("the timeline response has no stores list")
         if not isinstance(stores, list):
             raise AltaError("the timeline stores are not a list")
         for store in stores:
