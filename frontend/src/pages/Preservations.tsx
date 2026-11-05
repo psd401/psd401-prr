@@ -294,6 +294,62 @@ function WidenDialog({
   )
 }
 
+/** Drop one camera from a live hold. A human reason lands in the audit trail. */
+function ExcludeDialog({
+  hold,
+  pending,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  hold: CameraHold
+  pending: boolean
+  error: unknown
+  onClose: () => void
+  onSubmit: (reason: string) => void
+}) {
+  const [reason, setReason] = useState('')
+
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    if (pending || reasonTooShort(reason)) return
+    onSubmit(reason)
+  }
+
+  return (
+    <Modal open title={`Exclude ${hold.camera_name}`} onClose={onClose} dismissible={!pending}>
+      <form onSubmit={submit} className="space-y-4">
+        <p className="text-sm text-ink-muted">
+          Camera <span className="font-heading font-bold">{hold.camera_name}</span> at{' '}
+          {hold.site} will be excluded from this preservation hold.
+        </p>
+        <Field label="Reason" hint={reasonHint('recorded in the audit trail')}>
+          <Textarea
+            rows={3}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            minLength={MIN_REASON_LENGTH}
+            maxLength={MAX_REASON_LENGTH}
+            required
+          />
+        </Field>
+        {reasonShortfall(reason) && (
+          <p aria-live="polite" className="text-sm text-ink-muted">{reasonShortfall(reason)}</p>
+        )}
+        {error != null && <ErrorNote error={error} />}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={pending || reasonTooShort(reason)}>
+            {pending ? 'Excluding…' : 'Exclude camera'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 /**
  * Release a closed request's hold, deleting its Aware bookmarks. Also retries
  * the deletes that failed on an earlier release.
@@ -387,8 +443,8 @@ export function Preservations({
   const canExclude = roles.includes('records_officer')
   const toast = useToast()
   const activeStateFilter = searchParams.get('preservation_state') ?? ''
+  // Only Records Officer buttons set these, so a set target implies canExclude.
   const [excluding, setExcluding] = useState<ExcludeTarget | null>(null)
-  const [reason, setReason] = useState('')
   const [releasing, setReleasing] = useState<Preservation | null>(null)
   const [widening, setWidening] = useState<Preservation | null>(null)
 
@@ -474,26 +530,13 @@ export function Preservations({
   }
 
   function openExclude(preservationId: number, requestNumber: string, hold: CameraHold) {
-    setExcluding({ preservationId, requestNumber, hold })
-    setReason('')
     exclude.reset()
+    setExcluding({ preservationId, requestNumber, hold })
   }
 
   function closeExclude() {
     setExcluding(null)
-    setReason('')
     exclude.reset()
-  }
-
-  function submitExclude(e: FormEvent) {
-    e.preventDefault()
-    if (!excluding || exclude.isPending || reasonTooShort(reason)) return
-    exclude.mutate({
-      preservationId: excluding.preservationId,
-      requestNumber: excluding.requestNumber,
-      holdId: excluding.hold.id,
-      reason,
-    })
   }
 
   function changeStateFilter(value: string) {
@@ -658,49 +701,28 @@ export function Preservations({
         </div>
       )}
 
-      <Modal
-        open={canExclude && excluding !== null}
-        title={excluding ? `Exclude ${excluding.hold.camera_name}` : ''}
-        onClose={closeExclude}
-        dismissible={!exclude.isPending}
-      >
-        {excluding && (
-          <form onSubmit={submitExclude} className="space-y-4">
-            <p className="text-sm text-ink-muted">
-              Camera <span className="font-heading font-bold">{excluding.hold.camera_name}</span> at{' '}
-              {excluding.hold.site} will be excluded from this preservation hold.
-            </p>
-            <Field label="Reason" hint={reasonHint('recorded in the audit trail')}>
-              <Textarea
-                rows={3}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                minLength={MIN_REASON_LENGTH}
-                maxLength={MAX_REASON_LENGTH}
-                required
-              />
-            </Field>
-            {reasonShortfall(reason) && (
-              <p aria-live="polite" className="text-sm text-ink-muted">{reasonShortfall(reason)}</p>
-            )}
-            {exclude.isError && <ErrorNote error={exclude.error} />}
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={closeExclude} disabled={exclude.isPending}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={exclude.isPending || reasonTooShort(reason)}>
-                {exclude.isPending ? 'Excluding…' : 'Exclude camera'}
-              </Button>
-            </div>
-          </form>
-        )}
-      </Modal>
+      {excluding && (
+        <ExcludeDialog
+          hold={excluding.hold}
+          pending={exclude.isPending}
+          error={exclude.error}
+          onClose={closeExclude}
+          onSubmit={(excludeReason) =>
+            exclude.mutate({
+              preservationId: excluding.preservationId,
+              requestNumber: excluding.requestNumber,
+              holdId: excluding.hold.id,
+              reason: excludeReason,
+            })
+          }
+        />
+      )}
 
-      {canExclude && releasing && (
+      {releasing && (
         <ReleaseDialog
           preservation={releasing}
           pending={release.isPending}
-          error={release.isError ? release.error : null}
+          error={release.error}
           onClose={closeRelease}
           onSubmit={(releaseReason) =>
             release.mutate({
@@ -712,11 +734,11 @@ export function Preservations({
         />
       )}
 
-      {canExclude && widening && (
+      {widening && (
         <WidenDialog
           preservation={widening}
           pending={widen.isPending}
-          error={widen.isError ? widen.error : null}
+          error={widen.error}
           onClose={closeWiden}
           onSubmit={(widenReason) =>
             widen.mutate({
