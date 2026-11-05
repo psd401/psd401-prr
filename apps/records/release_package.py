@@ -1,9 +1,12 @@
 """One-step release package (issue #47).
 
-``build_release_package`` is the Releases tab's "Build package": it opens an
-installment from every release-ready record no live installment has claimed,
-generates the RCW 42.56.210(3) exemption log when the installment needs one,
-and prepares the immutable package. Each step is the existing service, run in
+``build_release_package`` is the Releases tab's "Build package". With no
+installment open, it opens one from every release-ready record no live
+installment has claimed. With one open (an officer's partial selection, or a
+build that stopped partway), it finishes that installment as chosen and adds
+nothing to it; the tab says how many ready records it leaves for the next
+package. Either way it then generates the RCW 42.56.210(3) exemption log when
+the installment needs one, and prepares the immutable package. Each step is the existing service, run in
 the same order an officer used to click through; nothing here releases or
 sends. Release and send stays a separate, human-only action (rule 6).
 
@@ -65,13 +68,15 @@ def build_release_package(request_number, *, actor, _client=None) -> Installment
     if prr.status in CLOSED_STATUSES:
         raise ReleasePackageBlocked(
             "This request is closed; reopen it before releasing records.",
-            code="request_closed", tab="overview",
+            code="request_closed",
+            tab="overview",
         )
     gate = open_deposit_gate(prr, scope=FeeDepositGate.Scope.PRODUCTION)
     if gate is not None:
         raise ReleasePackageBlocked(
             f"A ${gate.amount:.2f} production deposit must be recorded or lifted first.",
-            code="deposit_required", tab="releases",
+            code="deposit_required",
+            tab="releases",
         )
 
     installment = (
@@ -89,7 +94,8 @@ def build_release_package(request_number, *, actor, _client=None) -> Installment
                 "No records are ready to release. A record is ready once it is "
                 "reviewed, any heightened-review citation has a second approval, "
                 "and any redactions are rendered.",
-                code="no_ready_records", tab="review",
+                code="no_ready_records",
+                tab="review",
             )
         installment = create_installment(prr.number, actor=actor, item_ids=item_ids)
 

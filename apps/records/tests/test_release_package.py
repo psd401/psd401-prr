@@ -20,6 +20,10 @@ from rest_framework.test import APIClient
 
 from apps.api.identity import apply_staff_roles
 from apps.api.models import StaffRole
+from apps.records.exemption_logs import (
+    _build_manifest,
+    current_exemption_log_manifest_sha256,
+)
 from apps.records.models import (
     ExemptionCitation,
     Installment,
@@ -62,7 +66,6 @@ class _Fixture(TestCase):
         )
 
 
-
 @override_settings(OBJECT_STORE={"bucket": "records"})
 class BuildReleasePackageTests(_Fixture):
     def _build(self, actor=None):
@@ -89,6 +92,13 @@ class BuildReleasePackageTests(_Fixture):
         installment = self._build()
 
         self.assertNotEqual(installment.exemption_log_storage_key, "")
+        # The stored log is the one for this installment's current evidence,
+        # and that evidence lists the withheld record.
+        self.assertEqual(
+            installment.exemption_log_manifest_sha256, current_exemption_log_manifest_sha256(installment),
+        )
+        entries = _build_manifest(installment)["entries"]
+        self.assertIn(str(self.ready[0].pk), [entry["record_item_id"] for entry in entries])
         self.assertIsNotNone(installment.package_prepared_at)
 
     def test_building_again_reuses_the_open_package(self):
@@ -101,7 +111,7 @@ class BuildReleasePackageTests(_Fixture):
         self.assertEqual(Installment.objects.count(), 1)
         self.assertEqual(len(self.client_store.put_calls), puts)
 
-    def test_an_unprepared_installment_is_finished_rather_than_duplicated(self):
+    def test_an_open_partial_installment_is_finished_as_chosen_and_leaves_the_rest(self):
         open_one = Installment.objects.create(request=self.prr, sequence=1)
         open_one.items.add(self.ready[0])
 
@@ -110,6 +120,8 @@ class BuildReleasePackageTests(_Fixture):
         self.assertEqual(installment.pk, open_one.pk)
         self.assertEqual(list(installment.items.all()), [self.ready[0]])
         self.assertIsNotNone(installment.package_prepared_at)
+        # The other ready record is left for the next package, unclaimed.
+        self.assertFalse(Installment.objects.filter(items=self.ready[1]).exists())
 
     def test_no_ready_records_points_at_review(self):
         RecordItem.objects.filter(pk__in=[i.pk for i in self.ready]).update(

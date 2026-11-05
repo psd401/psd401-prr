@@ -877,3 +877,19 @@ it('folds the fee panels away when no fee applies, and leads with them when one 
   expect(await screen.findByText('Adopted fee schedule')).toBeInTheDocument()
   expect(screen.queryByText('Fees and deposits — no fee applies')).not.toBeInTheDocument()
 })
+
+it('says which ready records an open partial installment leaves out', async () => {
+  // listFor answers every record-items query with readyRecord, so it is both
+  // unclaimed and outside the open installment's own records here.
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => listFor(input, [
+    { ...row, item_count: 2, record_item_ids: ['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'] },
+  ])))
+  renderPage(['records_officer'], 'PRR-2026-0042')
+
+  const steps = await screen.findByRole('list', { name: 'Release steps' })
+  expect(within(steps).getByText(/Installment 1: 2 records, not prepared yet/)).toBeInTheDocument()
+  expect(within(steps).getByText(
+    /1 more ready record is not in this installment; build again after releasing it to package the rest/,
+  )).toBeInTheDocument()
+  expect(within(steps).getByRole('button', { name: 'Build package' })).toBeInTheDocument()
+})
