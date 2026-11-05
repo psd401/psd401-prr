@@ -73,9 +73,12 @@ def text_not_found():
     return response(404, "404 page not found")
 
 
-def head(sid, *, inactive=False, storing: str | None = "smart_storing"):
+def head(sid, *, inactive=False, storing: str | None = "smart_storing", source_name=None):
     """One sensor head: its ``sources`` config and its live record."""
-    return sid, {"inactive": inactive}, {"source": sid, "storing_info": storing}
+    config: dict[str, Any] = {"inactive": inactive}
+    if source_name is not None:
+        config["source_name"] = source_name
+    return sid, config, {"source": sid, "storing_info": storing}
 
 
 def device(

@@ -76,6 +76,7 @@ HOLD_DESCRIPTION = (
     "Public Records Act preservation hold. Do not delete. "
     "Managed by the PRR system."
 )
+SKIPPED_HEAD_ERROR = "head reports no stream; not bookmarked, check by hand"
 SMOKE_NAME = "PRR smoke test — delete"
 SMOKE_DESCRIPTION = (
     "Created by manage.py verify_alta --smoke-bookmark and deleted by it "
@@ -129,6 +130,10 @@ class Camera:
     status: str                   # live.status, e.g. "CONNECTED", "COMMUNICATION_ERROR"
     pruned_to: dt.datetime | None  # oldest retained footage (aware UTC); None if unknown
     sources: tuple[str, ...]      # active head sids to bookmark (inactive heads skipped)
+    # Heads reporting no stream now. Not bookmarked (whether Aware accepts
+    # them is unverified), but the window may still hold their footage, so a
+    # hold reports each as an uncovered head for a hand check.
+    skipped_sources: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -497,9 +502,12 @@ def _as_dict(value: Any) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _active_heads(device: dict, live: dict) -> tuple[str, ...]:
-    """The device's own head sids, minus inactive and streamless heads.
+def _active_heads(device: dict, live: dict) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The device's own head sids to bookmark, and the streamless ones.
 
+    Inactive heads are retired config and appear in neither. A head that
+    reports no stream now is returned second: it is not bookmarked, but the
+    requested window may still hold its footage, so it must not vanish.
     Numbering differs by unit even within one model, so it is only ever read
     from ``source_ids`` (or the ``sources`` map), never inferred.
     """
@@ -512,16 +520,18 @@ def _active_heads(device: dict, live: dict) -> tuple[str, ...]:
         if isinstance(entry, dict) and entry.get("source") is not None
     }
     heads: list[str] = []
+    skipped: list[str] = []
     for sid in sids:
-        if sid in heads:
+        if sid in heads or sid in skipped:
             continue
         config = _as_dict(_as_dict(configs.get(sid)).get("config"))
         if config.get("inactive") is True:
             continue
         if storing.get(sid) == "no_stream_available":
+            skipped.append(sid)
             continue
         heads.append(sid)
-    return tuple(heads)
+    return tuple(heads), tuple(skipped)
 
 
 def _camera(device: dict, group_names: dict[str, str]) -> Camera:
@@ -530,6 +540,7 @@ def _camera(device: dict, group_names: dict[str, str]) -> Camera:
         raise AltaError("An Alta device record has no guid.")
     live = _as_dict(device.get("live"))
     group_id = str(device.get("device_group_id") or "")
+    sources, skipped = _active_heads(device, live)
     return Camera(
         id=guid,
         name=str(device.get("name") or ""),
@@ -538,7 +549,8 @@ def _camera(device: dict, group_names: dict[str, str]) -> Camera:
         server_group_id=str(device.get("server_group_id") or ""),
         status=str(live.get("status") or ""),
         pruned_to=_pruned_to(device.get("pruned_to"), guid),
-        sources=_active_heads(device, live),
+        sources=sources,
+        skipped_sources=skipped,
     )
 
 
@@ -676,7 +688,15 @@ def _created_bookmark_id(created: Any, location: str, *, api_base: str) -> str:
 
 def _refuse_unholdable(camera: Camera) -> None:
     if not camera.sources:
-        raise AltaError(f"Alta device {camera.id} has no recording head to bookmark.")
+        streamless = len(dict.fromkeys(camera.skipped_sources))
+        raise AltaError(
+            f"Alta device {camera.id} has no recording head to bookmark"
+            + (
+                f"; {streamless} head(s) report no stream, check them by hand."
+                if streamless
+                else "."
+            )
+        )
     if not camera.server_group_id:
         raise AltaError(f"Alta device {camera.id} has no server group.")
 
@@ -772,14 +792,22 @@ def create_bookmark_hold(
 ) -> BookmarkHold:
     """One bookmark for one camera, one device_infos entry per active head,
     expiry_time null (kept until manually deleted). Then confirm per-head
-    coverage of [start, end); the caller decides HELD vs gap from it."""
+    coverage of [start, end); the caller decides HELD vs gap from it. Each of
+    ``camera.skipped_sources`` (streamless now, so not bookmarked) is
+    reported as an uncovered head, so it reads as a gap, never as nothing."""
     start_utc, end_utc = _hold_window(start, end)
     _refuse_unholdable(camera)
     with _client() as api:
         bookmark_id = _post_bookmark(
             api, camera, start_utc, end_utc, name=name, description=description
         )
-        return BookmarkHold(bookmark_id, _coverage(api, camera, start_utc, end_utc))
+        measured = _coverage(api, camera, start_utc, end_utc)
+    skipped = tuple(
+        HeadCoverage(sid, 0.0, SKIPPED_HEAD_ERROR)
+        for sid in dict.fromkeys(camera.skipped_sources)
+        if sid not in camera.sources
+    )
+    return BookmarkHold(bookmark_id, measured + skipped)
 
 
 def _bookmark_path(bookmark_id: str) -> str:

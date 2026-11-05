@@ -97,12 +97,41 @@ class DeviceListTests(fakes.TenantTestCase):
 
         self.assertEqual(camera.sources, ("1", "3", "4"))
 
+    def test_streamless_heads_are_reported_as_skipped_and_inactive_heads_are_not(self):
+        """No stream now does not mean no footage in the requested window, so
+        a streamless head is surfaced for a hand check; an inactive head is
+        retired config and stays out entirely."""
+        (camera,) = self._devices(
+            fakes.device(
+                "multi",
+                "Mixed",
+                heads=[
+                    fakes.head("0", inactive=True, storing="no_stream_available"),
+                    fakes.head("1"),
+                    fakes.head("2", storing="no_stream_available"),
+                    fakes.head("3", storing="no_stream_available"),
+                ],
+            )
+        )
+
+        self.assertEqual(camera.sources, ("1",))
+        self.assertEqual(camera.skipped_sources, ("2", "3"))
+
+    def test_a_camera_built_without_skipped_sources_has_none(self):
+        camera = client.Camera(
+            id="g", name="n", site="", device_group_id="", server_group_id="s",
+            status="", pruned_to=None, sources=("1",),
+        )
+
+        self.assertEqual(camera.skipped_sources, ())
+
     def test_a_device_with_no_recording_head_is_listed_with_no_sources(self):
         (camera,) = self._devices(
             fakes.device("dark", "Dark", heads=[fakes.head("1", storing="no_stream_available")])
         )
 
         self.assertEqual(camera.sources, ())
+        self.assertEqual(camera.skipped_sources, ("1",))
 
     def test_sources_fall_back_to_the_sources_map(self):
         record = fakes.device("x", "X", heads=[fakes.head("2"), fakes.head("5")])

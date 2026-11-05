@@ -201,6 +201,14 @@ class CreateBookmarkTests(_BookmarkTestCase):
                     self._hold(**kwargs)
         self.assertEqual(self.tenant.calls, [])
 
+    def test_a_camera_whose_every_head_is_streamless_is_refused_for_a_hand_check(self):
+        camera = dataclasses.replace(_camera(), sources=(), skipped_sources=("1", "2"))
+
+        with self.assertRaisesRegex(client.AltaError, "2 head.*no stream.*by hand"):
+            self._hold(camera)
+
+        self.assertEqual(self.tenant.calls, [])
+
     def test_a_server_error_on_create_is_not_retried(self):
         self.tenant.on("POST", "/bookmarks", fakes.response(503))
 
@@ -374,6 +382,38 @@ class CoverageTests(_BookmarkTestCase):
                 self.assertEqual(head.source, "1")
                 self.assertEqual(head.covered_fraction, 0.0)
                 self.assertTrue(head.error)
+
+    def test_a_streamless_head_is_a_gap_in_coverage_but_not_bookmarked(self):
+        """Whether Aware accepts a streamless head is unverified, so it is not
+        sent; it is reported as an uncovered head for a hand check."""
+        camera = dataclasses.replace(_camera("1"), skipped_sources=("2", "3"))
+
+        coverage = self._coverage({"1": [(START, END)]}, camera=camera)
+
+        self.assertEqual([e["source"] for e in self._posted()["device_infos"]], ["1"])
+        self.assertEqual(
+            coverage,
+            (
+                client.HeadCoverage("1", 1.0),
+                client.HeadCoverage("2", 0.0, client.SKIPPED_HEAD_ERROR),
+                client.HeadCoverage("3", 0.0, client.SKIPPED_HEAD_ERROR),
+            ),
+        )
+        self.assertEqual(
+            client.SKIPPED_HEAD_ERROR, "head reports no stream; not bookmarked, check by hand"
+        )
+        self.assertEqual(
+            [c["json"]["deviceSources"][0]["source"] for c in self.tenant.calls_to("POST", TIMELINE)],
+            ["1"],
+        )
+
+    def test_a_skipped_head_also_listed_as_a_source_is_measured_not_doubled(self):
+        camera = dataclasses.replace(_camera("1"), skipped_sources=("1", "2", "2"))
+
+        coverage = self._coverage({"1": [(START, END)]}, camera=camera)
+
+        self.assertEqual([c.source for c in coverage], ["1", "2"])
+        self.assertEqual(coverage[0], client.HeadCoverage("1", 1.0))
 
     def test_one_unreadable_head_does_not_hide_the_others(self):
         def answer(record):
