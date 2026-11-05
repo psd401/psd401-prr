@@ -853,13 +853,47 @@ def stall_detector():
         )
 
 
+def _degrade_footage_hold_to_manual(fp, *, reason: str, error: str) -> None:
+    """Rule 7: when no camera ended up held, fall back to an URGENT manual
+    hold — facilities gets exact instructions and the timeline says why and
+    whether the alert went out. Never silence, never a false "Held"."""
+    from .models import FootagePreservation, StatusEvent
+
+    fp.state = FootagePreservation.State.MANUAL
+    fp.save(update_fields=["state"])
+    notification_result = notifications.notify_footage_manual_hold(
+        fp,
+        error=error,
+    )
+    if notification_result is True:
+        notification_note = "notification sent or queued to facilities."
+    elif notification_result is None:
+        notification_note = (
+            "an equivalent notification was already sent or queued; "
+            "duplicate alert suppressed."
+        )
+    else:
+        notification_note = (
+            "notification delivery failed or was blocked; operational "
+            "intervention required."
+        )
+    StatusEvent.objects.create(
+        request=fp.request,
+        note=(
+            f"Footage preservation: {reason} — URGENT manual hold "
+            + notification_note
+        ),
+    )
+
+
 @shared_task
 def execute_footage_hold(preservation_id: int):
     """Create saved clips on EVERY camera for the preservation window.
     Broad by default — narrowing is a human decision (triage.exclude_camera).
-    If the Aware API isn't configured/reachable, degrade to a MANUAL hold:
-    urgent email to facilities with exact instructions, because the retention
-    clock does not care about our API status."""
+    If the Aware API isn't configured/reachable, returns no cameras, or every
+    camera hold fails, degrade to a MANUAL hold: urgent email to facilities
+    with exact instructions, because the retention clock does not care about
+    our API status."""
     from apps.integrations.avigilon import client as alta
 
     from .models import CameraHold, FootagePreservation, StatusEvent
@@ -869,35 +903,28 @@ def execute_footage_hold(preservation_id: int):
 
     try:
         cameras = alta.list_cameras()
-    except alta.AltaError as exc:
-        fp.state = FootagePreservation.State.MANUAL
-        fp.save(update_fields=["state"])
-        notification_result = notifications.notify_footage_manual_hold(
-            fp,
-            error=str(exc),
+    # Rule 7: transport, HTTP, and decode errors must degrade like AltaError
+    # does; an escaping exception would leave the hold PENDING and nobody told.
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc) if isinstance(exc, alta.AltaError) else (
+            f"{type(exc).__name__}: {exc}"
         )
-        if notification_result is True:
-            notification_note = "notification sent or queued to facilities."
-        elif notification_result is None:
-            notification_note = (
-                "an equivalent notification was already sent or queued; "
-                "duplicate alert suppressed."
-            )
-        else:
-            notification_note = (
-                "notification delivery failed or was blocked; operational "
-                "intervention required."
-            )
-        StatusEvent.objects.create(
-            request=prr,
-            note=(
-                "Footage preservation: API unavailable — URGENT manual hold "
-                + notification_note
+        _degrade_footage_hold_to_manual(fp, reason="API unavailable", error=error)
+        return
+
+    if not cameras:
+        _degrade_footage_hold_to_manual(
+            fp,
+            reason="Aware returned zero cameras",
+            error=(
+                "Aware returned zero cameras, so nothing was preserved; a human "
+                "must confirm where any footage for this window lives"
             ),
         )
         return
 
     held, failed = 0, 0
+    first_error = ""
     for cam in cameras:
         ch = CameraHold.objects.create(
             preservation=fp, camera_id=str(cam["id"]),
@@ -914,8 +941,20 @@ def execute_footage_hold(preservation_id: int):
         except Exception as exc:  # noqa: BLE001 — per-camera isolation
             ch.state = CameraHold.State.FAILED
             ch.error = str(exc)[:500]
+            first_error = first_error or ch.error
             failed += 1
         ch.save()
+
+    if held == 0:
+        _degrade_footage_hold_to_manual(
+            fp,
+            reason=f"every camera hold failed (0 of {failed} held)",
+            error=(
+                f"every camera hold failed (0 of {failed} held); "
+                f"first error: {first_error[:300]}"
+            ),
+        )
+        return
 
     fp.state = (FootagePreservation.State.HELD if failed == 0
                 else FootagePreservation.State.PARTIAL)

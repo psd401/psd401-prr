@@ -230,6 +230,51 @@ class HoldPathTests(TestCase):
         self.assertEqual(fp.held_count, 0)
         notify_manual_hold.assert_called_once()
 
+    @mock.patch("apps.records.tasks.notifications.notify_footage_hold_complete")
+    @mock.patch(
+        "apps.records.tasks.notifications.notify_footage_manual_hold",
+        return_value=True,
+    )
+    @mock.patch("apps.integrations.avigilon.client.list_cameras", return_value=[])
+    def test_zero_cameras_records_reason_and_sends_no_completion(
+        self, _m_list, notify_manual_hold, notify_complete,
+    ):
+        day = (timezone.localdate() - dt.timedelta(days=2)).isoformat()
+        prr = make_request(f"all camera footage at the school on {day}")
+
+        fp = triage.triage_footage(prr)
+
+        fp.refresh_from_db()
+        self.assertEqual(fp.state, FootagePreservation.State.MANUAL)
+        notify_complete.assert_not_called()
+        self.assertIn("zero cameras", notify_manual_hold.call_args.kwargs["error"])
+        self.assertTrue(
+            prr.events.filter(
+                note__icontains="zero cameras — URGENT manual hold notification",
+            ).exists()
+        )
+
+    @mock.patch("apps.records.tasks.notifications.notify_footage_hold_complete")
+    @mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold")
+    @mock.patch(
+        "apps.integrations.avigilon.client.create_clip_hold",
+        side_effect=["clip-1", RuntimeError("bookmark rejected"), "clip-3"],
+    )
+    @mock.patch("apps.integrations.avigilon.client.list_cameras", return_value=FAKE_CAMERAS)
+    def test_some_cameras_failing_stays_partial(
+        self, _m_list, _m_clip, notify_manual_hold, notify_complete,
+    ):
+        day = (timezone.localdate() - dt.timedelta(days=2)).isoformat()
+        prr = make_request(f"camera footage of the gym on {day}")
+
+        fp = triage.triage_footage(prr)
+
+        fp.refresh_from_db()
+        self.assertEqual(fp.state, FootagePreservation.State.PARTIAL)
+        self.assertEqual(fp.held_count, 2)
+        notify_manual_hold.assert_not_called()
+        notify_complete.assert_called_once_with(fp, held=2, failed=1)
+
 
 @override_settings(
     CELERY_TASK_ALWAYS_EAGER=True,
