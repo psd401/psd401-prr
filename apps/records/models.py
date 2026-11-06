@@ -10,6 +10,7 @@ Design principles:
 """
 import uuid
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -19,6 +20,9 @@ from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.append_only import AppendOnlyManager, AppendOnlyModelMixin
+
+if TYPE_CHECKING:  # pragma: no cover - Django builds these at runtime
+    from django.db.models.fields.related_descriptors import RelatedManager
 
 
 class Requester(models.Model):
@@ -2803,6 +2807,10 @@ class FootagePreservation(models.Model):
     release_reason = models.CharField(max_length=500, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    if TYPE_CHECKING:  # pragma: no cover - declared for the type checker only
+        id: int
+        camera_holds: RelatedManager["CameraHold"]
+
     @property
     def held_count(self):
         """Cameras with a live Aware bookmark (full or partial coverage)."""
@@ -2852,6 +2860,11 @@ class CameraHold(models.Model):
     excluded_at = models.DateTimeField(null=True, blank=True)
     excluded_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     exclusion_reason = models.CharField(max_length=500, blank=True)
+
+    if TYPE_CHECKING:  # pragma: no cover - declared for the type checker only
+        id: int
+        preservation_id: int
+        excluded_by_id: int | None
 
     class Meta:
         unique_together = [("preservation", "camera_id")]

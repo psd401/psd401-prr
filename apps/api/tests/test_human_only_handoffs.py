@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
@@ -34,7 +35,8 @@ class HumanOnlyRuntimeBoundaryTests(TestCase):
         )
 
     @property
-    def auth(self):
+    def auth(self) -> dict[str, Any]:
+        # Any: these are WSGI environ extras, not the client's typed keywords.
         return {"HTTP_AUTHORIZATION": f"Token {self.token.key}"}
 
     def assert_handoff(self, response):

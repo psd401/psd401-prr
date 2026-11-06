@@ -30,7 +30,9 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from typing import cast
 
+from celery import Task
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -342,13 +344,13 @@ def triage_footage(prr: PublicRecordsRequest) -> FootagePreservation | None:
           sites=fp.site_codes, window=_local_dates(fp))
     if narrowed:
         record_scope_narrowed(fp, reasons=narrowed)
-    execute_footage_hold.delay(fp.id)
+    cast(Task, execute_footage_hold).delay(fp.id)
     fp.refresh_from_db()
     return fp
 
 
 @transaction.atomic
-def exclude_camera(camera_hold, reason: str, *, actor=None):
+def exclude_camera(camera_hold, reason: object, *, actor=None):
     """Narrow a hold: release one camera. Human + substantive reason required
     — same gate pattern as estimate revisions."""
     from apps.integrations.avigilon import client as alta
@@ -416,7 +418,7 @@ def exclude_camera(camera_hold, reason: str, *, actor=None):
     return camera_hold
 
 
-def _reason_text(reason) -> str:
+def _reason_text(reason: object) -> str:
     """A reason must be text. Anything else (a list, a number, a JSON object
     from an API body) is refused like an empty one, never coerced."""
     if reason is None:
@@ -431,7 +433,7 @@ WIDEN_REASON_MAX_LENGTH = 500
 
 @transaction.atomic
 def widen_preservation(
-    preservation: FootagePreservation, *, actor, reason,
+    preservation: FootagePreservation, *, actor, reason: object,
 ) -> FootagePreservation:
     """Widen a site-narrowed hold to every camera district-wide. Widening
     only preserves more, so it needs a current Records Officer and a reason
@@ -480,7 +482,9 @@ def widen_preservation(
             f"camera district-wide. Reason: {reason}"
         ),
     )
-    transaction.on_commit(lambda: execute_footage_hold.delay(fp.id, only_new=True))
+    transaction.on_commit(
+        lambda: cast(Task, execute_footage_hold).delay(fp.id, only_new=True)
+    )
     return fp
 
 
@@ -516,8 +520,8 @@ def release_preservation(
     preservation: FootagePreservation,
     *,
     actor,
-    reason: str,
-    attest_no_litigation_hold: bool,
+    reason: object,
+    attest_no_litigation_hold: object,
 ) -> FootagePreservation:
     """End a preservation hold for good: Aware deletes every bookmark and the
     footage then ages out. Human only, like exclude_camera: a current Records
@@ -570,7 +574,7 @@ def release_preservation(
     if fp.state not in RELEASABLE_PRESERVATION_STATES and not retry:
         raise ValueError(
             "Only a held or partly held preservation can be released; this "
-            f"one is {fp.get_state_display().lower()}."
+            f"one is {FootagePreservation.State(fp.state).label.lower()}."
         )
     prr = fp.request
     if prr.status not in CLOSED_STATUSES:

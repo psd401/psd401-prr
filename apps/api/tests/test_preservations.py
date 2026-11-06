@@ -425,7 +425,7 @@ class PreservationApiTests(TestCase):
     def _narrow_to_phs(self):
         FootagePreservation.objects.filter(pk=self.fp.pk).update(site_codes=["PHS"])
 
-    def _widen(self, reason=WIDEN_REASON):
+    def _widen(self, reason: object = WIDEN_REASON):
         with self.captureOnCommitCallbacks(execute=True):
             return self.client.post(
                 f"/api/staff/preservations/{self.fp.id}/widen/",

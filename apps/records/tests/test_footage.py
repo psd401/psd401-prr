@@ -1033,7 +1033,7 @@ class WidenTests(TestCase):
         self.assertEqual(fp.site_codes, ["PHS"])
         return fp
 
-    def _widen(self, fp, reason=REASON, actor=None):
+    def _widen(self, fp, reason: object = REASON, actor=None):
         with self.captureOnCommitCallbacks(execute=True):
             return triage.widen_preservation(
                 fp, reason=reason, actor=actor or self._officer(),
@@ -1397,6 +1397,7 @@ class ConfirmationTextTests(TestCase):
         )
         fp.refresh_from_db()
         text = triage.preservation_confirmation_text(fp)
+        assert text is not None
         self.assertIn("1 pending", text)
         self.assertTrue(text.endswith("0 failed."), text)
 
