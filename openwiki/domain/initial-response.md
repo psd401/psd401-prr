@@ -79,7 +79,10 @@ the request's `acknowledgment_sent_at`, a legacy NextRequest import
 `record_external_initial_response()` in [`apps/records/services.py`](../../apps/records/services.py),
 or an `ACKNOWLEDGED` or `CLARIFICATION` status event. The property
 `initial_response_delivered` in [`apps/records/models.py`](../../apps/records/models.py)
-reads them. The inverse query, `awaiting_initial_response()`, is the same predicate that the
+reads them. Attestations for cases answered in a prior system can also be recorded in bulk
+by the `attest_external_initial_responses` command, which calls the same service once per
+case ([NextRequest migration](nextrequest-migration.md#companion-imports)).
+The inverse query, `awaiting_initial_response()`, is the same predicate that the
 safety-net worker selects on.
 
 ## The day-5 safety net reads the same predicate
@@ -151,10 +154,6 @@ response was delivered for a case the safety net still considers unanswered.
   an external first response in the service. `apps/api/tests/test_external_initial_response_api.py`
   covers the endpoint, its human-only refusal, and the attestation it returns. On the frontend, `CorrespondencePanel.test.tsx` and
   `RequestDetail.test.tsx` cover the ladder and the delivered state.
-- **Escalation.** A change that alters when the safety net fires, or the rule for
-  `automatic_blocked`, is a compliance change. Read [compliance](compliance.md) first and
-  run the compliance tests as well.
-
 - **Escalation.** A change that alters when the safety net fires, or the rule for
   `automatic_blocked`, is a compliance change. Read [compliance](compliance.md) first and
   run the compliance tests as well.
