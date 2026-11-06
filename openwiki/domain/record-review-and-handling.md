@@ -6,14 +6,15 @@ tags: [domain, record-review, redaction, derivatives, handling, media, opaque-re
 openwiki:
   roles: [domain, workflow]
   change_kinds: [review-workflow, rendering, handling-paths]
-  source_paths: [apps/records/handling.py, apps/records/derivatives.py, apps/records/preview.py, apps/records/review.py, apps/records/opaque_review.py, apps/records/media_review.py, apps/records/clusters.py, apps/records/review_batches.py, apps/api/resources/records_misc.py, frontend/src/case/RecordClusters.tsx, frontend/src/case/BatchReview.tsx, frontend/src/case/ReviewFlight.tsx]
-  symbols: [handling_for, handling_for_item, build_derivative, review_record, bulk_review_records, bulk_review_selection, bulk_review_confirmed_selection, approve_second_review, render_redacted_record, record_opaque_disposition, create_media_redaction, render_media_redactions, cluster_records, RecordItemViewSet]
-  test_paths: [apps/records/tests/test_handling.py, apps/records/tests/test_derivatives.py, apps/records/tests/test_record_review.py, apps/records/tests/test_media_and_opaque_review.py, apps/records/tests/test_review_agreement.py, apps/records/tests/test_undo_review.py, apps/api/tests/test_records_misc.py, apps/api/tests/test_bulk_review_by_filter.py, frontend/src/case/ReviewFlight.test.tsx]
+  source_paths: [apps/records/handling.py, apps/records/derivatives.py, apps/records/preview.py, apps/records/readable.py, apps/records/review.py, apps/records/opaque_review.py, apps/records/media_review.py, apps/records/clusters.py, apps/records/review_batches.py, apps/api/resources/records_misc.py, frontend/src/case/RecordClusters.tsx, frontend/src/case/BatchReview.tsx, frontend/src/case/ReviewFlight.tsx]
+  symbols: [handling_for, handling_for_item, build_derivative, readable_text, record_reading_text, review_record, bulk_review_records, bulk_review_selection, bulk_review_confirmed_selection, approve_second_review, render_redacted_record, record_opaque_disposition, create_media_redaction, render_media_redactions, cluster_records, RecordItemViewSet]
+  test_paths: [apps/records/tests/test_handling.py, apps/records/tests/test_derivatives.py, apps/records/tests/test_readable_text.py, apps/records/tests/test_record_review.py, apps/records/tests/test_media_and_opaque_review.py, apps/records/tests/test_review_agreement.py, apps/records/tests/test_undo_review.py, apps/api/tests/test_records_misc.py, apps/api/tests/test_bulk_review_by_filter.py, apps/api/tests/test_record_review.py, frontend/src/case/ReviewFlight.test.tsx]
   invariants:
     - A record's original bytes are never replaced; a reading copy or redacted copy is always a new derived object.
     - A record that cannot be rendered is never marked reviewed by default; a named human records a basis and reasoning.
     - Every redaction cites an exemption, and a second-review exemption needs a distinct second reviewer before burn-in.
     - A filter-driven bulk decision writes only the exact set the reviewer confirmed (same count and digest), or it writes nothing.
+    - A reading copy of extracted text is derived for display only; `ocr_text` is never rewritten, and each read is audited.
   validation_commands: ["PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_handling apps.records.tests.test_derivatives --settings=config.test_settings", "PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_bulk_review_by_filter --settings=config.test_settings"]
 ---
 
@@ -87,6 +88,26 @@ reason. Outlook `.msg` files get guidance instead of a fake render. The Celery t
 [`apps/records/tasks.py`](../../apps/records/tasks.py) drive the queue. `preview.py`
 (`is_previewable`, `has_ready_derivative`, `preview_pdf_metadata`) gives the reviewer a
 verified PDF for the converted or original copy.
+
+## Reading text without email markup
+
+Reviewers who read extracted text, rather than a PDF page, use a cleaned reading copy from
+`apps/records/readable.py`. `RecordItem.ocr_text` stays exactly as extracted, because search
+reads it. Email bodies arrive with Outlook conditional comments, style blocks, HTML tags, and
+markdown image and link syntax. `readable_text(raw)` removes that markup, collapses blank lines,
+and never writes back. It removes only real HTML element names and Office-namespaced tags, so
+text a person wrote in angle brackets, such as a redaction marker or an address, stays.
+
+`record_reading_text(item, actor=...)` serves the copy at
+`GET /api/staff/record-items/{id}/text/` (the `text` action on `RecordItemViewSet`, registered as
+capability `record_items.read_text`). The response is `{text, truncated}`, capped at
+`READABLE_TEXT_LIMIT` (200,000 characters). Each read writes a `record.text_viewed` audit entry,
+with the same audience as a page preview. `ReviewFlight` fetches this endpoint on the keyboard
+review screen ([keyboard review](#keyboard-review-in-the-case-review-tab)).
+
+Focused tests: `apps/records/tests/test_readable_text.py` for the cleaning rules, and
+`apps/api/tests/test_record_review.py` for the audited read and the role denial. Minimal
+validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_readable_text --settings=config.test_settings`.
 
 ## Human review and second review
 
