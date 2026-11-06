@@ -168,6 +168,16 @@ class ShapeTests(_StoreTestCase):
         self._set("ALTA_API_USERNAME", "prr-holds@example.org")
         self.assertEqual(runtime.get("ALTA_API_USERNAME"), "prr-holds@example.org")
 
+    def test_the_bookmark_share_group_is_an_aware_group_id(self):
+        self.assertEqual(runtime.get("ALTA_BOOKMARK_SHARE_GROUP_ID"), "")
+        for refused in ("PRR Records", "0f8e2a4c-1b3d-4e5f-8a9b", "0f8e2a4c 1b3d"):
+            with self.subTest(value=refused), self.assertRaises(ValidationError):
+                self._set("ALTA_BOOKMARK_SHARE_GROUP_ID", refused)
+
+        group = "0f8e2a4c-1b3d-4e5f-8a9b-0c1d2e3f4a5b"
+        self._set("ALTA_BOOKMARK_SHARE_GROUP_ID", group)
+        self.assertEqual(runtime.get("ALTA_BOOKMARK_SHARE_GROUP_ID"), group)
+
     def test_the_scanner_port_is_a_real_port(self):
         with self.assertRaises(ValidationError):
             self._set("CLAMAV_PORT", 70000)

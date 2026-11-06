@@ -13,6 +13,7 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 import requests
+from django.test import override_settings
 
 from apps.integrations.avigilon import client
 from apps.integrations.avigilon.tests import fakes
@@ -100,7 +101,7 @@ class CreateBookmarkTests(_BookmarkTestCase):
                 "description": "Public records preservation hold.",
                 "expiry_time": None,
                 "origin": "ALTA Aware",
-                "able_to_download": True,
+                "able_to_download": False,
                 "allow_audio": False,
                 "device_infos": [
                     {
@@ -114,6 +115,24 @@ class CreateBookmarkTests(_BookmarkTestCase):
                 ],
             },
         )
+
+    @override_settings(ALTA_BOOKMARK_SHARE_GROUP_ID="0f8e2a4c-1b3d-4e5f-8a9b-0c1d2e3f4a5b")
+    def test_a_configured_share_group_sees_the_hold(self):
+        self._hold()
+
+        posted = self._posted()
+        self.assertEqual(
+            posted["shared_user_groups"],
+            [{"user_group_id": "0f8e2a4c-1b3d-4e5f-8a9b-0c1d2e3f4a5b"}],
+        )
+        self.assertIs(posted["share_all"], False)
+        self.assertIs(posted["able_to_download"], False)
+
+    def test_no_share_group_shares_with_no_one(self):
+        self._hold()
+
+        self.assertNotIn("shared_user_groups", self._posted())
+        self.assertNotIn("share_all", self._posted())
 
     def test_no_entry_carries_a_source_id(self):
         self._hold(_camera("1", "2"))

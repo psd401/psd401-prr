@@ -2378,6 +2378,27 @@ SETTINGS: tuple[SettingSpec, ...] = (
             "Blank or wrong, holds fall back to manual facilities work."
         ),
     ),
+    SettingSpec(
+        key="ALTA_BOOKMARK_SHARE_GROUP_ID",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        max_length=36,
+        pattern=r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        format_message=(
+            "The share group is the Aware user group's id, a UUID such as "
+            "0f8e2a4c-1b3d-4e5f-8a9b-0c1d2e3f4a5b."
+        ),
+        category=CATEGORY_INTEGRATIONS,
+        label="Avigilon Aware hold share group",
+        consequence=(
+            "The Aware user group each new hold bookmark is shared with, so "
+            "Records staff see holds in Aware. What a member may do comes "
+            "from their Aware role: keep the group on a role that cannot edit "
+            "or delete clips. Blank, holds are visible only to the holds "
+            "account and Aware administrators."
+        ),
+    ),
 )
 
 #: Ordering constraints between two settings, checked from either side on

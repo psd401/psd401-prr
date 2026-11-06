@@ -702,7 +702,9 @@ def _post_bookmark(
         "description": description,
         "expiry_time": None,
         "origin": BOOKMARK_ORIGIN,
-        "able_to_download": True,
+        # View-only, like every other bookmark on the tenant: a hold preserves
+        # footage, and exports are made from the camera by staff who may.
+        "able_to_download": False,
         "allow_audio": False,
         "device_infos": [
             {
@@ -715,6 +717,10 @@ def _post_bookmark(
             for sid in heads
         ],
     }
+    share_group = (runtime.get("ALTA_BOOKMARK_SHARE_GROUP_ID") or "").strip()
+    if share_group:
+        body["share_all"] = False
+        body["shared_user_groups"] = [{"user_group_id": share_group}]
     try:
         created, location = api.create("/bookmarks", body)
     except AltaWriteUncertain as exc:
