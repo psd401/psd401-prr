@@ -1,7 +1,7 @@
 ---
 type: Operations
 title: Application Backup and Restore
-description: The two production recovery layers for PSD401 PRR - the EBS snapshot policy and the append-only daily PostgreSQL plus audit-ledger application backup - with the manifest commit marker, monitoring, and the restore drill required before migration-bearing releases.
+description: The two production recovery layers for PSD401 PRR - the EBS snapshot policy and the append-only daily PostgreSQL plus audit-ledger application backup - with the manifest commit marker, monitoring, and the restore verifier. The release script takes a backup before migrating, but the source does not enforce the restore drill that docs/backups.md requires before migration-bearing releases.
 tags: [operations, backups, restore, postgresql, audit, production]
 openwiki:
   roles: [operations]
