@@ -789,8 +789,8 @@ it('leads with the switches that shape the work and folds the rest under Advance
 
 afterEach(() => window.localStorage.clear())
 
-it('keeps Advanced open once opened, across a refresh of the list', async () => {
-  const fetchMock = stubFetch(async () => ok(withModel()))
+it('keeps Advanced open once opened, through a search and back', async () => {
+  stubFetch(async () => ok(withModel()))
   const user = userEvent.setup()
   renderPage()
   await screen.findByRole('heading', { name: 'Main' })
@@ -798,8 +798,7 @@ it('keeps Advanced open once opened, across a refresh of the list', async () => 
   await user.click(screen.getByText('Advanced settings'))
   const advanced = screen.getByText('Advanced settings').closest('details')!
   expect(advanced).toHaveAttribute('open')
-  // A save refetches the list; the section stays as the person left it.
-  fetchMock.mockClear()
+  // A search re-renders the section; it stays as the person left it.
   await user.type(screen.getByRole('searchbox', { name: 'Search settings' }), 'x')
   await user.clear(screen.getByRole('searchbox', { name: 'Search settings' }))
   expect(screen.getByText('Advanced settings').closest('details')).toHaveAttribute('open')

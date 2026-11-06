@@ -1582,7 +1582,7 @@ export function RequestDetail({
                     {r.ferpa_identity_verification.verified_by
                       ? ` — ${r.ferpa_identity_verification.verified_by}`
                       : ''}
-                    , {r.ferpa_identity_verification.verified_at.slice(0, 10)}.{' '}
+                    , {formatDay(r.ferpa_identity_verification.verified_at)}.{' '}
                     {r.ferpa_identity_verification.note}
                   </p>
                 ) : (
@@ -1702,10 +1702,10 @@ export function RequestDetail({
                     {canManageRequest ? (
                       <>
                         {' '}— {rev.reason} ({rev.automated ? 'automated' : rev.revised_by ?? 'system'},{' '}
-                        {rev.created_at.slice(0, 10)})
+                        {formatDay(rev.created_at)})
                       </>
                     ) : (
-                      <> ({rev.created_at.slice(0, 10)})</>
+                      <> ({formatDay(rev.created_at)})</>
                     )}
                   </span>
                 </div>

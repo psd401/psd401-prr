@@ -18,6 +18,7 @@ import {
   Textarea,
   useToast,
 } from '../ui'
+import { formatDay } from '../date'
 
 interface CameraHold {
   id: number
@@ -243,7 +244,7 @@ export function Preservations({
                       cell: (h: CameraHold) =>
                         h.excluded_at ? (
                           <span className="block max-w-xs text-xs text-ink-muted">
-                            {h.excluded_at.slice(0, 10)} by {h.excluded_by ?? '—'}
+                            {formatDay(h.excluded_at)} by {h.excluded_by ?? '—'}
                             {h.exclusion_reason && <> — {h.exclusion_reason}</>}
                           </span>
                         ) : (

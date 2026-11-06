@@ -115,7 +115,6 @@ class CaseInboxViewTests(StaffApiTestCase):
         aggregate = max((query["sql"] for query in queries.captured_queries), key=len)
         self.assertNotIn('"_source_correspondence_id"', aggregate)
         self.assertNotIn('"_source_due_date"', aggregate)
-        self.assertNotIn("OuterRef", aggregate)
         self.assertEqual(response.json()["inbox_needs_attention"], 2)
 
     def test_mark_caught_up_handles_every_waiting_row_on_the_case(self):

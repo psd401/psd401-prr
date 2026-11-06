@@ -478,7 +478,7 @@ export function Tasks({
               },
               {
                 header: 'Completed',
-                cell: (r: CollectionTask) => (r.completed_at ? r.completed_at.slice(0, 10) : '—'),
+                cell: (r: CollectionTask) => formatDay(r.completed_at),
               },
             ]}
             rows={rows}
