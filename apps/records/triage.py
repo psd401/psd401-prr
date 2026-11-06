@@ -649,9 +649,15 @@ def release_preservation(
         fp.released_by = actor
         fp.release_reason = reason
         fp.save(update_fields=["state", "released_at", "released_by", "release_reason"])
-    CameraHold.objects.filter(pk__in=[hold.pk for hold in holds]).update(
-        state=CameraHold.State.RELEASED,
+    # A bookmark is RELEASED only once Aware confirms the delete: until then
+    # it is not yet confirmed deleted, so a crash after commit stays
+    # retryable instead of orphaning it.
+    CameraHold.objects.filter(pk__in=[pk for pk, _, _ in bookmarks]).update(
+        state=CameraHold.State.RELEASE_FAILED,
     )
+    CameraHold.objects.filter(pk__in=[hold.pk for hold in holds]).exclude(
+        pk__in=[pk for pk, _, _ in bookmarks],
+    ).update(state=CameraHold.State.RELEASED)
     StatusEvent.objects.create(
         request=prr,
         actor=actor,
@@ -677,13 +683,10 @@ def release_preservation(
             failed = []
             for hold_pk, camera, bookmark_id in bookmarks:
                 try:
-                    alta.delete_bookmark(bookmark_id)
+                    alta.delete_bookmark(bookmark_id)  # NOT_FOUND counts as deleted
                 # Any failure, not only AltaError: the rest still get deleted.
                 except Exception as exc:  # noqa: BLE001
                     failed.append(camera)
-                    CameraHold.objects.filter(pk=hold_pk).update(
-                        state=CameraHold.State.RELEASE_FAILED,
-                    )
                     audit(
                         "footage.bookmark_release_failed",
                         target=prr.number,
@@ -692,6 +695,10 @@ def release_preservation(
                         bookmark=bookmark_id,
                         error=_safe_alta_error(exc, action="bookmark delete"),
                     )
+                else:
+                    CameraHold.objects.filter(
+                        pk=hold_pk, state=CameraHold.State.RELEASE_FAILED,
+                    ).update(state=CameraHold.State.RELEASED)
             if failed:
                 StatusEvent.objects.create(
                     request=prr,

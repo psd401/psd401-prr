@@ -2835,9 +2835,13 @@ class CameraHold(models.Model):
         NOT_RETAINED = "not_retained", "No retained footage for the window"
         FAILED = "failed", "Failed"
         RELEASED = "released", "Released"
-        # Release asked Aware to delete the bookmark and the delete failed:
-        # the bookmark may still exist. Re-posting release retries it.
-        RELEASE_FAILED = "release_failed", "Release failed — bookmark may still exist"
+        # Release asked Aware to delete the bookmark and Aware has not yet
+        # confirmed it (still running, crashed, or the delete failed): the
+        # bookmark may still exist. Re-posting release retries it.
+        RELEASE_FAILED = (
+            "release_failed",
+            "Not yet confirmed deleted — bookmark may still exist",
+        )
 
     BOOKMARKED_STATES = (State.HELD, State.GAP)
 

@@ -2039,6 +2039,38 @@ class ReleaseGateTests(TestCase):
         self.assertEqual(fp.state, FootagePreservation.State.RELEASED)
 
     @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_a_bookmark_is_not_released_until_aware_confirms_its_delete(
+        self, delete_bookmark,
+    ):
+        # A crash between commit and the deletes must leave them retryable.
+        fp = self._held_preservation()
+        with self.captureOnCommitCallbacks(execute=False) as deletes:
+            self._release(fp)
+
+        delete_bookmark.assert_not_called()
+        self.assertEqual(
+            set(fp.camera_holds.values_list("state", flat=True)),
+            {CameraHold.State.RELEASE_FAILED},
+        )
+        fp.refresh_from_db()
+        self.assertEqual(fp.state, FootagePreservation.State.RELEASED)
+        self.assertTrue(triage.is_releasable(fp))
+
+        for callback in deletes:
+            callback()
+
+        self.assertEqual(delete_bookmark.call_count, 3)
+        self.assertEqual(
+            set(fp.camera_holds.values_list("state", flat=True)),
+            {CameraHold.State.RELEASED},
+        )
+
+    def test_an_unconfirmed_delete_is_worded_as_not_yet_confirmed_deleted(self):
+        self.assertIn(
+            "not yet confirmed deleted", CameraHold.State.RELEASE_FAILED.label.lower(),
+        )
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
     def test_release_deletes_a_failed_hold_that_recorded_a_bookmark(
         self, delete_bookmark,
     ):
