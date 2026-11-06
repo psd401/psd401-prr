@@ -183,7 +183,8 @@ transaction, and flip it to `RELEASED` only after Aware confirms the delete (or
 reports the bookmark already gone). A refused delete, or a crash partway
 through, therefore leaves the camera retryable and logged; every run retries
 only those cameras, excluded ones included, and records each retry in the
-audit log. Release waits
+audit log. An exclusion whose delete fails on an open request waits for that
+release, so its bookmark over-preserves until then. Release waits
 while a hold run (a widen included) is still bookmarking; if the sweeper
 cleared a stalled run that then makes one more bookmark after a release, that
 bookmark is marked `RELEASE_FAILED` so the next run deletes it. A camera whose
