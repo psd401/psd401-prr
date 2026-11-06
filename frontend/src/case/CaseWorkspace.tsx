@@ -2,7 +2,7 @@
 // ABOUTME: through Close, each stage led by its decision card. One stage mounts.
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router'
+import { Link, Navigate, useParams, useSearchParams } from 'react-router'
 import type { StaffRole } from '../api/auth'
 import { api } from '../api/client'
 import { PageHeader } from '../layout/AppLayout'
@@ -24,6 +24,7 @@ import { useCaseCollections } from './caseCollections'
 import { EstimateLetterCard } from './EstimateLetterCard'
 import { RecordUploadPanel } from './RecordUploadPanel'
 import { RedactionProposals } from './RedactionProposals'
+import { RedactWorkspace } from './RedactWorkspace'
 import { ReviewFlight } from './ReviewFlight'
 import { ScopingTrail } from './ScopingTrail'
 
@@ -435,14 +436,19 @@ function ReviewStage({ number, roles }: { number: string; roles: StaffRole[] }) 
 }
 
 function RedactStage({ number }: { number: string }) {
-  const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
   return (
-    <RedactionProposals
-      request={number}
-      onOpen={(id) => navigate(
-        `/requests/${number}/review?view=records&item=${encodeURIComponent(id)}`,
-      )}
-    />
+    <div className="space-y-5">
+      <RedactionProposals
+        request={number}
+        onOpen={(id) => {
+          const next = new URLSearchParams(params)
+          next.set('item', id)
+          setParams(next)
+        }}
+      />
+      <RedactWorkspace number={number} />
+    </div>
   )
 }
 
