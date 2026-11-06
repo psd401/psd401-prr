@@ -64,3 +64,18 @@ class VerifyAdvisoryCommandTests(TestCase):
                 with self.assertRaisesMessage(CommandError, f"retention mode is {mode}"):
                     call_command("verify_advisory_ai", stdout=StringIO())
         invoke.assert_not_called()
+
+    @patch("apps.records.management.commands.verify_advisory_ai.invoke_advisory_model")
+    def test_refuses_when_the_retention_mode_cannot_be_read(self, invoke):
+        from botocore.exceptions import ClientError
+
+        denied = ClientError(
+            {"Error": {"Code": "AccessDeniedException", "Message": "no"}},
+            "GetAccountDataRetention",
+        )
+        with patch("apps.records.advisory_ai.boto3.client") as client_factory:
+            client_factory.return_value.get_account_data_retention.side_effect = denied
+            with self.assertRaisesMessage(CommandError, "zero retention cannot be confirmed"):
+                call_command("verify_advisory_ai", stdout=StringIO())
+        self.assertEqual(client_factory.call_args.args, ("bedrock",))
+        invoke.assert_not_called()
