@@ -50,7 +50,10 @@ class PreservationSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(serializers.BooleanField())
     def get_widenable(self, obj):
-        return bool(obj.site_codes) and obj.state != FootagePreservation.State.RELEASED
+        # PENDING: the first run is still bookmarking; widen once it finishes.
+        return bool(obj.site_codes) and obj.state not in (
+            FootagePreservation.State.RELEASED, FootagePreservation.State.PENDING,
+        )
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_released_by(self, obj):

@@ -1040,6 +1040,7 @@ def _hold_one_camera(fp, cam, ch, *, now) -> None:
         ch.state = CameraHold.State.NOT_RETAINED
         ch.coverage_fraction = 0.0
         ch.error = ""
+        ch.hold_claimed_at = None  # no create was attempted
         notes.append(
             f"Oldest retained footage ({_local_time(pruned_to)}) is at or after "
             "the window end; nothing to bookmark, but other users' bookmarks "
@@ -1067,6 +1068,8 @@ def _hold_one_camera(fp, cam, ch, *, now) -> None:
         ch.error = _safe_alta_error(exc)[:500]
         if isinstance(exc, alta.AltaWriteUncertain):
             notes.append(BOOKMARK_MAY_EXIST[0].upper() + BOOKMARK_MAY_EXIST[1:] + ".")
+        else:
+            ch.hold_claimed_at = None  # Aware made no bookmark; a rerun may retry
         ch.coverage_note = " ".join(notes)[:500]
         ch.save()
         return
@@ -1305,6 +1308,14 @@ def _execute_footage_hold(preservation_id: int, *, only_new: bool = False):
         if (only_new and not created) or ch.state in skip or ch.clip_id \
                 or ch.excluded_at is not None:
             continue
+        # Claim the camera before calling Aware: a concurrent run that got
+        # here first owns it.
+        claimed_at = timezone.now()
+        if not CameraHold.objects.filter(
+            pk=ch.pk, clip_id="", hold_claimed_at__isnull=True,
+        ).update(hold_claimed_at=claimed_at):
+            continue
+        ch.hold_claimed_at = claimed_at
         _hold_one_camera(fp, cam, ch, now=now)
 
     holds = fp.camera_holds.filter(excluded_at__isnull=True).exclude(

@@ -484,6 +484,20 @@ class PreservationApiTests(TestCase):
         )
         self.assertFalse(self.client.get(url).json()["widenable"])
 
+    @mock.patch("apps.records.tasks.execute_footage_hold.delay")
+    def test_widen_is_refused_while_the_hold_is_still_running(self, delay):
+        self._narrow_to_phs()
+        FootagePreservation.objects.filter(pk=self.fp.pk).update(
+            state=FootagePreservation.State.PENDING,
+        )
+        url = f"/api/staff/preservations/{self.fp.id}/"
+        self.assertFalse(self.client.get(url).json()["widenable"])
+
+        response = self._widen()
+
+        self.assertEqual(response.status_code, 400)
+        delay.assert_not_called()
+
     # -- read-only enforcement --------------------------------------------
 
     def test_create_not_allowed(self):

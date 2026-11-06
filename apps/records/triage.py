@@ -482,6 +482,10 @@ def widen_preservation(
     ).get(pk=preservation.pk)
     if fp.state == FootagePreservation.State.RELEASED:
         raise ValueError("A released preservation cannot be widened.")
+    if fp.state == FootagePreservation.State.PENDING:
+        raise ValueError(
+            "The automatic hold is still running; widen it once it finishes."
+        )
     if not fp.site_codes:
         raise ValueError("This hold already covers every camera district-wide.")
 

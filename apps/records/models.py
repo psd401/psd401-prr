@@ -2860,6 +2860,10 @@ class CameraHold(models.Model):
     excluded_at = models.DateTimeField(null=True, blank=True)
     excluded_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     exclusion_reason = models.CharField(max_length=500, blank=True)
+    # Set by a conditional update before any Aware call, so two runs never
+    # bookmark the same camera. Cleared only when Aware definitely made no
+    # bookmark; an uncertain create or a run that died mid-call keeps it.
+    hold_claimed_at = models.DateTimeField(null=True, blank=True)
 
     if TYPE_CHECKING:  # pragma: no cover - declared for the type checker only
         id: int

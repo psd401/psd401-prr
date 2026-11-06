@@ -1148,6 +1148,54 @@ class WidenTests(TestCase):
         with self.assertRaises(ValueError):
             self._widen(fp)
 
+    def test_widen_is_refused_while_the_first_run_is_still_pending(self):
+        # Two runs at once could bookmark the same camera twice.
+        fp = self._phs_hold()
+        FootagePreservation.objects.filter(pk=fp.pk).update(
+            state=FootagePreservation.State.PENDING,
+        )
+        with aware() as m, self.assertRaises(ValueError):
+            self._widen(fp)
+
+        m.hold.assert_not_called()
+        fp.refresh_from_db()
+        self.assertEqual(fp.site_codes, ["PHS"])
+
+    def test_a_camera_another_run_has_claimed_is_never_bookmarked_again(self):
+        # The widen created and claimed cam-3's row; the stalled first run
+        # reaches cam-3 afterwards and must leave it alone.
+        prr = make_request(f"camera footage of the gym entrance on {days_ago(3)}")
+        fp = preserve_uncommitted(prr)  # its task never runs: no commit
+        CameraHold.objects.create(
+            preservation=fp, camera_id="cam-3", camera_name="Main Office", site="KMS",
+            hold_claimed_at=timezone.now(),
+        )
+        with aware() as m:
+            tasks.execute_footage_hold(fp.id)
+
+        self.assertEqual(
+            sorted(c.args[0].id for c in m.hold.call_args_list), ["cam-1", "cam-2"],
+        )
+
+    def test_a_run_records_its_claim_on_each_camera_it_bookmarks(self):
+        fp = self._phs_hold()
+        self.assertTrue(all(
+            ch.hold_claimed_at is not None for ch in fp.camera_holds.all()
+        ))
+
+    def test_a_create_that_may_have_landed_keeps_its_claim_so_no_rerun_repeats_it(self):
+        def cam_2_uncertain(cam, start, end, *, name, description):
+            if cam.id == "cam-2":
+                raise alta.AltaWriteUncertain("timed out")
+            return full_hold(cam, start, end, name=name, description=description)
+
+        fp = self._phs_hold(hold=cam_2_uncertain)
+        self.assertIsNotNone(fp.camera_holds.get(camera_id="cam-2").hold_claimed_at)
+        with aware() as m:
+            tasks.execute_footage_hold(fp.id)
+
+        m.hold.assert_not_called()
+
     def test_a_widen_run_that_crashes_sends_an_urgent_manual_notice(self):
         fp = self._phs_hold()
         with aware(), \
