@@ -914,7 +914,7 @@ CAPABILITIES = (
         ),
         "POST",
         "/api/staff/preservations/{id}/widen/",
-        ["/requests/:number/collection"],
+        ["/requests/:number/collect"],
         risk="moderate",
         mcp_tool=None,
         constraints=[
@@ -932,7 +932,7 @@ CAPABILITIES = (
         ),
         "POST",
         "/api/staff/preservations/{id}/release/",
-        ["/requests/:number/collection"],
+        ["/requests/:number/collect"],
         execution="human_only",
         risk="high",
         constraints=[
