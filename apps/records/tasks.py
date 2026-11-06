@@ -946,6 +946,43 @@ def _finish_hold_run(fp, run: _HoldRun, state) -> bool:
     return False
 
 
+def _degrade_or_report_widen(
+    fp, run: _HoldRun, *, only_new: bool, widened_from, reason: str, error: str,
+) -> None:
+    """A widen only adds cameras: when it cannot run, send the URGENT
+    district-wide notice and leave the hold's state and held cameras as they
+    were. Its scope returns to the sites actually held, so the confirmation
+    never claims district-wide cameras and the widen can be posted again.
+    A first run degrades to MANUAL."""
+    from apps.audit.models import audit
+
+    from . import triage
+    from .models import FootagePreservation, StatusEvent
+
+    if not only_new:
+        _degrade_footage_hold_to_manual(fp, run, reason=reason, error=error)
+        return
+    _notify_manual_hold(
+        fp, reason=f"widened hold not run: {reason}", error=error, site_codes=[],
+    )
+    if widened_from and FootagePreservation.objects.filter(
+        pk=fp.pk, site_codes=[], hold_run_started_at=run.started_at,
+    ).update(site_codes=list(widened_from)):
+        fp.site_codes = list(widened_from)
+        sites = triage.describe_sites(widened_from)
+        audit("footage.hold_widen_not_run", target=fp.request.number,
+              sites=fp.site_codes, reason=reason)
+        StatusEvent.objects.create(
+            request=fp.request,
+            note=(
+                f"Footage hold not widened ({reason}): Aware still holds only "
+                f"{sites}, so the hold's scope is back to {sites}. Facilities "
+                "has URGENT manual instructions for every camera district-wide; "
+                "widen it again once Aware answers."
+            ),
+        )
+
+
 def _end_hold_run(preservation_id: int, run: _HoldRun | None) -> None:
     """Clear this run's marker when it stops without writing a result."""
     from .models import FootagePreservation
@@ -1252,11 +1289,16 @@ def sweep_stalled_footage_holds() -> int:
 
 
 @shared_task
-def execute_footage_hold(preservation_id: int, only_new: bool = False):
+def execute_footage_hold(
+    preservation_id: int, only_new: bool = False, widened_from=None,
+):
     """Run the hold; whatever happens, never leave it PENDING. ``only_new``
-    (a widen) bookmarks only cameras with no hold row yet."""
+    (a widen) bookmarks only cameras with no hold row yet; ``widened_from``
+    is the scope it widened, restored if the widen cannot run."""
     try:
-        _execute_footage_hold(preservation_id, only_new=only_new)
+        _execute_footage_hold(
+            preservation_id, only_new=only_new, widened_from=widened_from,
+        )
     except Exception:
         if only_new:
             _widen_stopped(preservation_id)
@@ -1290,7 +1332,9 @@ def _never_leave_pending(preservation_id: int) -> None:
         logger.exception("Could not move footage hold %s off PENDING", preservation_id)
 
 
-def _execute_footage_hold(preservation_id: int, *, only_new: bool = False):
+def _execute_footage_hold(
+    preservation_id: int, *, only_new: bool = False, widened_from=None,
+):
     """Bookmark every in-scope camera for the requested window: each camera at
     the sites the request names, or every camera district-wide when it names
     none. Broad by default — narrowing is a human decision
@@ -1313,12 +1357,12 @@ def _execute_footage_hold(preservation_id: int, *, only_new: bool = False):
         return
     run = _start_hold_run(fp)
     try:
-        _run_footage_hold(fp, run, only_new=only_new)
+        _run_footage_hold(fp, run, only_new=only_new, widened_from=widened_from)
     finally:
         _end_hold_run(fp.pk, run)
 
 
-def _run_footage_hold(fp, run: _HoldRun, *, only_new: bool) -> None:
+def _run_footage_hold(fp, run: _HoldRun, *, only_new: bool, widened_from) -> None:
     from collections import Counter
 
     from apps.integrations.avigilon import client as alta
@@ -1344,12 +1388,15 @@ def _run_footage_hold(fp, run: _HoldRun, *, only_new: bool) -> None:
                 "but some cameras keep footage longer: check each camera's "
                 "retention in Aware and bookmark any that still hold the window."
             )
-        _degrade_footage_hold_to_manual(fp, run, reason="API unavailable", error=error)
+        _degrade_or_report_widen(
+            fp, run, only_new=only_new, widened_from=widened_from,
+            reason="API unavailable", error=error,
+        )
         return
 
     if not cameras:
-        _degrade_footage_hold_to_manual(
-            fp, run,
+        _degrade_or_report_widen(
+            fp, run, only_new=only_new, widened_from=widened_from,
             reason="Aware returned zero cameras",
             error=(
                 "Aware returned zero cameras, so nothing was preserved; a human "

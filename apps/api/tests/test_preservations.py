@@ -444,7 +444,7 @@ class PreservationApiTests(TestCase):
         self.assertEqual(body["id"], self.fp.id)
         self.assertEqual(body["site_codes"], [])
         self.assertFalse(body["widenable"])
-        delay.assert_called_once_with(self.fp.id, only_new=True)
+        delay.assert_called_once_with(self.fp.id, only_new=True, widened_from=["PHS"])
 
     @mock.patch("apps.records.tasks.execute_footage_hold.delay")
     def test_widen_rejects_a_thin_or_non_string_reason(self, delay):

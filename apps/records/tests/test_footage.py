@@ -1264,6 +1264,44 @@ class WidenTests(TestCase):
         self.assertIsNotNone(fp.hold_run_started_at)
         self.assertIsNotNone(fp.hold_heartbeat_at)
 
+    def _assert_widen_failure_keeps_the_hold(self, fp, manual):
+        before = (fp.state, fp.held_count, confirmation(fp), fp.site_codes)
+        fp.refresh_from_db()
+        # The scope returns to the sites actually held, so the widen can be
+        # posted again; facilities has the district-wide instructions.
+        self.assertEqual(
+            (fp.state, fp.held_count, confirmation(fp), fp.site_codes), before,
+        )
+        self.assertIsNone(fp.hold_run_started_at)
+        manual.assert_called_once()
+        self.assertEqual(manual.call_args.kwargs["site_codes"], [])
+        self.assertTrue(fp.request.events.filter(
+            note__contains="widen it again once Aware answers",
+        ).exists())
+        self.assertTrue(AuditLog.objects.filter(
+            action="footage.hold_widen_not_run", target=fp.request.number,
+        ).exists())
+
+    def test_a_widen_that_cannot_list_cameras_keeps_what_is_held(self):
+        fp = self._phs_hold()
+        self.assertEqual(fp.state, FootagePreservation.State.HELD)
+        with mock.patch(f"{CLIENT}.list_device_cameras",
+                        side_effect=alta.AltaNotConfigured("no token")), \
+             mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold",
+                        return_value=True) as manual:
+            self._widen(fp)
+
+        self._assert_widen_failure_keeps_the_hold(fp, manual)
+
+    def test_a_widen_that_sees_zero_cameras_keeps_what_is_held(self):
+        fp = self._phs_hold()
+        with aware(cameras=[]), \
+             mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold",
+                        return_value=True) as manual:
+            self._widen(fp)
+
+        self._assert_widen_failure_keeps_the_hold(fp, manual)
+
     def test_a_run_records_its_claim_on_each_camera_it_bookmarks(self):
         fp = self._phs_hold()
         self.assertTrue(all(

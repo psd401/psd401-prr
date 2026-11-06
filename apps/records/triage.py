@@ -511,7 +511,9 @@ def widen_preservation(
         ),
     )
     transaction.on_commit(
-        lambda: cast(Task, execute_footage_hold).delay(fp.id, only_new=True)
+        lambda: cast(Task, execute_footage_hold).delay(
+            fp.id, only_new=True, widened_from=previous,
+        )
     )
     return fp
 
