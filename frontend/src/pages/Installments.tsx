@@ -22,6 +22,7 @@ import {
   MIN_REASON_LENGTH,
   reasonTooShort,
 } from '../ui'
+import { formatDay } from '../date'
 
 interface FeeSchedule {
   id: string
@@ -910,11 +911,11 @@ export function Installments({
               { header: 'Sequence', cell: (r: Installment) => r.sequence, align: 'right' },
               { header: 'Items', cell: (r: Installment) => r.item_count, align: 'right' },
               { header: 'Fee amount', cell: (r: Installment) => r.fee_amount, align: 'right' },
-              { header: 'Fee paid', cell: (r: Installment) => r.fee_paid_at?.slice(0, 10) ?? '—' },
-              { header: 'Released', cell: (r: Installment) => r.released_at?.slice(0, 10) ?? '—' },
+              { header: 'Fee paid', cell: (r: Installment) => formatDay(r.fee_paid_at) },
+              { header: 'Released', cell: (r: Installment) => formatDay(r.released_at) },
               {
                 header: 'Download expires',
-                cell: (r: Installment) => r.download_expires_at?.slice(0, 10) ?? '—',
+                cell: (r: Installment) => formatDay(r.download_expires_at),
               },
               {
                 header: 'Downloads',

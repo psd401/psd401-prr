@@ -26,7 +26,10 @@ in the request.
 
 **New request** logs a phone, mailed, or in-person request. **Settings** holds
 configuration and, under *Reports*, JLARC reporting, the audit log, and the AI
-evaluation and agreement reports. The Inbox, Review, Decisions, and Oversight
+evaluation and agreement reports. District settings opens on *Main* -- the AI
+switches, the day-5 safety net, the AI models (picked from the approved list),
+and the trust ladder -- with every other limit and timeout under *Advanced
+settings*; the search box finds any of them. The Inbox, Review, Decisions, and Oversight
 pages still open from their links and old bookmarks.
 
 ## Triage the Inbox

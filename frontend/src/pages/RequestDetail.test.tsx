@@ -1447,7 +1447,7 @@ describe('a matter governed by other law', () => {
       .toBeInTheDocument()
     // The 45-day FERPA date is shown; the five-day RCW row is not there at all.
     expect(screen.getByText('FERPA access due (45 days)')).toBeInTheDocument()
-    expect(screen.getByText('2026-08-15')).toBeInTheDocument()
+    expect(screen.getByText('Aug 15, 2026')).toBeInTheDocument()
     expect(screen.queryByText('Statutory response due')).not.toBeInTheDocument()
     expect(screen.queryByText('Tolled business days')).not.toBeInTheDocument()
     // The safety net never sees this matter, so the card must not claim it

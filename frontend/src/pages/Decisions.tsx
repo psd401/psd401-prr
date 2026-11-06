@@ -6,6 +6,7 @@ import { Link } from 'react-router'
 import { api, unwrap, type Page } from '../api/client'
 import { PageHeader } from '../layout/AppLayout'
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Select, Spinner, Textarea } from '../ui'
+import { formatDay } from '../date'
 
 type Kind = 'review' | 'supersede' | 'scope_and_collect' | 'redaction_group' | 'intake_label'
 type State = 'proposed' | 'approved' | 'rejected'
@@ -100,7 +101,7 @@ function BatchCard({ batch }: { batch: DecisionBatch }) {
             {batch.request_number}
           </Link>
           <span className="text-ink-muted">
-            Proposed by {batch.proposed_by_username} on {batch.created_at.slice(0, 10)}
+            Proposed by {batch.proposed_by_username} on {formatDay(batch.created_at)}
           </span>
           {batch.state !== 'proposed' && (
             <Badge tone={batch.state === 'approved' ? 'green' : 'neutral'}>

@@ -61,6 +61,21 @@ class CaseInboxViewTests(StaffApiTestCase):
                 "reason": "",
             })
 
+    def test_the_case_list_costs_the_same_for_a_few_cases_or_many(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        def queries_for_list():
+            with CaptureQueriesContext(connection) as queries:
+                response = self.client.get("/api/staff/requests/", {"status": "open"})
+            self.assertEqual(response.status_code, 200, response.content)
+            return len(queries.captured_queries)
+
+        few = queries_for_list()
+        for index in range(8):
+            make_request(description=f"Another open case {index}", status=RequestStatus.ACKNOWLEDGED)
+        self.assertEqual(queries_for_list(), few)
+
     def test_open_cases_view_lists_each_open_case_once_flagged_first(self):
         response = self.client.get("/api/staff/requests/", {"queue": "inbox"})
 
@@ -84,6 +99,22 @@ class CaseInboxViewTests(StaffApiTestCase):
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["inbox_updated_cases"], 1)
+        self.assertEqual(response.json()["inbox_needs_attention"], 2)
+
+    def test_counts_use_no_per_row_source_lookups(self):
+        # Production has thousands of work items; a correlated lookup per row
+        # (matching a source id by casting primary keys) took ten seconds.
+        # The counts match sources once, in uncorrelated subqueries.
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get("/api/staff/work-items/counts/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        aggregate = max((query["sql"] for query in queries.captured_queries), key=len)
+        self.assertNotIn('"_source_correspondence_id"', aggregate)
+        self.assertNotIn('"_source_due_date"', aggregate)
         self.assertEqual(response.json()["inbox_needs_attention"], 2)
 
     def test_mark_caught_up_handles_every_waiting_row_on_the_case(self):

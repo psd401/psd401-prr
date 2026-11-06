@@ -89,6 +89,15 @@ class AppSettingApiTests(TestCase):
             self.assertIn("value", row)
             self.assertIn("last_change", row)
 
+    def test_model_settings_offer_the_granted_profiles_as_a_pick_list(self):
+        rows = {
+            row["key"]: row
+            for row in self.client.get("/api/staff/settings/").json()["results"]
+        }
+        self.assertIn("us.openai.gpt-6.1-terra", rows["PRR_AI_MODEL_INTAKE"]["suggestions"])
+        self.assertEqual(rows["PRR_AI_MODEL"]["suggestions"], rows["PRR_AI_MODEL_INTAKE"]["suggestions"])
+        self.assertEqual(rows["AUTO_ACK_SAFETY_NET"]["suggestions"], [])
+
     def test_the_safety_net_row_states_the_statutory_consequence(self):
         response = self.client.get("/api/staff/settings/")
         self.assertEqual(response.status_code, 200)

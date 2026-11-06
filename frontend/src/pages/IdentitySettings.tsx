@@ -17,6 +17,7 @@ import {
   Table,
   useToast,
 } from '../ui'
+import { formatMoment } from '../date'
 
 type Role = 'records_officer' | 'intake_clerk' | 'liaison' | 'reviewer' | 'admin'
 
@@ -408,7 +409,7 @@ export function IdentitySettings() {
                           <p className="font-mono text-sm text-ink">{account.username}</p>
                           <p className="text-xs text-ink-muted">
                             {account.token_created_at
-                              ? `Token created ${new Date(account.token_created_at).toLocaleString()}`
+                              ? `Token created ${formatMoment(account.token_created_at)}`
                               : 'No token issued'}
                           </p>
                         </div>

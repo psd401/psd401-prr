@@ -474,8 +474,14 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        user = self.context["request"].user
-        if not has_staff_role(user, StaffRole.RECORDS_OFFICER):
+        # A page reads the caller's role once (``list`` sets it), not once
+        # per row: each check is a group query.
+        is_officer = self.context.get("is_records_officer")
+        if is_officer is None:
+            is_officer = has_staff_role(
+                self.context["request"].user, StaffRole.RECORDS_OFFICER,
+            )
+        if not is_officer:
             data["requester_email"] = None
             data["requester_name"] = None
         return data
@@ -1823,6 +1829,9 @@ class RequestsViewSet(
         rows = page if page is not None else list(queryset)
         context = dict(self.get_serializer_context())
         context["stages"] = current_stages(rows)
+        context["is_records_officer"] = has_staff_role(
+            request.user, StaffRole.RECORDS_OFFICER,
+        )
         if request.query_params.get("queue") == "inbox" and has_staff_role(
             request.user, StaffRole.RECORDS_OFFICER,
         ):

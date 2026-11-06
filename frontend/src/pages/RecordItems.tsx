@@ -36,6 +36,7 @@ import {
   useToast,
 } from '../ui'
 import type { Column } from '../ui/Table'
+import { formatDay } from '../date'
 
 interface RecordItem {
   id: string
@@ -1236,7 +1237,7 @@ export function RecordItems({
         </span>
       ),
     },
-    { header: 'Created', cell: (row) => row.created_at.slice(0, 10) },
+    { header: 'Created', cell: (row) => formatDay(row.created_at) },
     ]
   }
 
