@@ -200,7 +200,9 @@ them before a large merge, not for a one-file change.
 - **Restore-drill release gate.** `docs/backups.md` says the recurring deploy rejects pending
   migrations unless the reviewer pins a completed drill's evidence. The current release script
   in `infra/cdk/lib/prr-hosting-stack.ts` takes an application backup and then runs `migrate`,
-  and no drill or migration-digest check was found in `infra/`. `docs/project-status.md` says
+  and no drill or migration-digest check was found in `infra/`. The restore verifier
+  (`infra/aws/verify-app-backup-restore.sh`) is installed on the host as a command, but nothing in
+  `infra/` invokes it during a release. `docs/project-status.md` says
   the release-gate machinery was retired. Treat the drill as a manual procedure until the
   owner confirms. See [backups](operations/backups.md#restore-verifier-and-the-release-ordering).
 
@@ -215,11 +217,5 @@ Each has a source anchor and the reason it is deferred.
 - **Operator management commands without their own runbook entry** — `apps/records/management/commands/seed_systems.py`, `gmail_inbound_status.py` (correspondence), `check_correspondence_readiness.py`, `activate_nextrequest_import.py`, `import_legacy_timeline.py`, `nextrequest_import_files.py`, `check_nextrequest_cutover.py`, `apps/correspondence/management/commands/seed_casework_test_fixture.py`. Deferred: most are one-shot migration or readiness helpers. The migration flow is in [NextRequest migration](domain/nextrequest-migration.md), and the registry seed is covered in [collection and Vault](domain/collection-and-vault.md#the-system-registry-and-triage). Read each command's module docstring before running it.
 - **Design, UX, and sourcing records** — `docs/ux/casework-uat.md`, `docs/ux/case-workspace-research.md`, `docs/ux/casework-rollout-readiness.md`, `docs/superpowers/specs/`, `docs/build-vs-buy.md`. Deferred: these record the rationale and UAT for past decisions rather than current runtime behavior. Read them directly when a UX or sourcing question arises.
 
-
-.
-
-
-. The migration flow is in [NextRequest migration](domain/nextrequest-migration.md), and the registry seed is covered in [collection and Vault](domain/collection-and-vault.md#the-system-registry-and-triage). Read each command's module docstring before running it.
-- **Design, UX, and sourcing records** — `docs/ux/casework-uat.md`, `docs/ux/case-workspace-research.md`, `docs/ux/casework-rollout-readiness.md`, `docs/superpowers/specs/`, `docs/build-vs-buy.md`. Deferred: these record the rationale and UAT for past decisions rather than current runtime behavior. Read them directly when a UX or sourcing question arises.
 
 
