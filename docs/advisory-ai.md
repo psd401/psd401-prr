@@ -719,7 +719,10 @@ set until `verify_advisory_ai --model us.anthropic.claude-fable-5-1` passes.
 
 Only Amazon Nova is sent `temperature` 0
 (`advisory_ai.inference_config`). The Claude 5.x and GPT-6.1 models reject the
-field outright, so every call to them would fail if it were sent.
+field outright, so every call to them would fail if it were sent. Those same models
+answer with a `reasoningContent` block before the JSON text; the reasoning is
+dropped unread -- never parsed, stored, or logged -- and exactly one plain
+text block must remain.
 
 Each new Anthropic or OpenAI model also needs a one-time AWS Marketplace
 subscription for the account. It is completed by accepting the model's

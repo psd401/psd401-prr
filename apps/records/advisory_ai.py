@@ -1879,14 +1879,19 @@ def invoke_advisory_model(
                 usage[key] = reported[key]
     try:
         content_blocks = response["output"]["message"]["content"]
-        if (
-            not isinstance(content_blocks, list)
-            or len(content_blocks) != 1
-            or not isinstance(content_blocks[0], dict)
-            or set(content_blocks[0]) != {"text"}
+        if not isinstance(content_blocks, list) or not all(
+            isinstance(block, dict) for block in content_blocks
         ):
             raise ValueError
-        content = content_blocks[0]["text"]
+        # Reasoning models (Claude 5.x, GPT-6.1) send a reasoningContent block
+        # before the answer. It is dropped here: never parsed, stored, or
+        # logged. Exactly one plain text block must remain, and nothing else.
+        answer_blocks = [
+            block for block in content_blocks if set(block) != {"reasoningContent"}
+        ]
+        if len(answer_blocks) != 1 or set(answer_blocks[0]) != {"text"}:
+            raise ValueError
+        content = answer_blocks[0]["text"]
         if (
             not isinstance(content, str)
             or len(content.encode("utf-8")) > runtime.get("PRR_AI_MAX_RESPONSE_BYTES")

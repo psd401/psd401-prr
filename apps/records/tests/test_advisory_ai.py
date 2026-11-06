@@ -700,6 +700,50 @@ class AdvisoryAITests(TestCase):
 
         self.assertEqual(result, proposal)
 
+    def _converse(self, content_blocks, model="us.anthropic.claude-opus-5-5"):
+        with patch("apps.records.advisory_ai.boto3.client") as client_factory:
+            client_factory.return_value.get_account_data_retention.return_value = {"mode": "none"}
+            client_factory.return_value.converse.return_value = {
+                "output": {"message": {"content": content_blocks}}
+            }
+            return invoke_advisory_model(
+                AdvisoryRun.Kind.REQUEST_INTENT,
+                {"request_description": "Synthetic request"},
+                model_identifier=model,
+            )
+
+    @override_settings(
+        PRR_AI_PROVIDER="bedrock",
+        PRR_AI_AWS_REGION="us-west-2",
+        PRR_AI_MODEL="us.amazon.nova-2-lite-v1:0",
+        PRR_AI_MAX_RESPONSE_BYTES=65_536,
+    )
+    def test_reasoning_blocks_are_skipped_and_never_returned(self):
+        # Production, 2026-11-05: Opus 5.5, Haiku 5.5 and GPT-6.1 Sol/Terra
+        # answer with a reasoningContent block, then the JSON text block.
+        reasoning = {"reasoningContent": {"reasoningText": {"text": "Private chain of thought."}}}
+        result = self._converse([reasoning, {"text": '{"summary": "ok"}'}])
+        self.assertEqual(result, {"summary": "ok"})
+        self.assertNotIn("Private chain of thought", json.dumps(result))
+
+    @override_settings(
+        PRR_AI_PROVIDER="bedrock",
+        PRR_AI_AWS_REGION="us-west-2",
+        PRR_AI_MODEL="us.amazon.nova-2-lite-v1:0",
+        PRR_AI_MAX_RESPONSE_BYTES=65_536,
+    )
+    def test_still_exactly_one_answer_and_no_unknown_blocks(self):
+        reasoning = {"reasoningContent": {"reasoningText": {"text": "Thinking."}}}
+        for blocks in (
+            [reasoning],
+            [reasoning, {"text": "{}"}, {"text": "{}"}],
+            [{"toolUse": {"name": "x"}}, {"text": "{}"}],
+            [{"text": "{}", "extra": 1}],
+        ):
+            with self.subTest(blocks=blocks), self.assertRaises(AdvisoryProviderError) as raised:
+                self._converse(blocks)
+            self.assertEqual(raised.exception.code, "invalid_provider_response")
+
     @override_settings(
         PRR_AI_PROVIDER="bedrock",
         PRR_AI_AWS_REGION="us-west-2",
