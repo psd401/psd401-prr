@@ -6,9 +6,9 @@ tags: [architecture, frontend, routing, react, access-control]
 openwiki:
   roles: [architecture, integration]
   change_kinds: [route, navigation, frontend-api-client]
-  source_paths: [frontend/src/App.tsx, frontend/src/nav.ts, frontend/src/api/client.ts, frontend/src/case/CaseWorkspace.tsx, frontend/src/layout/AppLayout.tsx, frontend/src/caseStatus.ts, frontend/src/work.ts, frontend/src/statutory.ts, frontend/src/vaultQuery.ts, frontend/src/scopeCountNotice.ts, frontend/src/caseSort.ts, frontend/src/queueCounts.tsx, frontend/src/messages/MessageWorkspace.tsx, frontend/src/messages/boundedInfiniteCache.ts, frontend/src/theme.ts, frontend/src/main.tsx, frontend/src/ui/ThemePicker.tsx, frontend/src/index.css, frontend/src/nexus/SOURCE.txt, frontend/vite.config.ts, frontend/package.json, apps/api/spa.py, apps/api/resources/correspondence.py, apps/api/resources/work_items.py]
-  symbols: [App, StaffApp, AuthorizedRoute, routeIsAuthorized, defaultLanding, PRIMARY_NAV, CONFIGURATION_NAV, OVERSIGHT_NAV, CASE_TAB_ROLES, STAGE_ROLES, LEGACY_CASE_TABS, caseTabPath, stageLabel, CaseWorkspace, StageRail, api, ApiError, index, MessageWorkspace, invalidateBoundedInfiniteQueries, markBoundedInfiniteQueriesStale, thread_messages, statusLabel, statusTone, isTerminalStatus, CASE_STATUS_CHOICES, WorkItemDetail, DISPOSITION_LABELS, THEMES, resolveTheme, applyTheme, startTheme, ThemePicker]
-  test_paths: [frontend/src/App.test.tsx, frontend/src/AppAuthorizedRoutes.test.tsx, frontend/src/nav.test.ts, frontend/src/layout/AppLayout.test.tsx, frontend/src/case/CaseWorkspace.test.tsx, frontend/src/vaultQuery.test.ts, frontend/src/scopeCountNotice.test.ts, frontend/src/caseSort.test.ts, frontend/src/queueCounts.test.tsx, frontend/src/messages/MessageWorkspace.test.tsx, frontend/src/messages/boundedInfiniteCache.test.ts, frontend/src/pages/RequestDetail.test.tsx, frontend/src/pages/Inbox.test.tsx, frontend/src/theme.test.ts, frontend/src/nexus-foundation.test.ts, frontend/src/ui/TrustFooter.test.tsx]
+  source_paths: [frontend/src/App.tsx, frontend/src/nav.ts, frontend/src/api/client.ts, frontend/src/today.ts, frontend/src/pages/Today.tsx, frontend/src/pages/AgentAccess.tsx, frontend/src/pages/Reporting.tsx, frontend/src/pages/Registry.tsx, frontend/src/pages/WorkItem.tsx, frontend/src/pages/Tasks.tsx, frontend/src/case/CaseWorkspace.tsx, frontend/src/layout/AppLayout.tsx, frontend/src/caseStatus.ts, frontend/src/work.ts, frontend/src/statutory.ts, frontend/src/vaultQuery.ts, frontend/src/scopeCountNotice.ts, frontend/src/caseSort.ts, frontend/src/queueCounts.tsx, frontend/src/messages/MessageWorkspace.tsx, frontend/src/messages/boundedInfiniteCache.ts, frontend/src/theme.ts, frontend/src/main.tsx, frontend/src/ui/ThemePicker.tsx, frontend/src/index.css, frontend/src/nexus/SOURCE.txt, frontend/vite.config.ts, frontend/package.json, apps/api/spa.py, apps/api/resources/correspondence.py, apps/api/resources/work_items.py]
+  symbols: [App, StaffApp, AuthorizedRoute, routeIsAuthorized, defaultLanding, PRIMARY_NAV, LINKED_ROUTES, CONFIGURATION_NAV, OVERSIGHT_NAV, Today, nextStep, dueLabel, CASE_TAB_ROLES, STAGE_ROLES, LEGACY_CASE_TABS, caseTabPath, stageLabel, CaseWorkspace, StageRail, api, ApiError, index, MessageWorkspace, invalidateBoundedInfiniteQueries, markBoundedInfiniteQueriesStale, thread_messages, statusLabel, statusTone, isTerminalStatus, CASE_STATUS_CHOICES, WorkItemDetail, DISPOSITION_LABELS, THEMES, resolveTheme, applyTheme, startTheme, ThemePicker]
+  test_paths: [frontend/src/App.test.tsx, frontend/src/AppAuthorizedRoutes.test.tsx, frontend/src/nav.test.ts, frontend/src/pages/Today.test.tsx, frontend/src/pages/AgentAccess.test.tsx, frontend/src/layout/AppLayout.test.tsx, frontend/src/case/CaseWorkspace.test.tsx, frontend/src/vaultQuery.test.ts, frontend/src/scopeCountNotice.test.ts, frontend/src/caseSort.test.ts, frontend/src/queueCounts.test.tsx, frontend/src/messages/MessageWorkspace.test.tsx, frontend/src/messages/boundedInfiniteCache.test.ts, frontend/src/pages/RequestDetail.test.tsx, frontend/src/pages/Inbox.test.tsx, frontend/src/theme.test.ts, frontend/src/nexus-foundation.test.ts, frontend/src/ui/TrustFooter.test.tsx]
   invariants:
     - Route and navigation roles are a client-side convenience; every API endpoint enforces its own role check.
     - Compliance logic stays in Django; the SPA only renders and submits.
@@ -61,7 +61,8 @@ navigation lists, and `ROUTE_ROLES` is built from them:
 
 | Registry | What it covers | Source |
 |---|---|---|
-| `PRIMARY_NAV` | Inbox, Review, Decisions (see [decision batches](../domain/decision-batches.md)), Staff Intake, Oversight, Configuration | `nav.ts` |
+| `PRIMARY_NAV` | Today (the home screen, see [Today](#today-the-home-screen)), New request (`/staff-intake`), and Settings (`/configuration`) | `nav.ts` |
+| `LINKED_ROUTES` | Routes reached from Today or Settings rather than the menu: Inbox, Review, Decisions (see [decision batches](../domain/decision-batches.md)), and the Oversight index | `nav.ts` (not exported) |
 | `CONFIGURATION_NAV` | Agent access, identity, registry, templates, exemptions, knowledge pack ([knowledge pack](../domain/knowledge-pack.md)), counsel domains, settings, message operations | `nav.ts` |
 | `OVERSIGHT_NAV` | JLARC reporting, audit log ([audit trail](../domain/compliance.md#audit-trail)), AI evaluation ([advisory model comparison](../domain/advisory-evaluation.md), Records Officer only), and AI agreement ([AI-human agreement](../domain/advisory-ai.md#ai-human-agreement), Records Officer only) | `nav.ts` |
 
@@ -69,9 +70,10 @@ navigation lists, and `ROUTE_ROLES` is built from them:
 - `routeIsAuthorized(path, roles)` checks the path pattern (`/work/:id`,
   `/requests/:number`, or an exact registry path). A case path such as
   `/requests/<number>/<tab>` is checked against `CASE_TAB_ROLES`. An unknown tab is denied.
-- `defaultLanding(roles)` chooses the first screen. Records officers and liaisons land on
-  `/inbox`, reviewers on `/review`, intake clerks on `/staff-intake`, and admins on
-  `/configuration`.
+- `defaultLanding(roles)` chooses the first screen. Any workflow role other than admin
+  (records officer, liaison, reviewer) lands on `/today`, intake clerks on
+  `/staff-intake`, and admins on `/configuration`. The `nav.test.ts` role table pins each
+  case.
 
 Role names come from `StaffRole` in `frontend/src/api/auth.ts`. Current values are
 `records_officer`, `liaison`, `reviewer`, `intake_clerk`, and `admin`. Those names must match the
@@ -124,6 +126,65 @@ Pre-rail case tabs redirect to their stage. `LEGACY_CASE_TABS` maps `overview` t
 Legacy case-scoped correspondence URLs are handled by `LegacyScopedRoutes.tsx`. Its
 tests in `frontend/src/case/LegacyScopedRoutes.test.tsx` cover filter preservation and
 dropped filters.
+
+### Today, the home screen
+
+`/today` is the default landing for workflow roles. `frontend/src/pages/Today.tsx`
+lists every open case, most urgent first, and gives each one next step.
+`frontend/src/today.ts` holds the presentation rules:
+
+- **Cases.** The list calls `GET /api/staff/requests/?status=open&ordering=due`. A search
+  box switches it to `?search=…&ordering=due`. Each row carries the `stage` object the
+  server computes for the case rail ([case stage rail](../domain/case-workspace.md#case-stage-rail)).
+  The ordering is the server's due-date sort (`CASE_ORDERINGS` in
+  [`apps/api/resources/requests.py`](../../apps/api/resources/requests.py)).
+- **Next step.** `nextStep(row)` turns the current stage into one action and route.
+  An intake case for a `public_records` matter offers "Send acknowledgment" in Messages,
+  because only that matter kind owes a requester acknowledgment (rule 13 in
+  [`AGENTS.md`](../../AGENTS.md)). A blocked scope or release stage is shown as waiting
+  on the requester or the deposit, with a secondary button.
+- **Due labels.** `dueLabel` renders the due date relative to the Pacific date
+  (`pacificDateString` in `frontend/src/date.ts`): "3 days late", "Due tomorrow", or a
+  calendar date. Deadline math itself stays in [compliance](../domain/compliance.md).
+- **Needs you.** Chips come from `GET /api/staff/work-items/counts/` (unmatched email,
+  quarantined email, delivery exceptions) and from the count of proposed decision batches
+  ([decision batches](../domain/decision-batches.md)). Each chip links into the Inbox
+  view or the Decisions queue ([work queue](../domain/work-queue.md)).
+
+Today decides nothing. It reads server state and links to the stage that owns the next
+call. Focused test: `frontend/src/pages/Today.test.tsx`. Run
+`cd frontend && bun run test -- src/pages/Today.test.tsx`.
+
+### Screen map
+
+Every route in `App.tsx` mounts one screen behind `guard(...)`. The owning domain page
+holds the rules that screen displays.
+
+| Route | Screen (`frontend/src/pages/` unless noted) | Owning page |
+|---|---|---|
+| `/today` | `Today.tsx` | this page, [case workspace](../domain/case-workspace.md) |
+| `/inbox`, `/work/:id` | `Inbox.tsx`, `WorkItem.tsx` | [work queue](../domain/work-queue.md) |
+| `/review` | `Review.tsx` | [record review](../domain/record-review-and-handling.md) |
+| `/decisions` | `Decisions.tsx` | [decision batches](../domain/decision-batches.md) |
+| `/staff-intake` | `StaffIntake.tsx` | [requests](../domain/requests.md#intake-and-triage), [case workspace](../domain/case-workspace.md) |
+| `/requests/:number/:tab` | `case/CaseWorkspace.tsx` (stage tabs mount `Tasks.tsx`, `Installments.tsx`, `RecordItems.tsx`, and others) | [case workspace](../domain/case-workspace.md) |
+| `/oversight/reporting` | `Reporting.tsx` | [JLARC annual reporting](../domain/jlarc-reporting.md) |
+| `/oversight/audit` | `Audit.tsx` | [audit trail](../domain/compliance.md#audit-trail) |
+| `/oversight/ai-evaluation` | `AiEvaluation.tsx` | [advisory model comparison](../domain/advisory-evaluation.md) |
+| `/oversight/ai-agreement` | `AiAgreement.tsx` | [AI-human agreement](../domain/advisory-ai.md#ai-human-agreement) |
+| `/configuration/agent-access` | `AgentAccess.tsx` | [personal access tokens](personal-access-tokens.md) |
+| `/configuration/identity` | `IdentitySettings.tsx` | [Google identity](google-identity.md) |
+| `/configuration/registry` | `Registry.tsx` | [collection and Vault](../domain/collection-and-vault.md) |
+| `/configuration/message-templates` | `MessageTemplates.tsx` | [message templates](../domain/message-templates.md) |
+| `/configuration/exemptions` | `Exemptions.tsx` | [compliance](../domain/compliance.md#exemption-taxonomy) |
+| `/configuration/knowledge` | `Knowledge.tsx` | [district knowledge pack](../domain/knowledge-pack.md) |
+| `/configuration/counsel-domains` | `CounselDomains.tsx` | [record facts and tags](../domain/record-facts-and-tags.md) |
+| `/configuration/settings` | `DistrictSettings.tsx` | [configuration](configuration.md) |
+| `/configuration/correspondence` | `Correspondence.tsx` | [correspondence](../domain/correspondence.md#operations-and-readiness) |
+
+Retired paths redirect to these routes (see [retired URLs](#retired-urls)). The screen
+does not decide access. `ROUTE_ROLES` in `nav.ts` gates each one, and the API still checks
+every call.
 
 ## Serving and build
 
@@ -243,7 +304,8 @@ role can use it.
 
 - **New screen.** Add the page under `frontend/src/pages/`, mount it in `App.tsx` inside
   `guard(...)`, and add a `NavItem` with the roles to the right registry in `nav.ts`.
-  Without the `ROUTE_ROLES` entry, `routeIsAuthorized` denies the route. Update the
+  Add a row to the [screen map](#screen-map). Without the `ROUTE_ROLES` entry,
+  `routeIsAuthorized` denies the route. Update the
   capability registry too ([agent parity](agent-parity.md), rule 10 in `AGENTS.md`).
 - **Changed role for a screen.** Change it in `nav.ts` and in the server policy together.
   The server check is the only real control. Add tests for both the visible item and
@@ -266,5 +328,3 @@ role can use it.
 - [Case workspace](../domain/case-workspace.md): the screens behind `/requests/:number/:tab`.
 - [Work queue](../domain/work-queue.md): the Inbox and work item screens.
 - [Configuration](configuration.md): the `PRR_AUTH_MODE` setting that `spa.py` reads.
-UTH_MODE` setting that `spa.py` reads.
- that `spa.py` reads.
