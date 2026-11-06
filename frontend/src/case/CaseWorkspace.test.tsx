@@ -35,6 +35,10 @@ const SUMMARY = {
     tab: 'collection',
     work_item_id: 'work-1',
   },
+  title: 'Board minutes for the spring term',
+  summary: 'Minutes and agendas from every spring board meeting.',
+  matter_kind: 'public_records',
+  next_due: null,
   stages: [
     { id: 'intake', label: 'Intake', state: 'done', open_count: 0, summary: '', reason: '' },
     { id: 'scope', label: 'Scope', state: 'done', open_count: 0, summary: '', reason: '' },
@@ -162,18 +166,21 @@ describe('CaseWorkspace', () => {
   it('renders the persistent bounded header and the whole rail at a direct URL', async () => {
     renderCase('/requests/PRR-2026-0001/intake')
 
-    expect(await screen.findByRole('heading', { name: 'PRR-2026-0001' }))
+    // The case opens on what it is, what was asked, and the one next step.
+    expect(await screen.findByRole('heading', { name: 'Board minutes for the spring term', level: 1 }))
       .toBeInTheDocument()
-    expect(screen.getByText('Jane Q. Public')).toBeInTheDocument()
-    expect(screen.getByText('Case Officer')).toBeInTheDocument()
-    expect(screen.getByText('Complete record search')).toBeInTheDocument()
-    expect(screen.getByText('2 new')).toBeInTheDocument()
-    expect(screen.getByText('3 need attention')).toBeInTheDocument()
+    const header = screen.getByRole('banner', { name: 'Case summary' })
+    expect(header).toHaveTextContent('PRR-2026-0001')
+    expect(header).toHaveTextContent('Jane Q. Public')
+    expect(header).toHaveTextContent('Case Officer')
+    expect(header).toHaveTextContent('Minutes and agendas from every spring board meeting.')
+    expect(header).toHaveTextContent('No due date')
+    expect(screen.getByRole('link', { name: 'Finish collection' }))
+      .toHaveAttribute('href', '/requests/PRR-2026-0001/collect')
+    expect(screen.queryByText('2 new')).not.toBeInTheDocument()
     for (const stage of STAGE_NAMES) expect(stageLink(stage)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Messages' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Activity' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Complete record search' }))
-      .toHaveAttribute('href', '/requests/PRR-2026-0001/collect')
     expect(await screen.findByRole('heading', { name: 'Intake', level: 2 }))
       .toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'Time entries' }))
@@ -260,7 +267,7 @@ describe('CaseWorkspace', () => {
   ] as Array<[StaffRole, string[]]>)('links only the stages %s may open', async (role, visible) => {
     renderCase('/requests/PRR-2026-0001/intake', [role])
 
-    await screen.findByRole('heading', { name: 'PRR-2026-0001' })
+    await screen.findByRole('heading', { name: 'Board minutes for the spring term', level: 1 })
     // Every stage is shown, so progress reads the same for everyone; only
     // the ones the role may open are links.
     const rail = screen.getByRole('navigation', { name: 'Case stages' })
@@ -854,15 +861,31 @@ describe('CaseWorkspace stage rail (#45)', () => {
       .toHaveAttribute('aria-current', 'page')
   })
 
-  it('leads the stage with its decision card and the evidence one click away', async () => {
+  it('heads the stage with what it asks, and jumps to the work when already there', async () => {
     renderCase('/requests/PRR-2026-0001/collect', ['records_officer'], withCollections([VAULT_TASK]))
 
     const card = await screen.findByRole('region', { name: 'Collect decision' })
     expect(card).toHaveTextContent('Finish the open collections')
     expect(card).toHaveTextContent('2 open collections')
-    expect(card).toHaveTextContent('Your call')
     expect(card).toHaveTextContent('Supersede takes unreviewed records out of review; nothing is deleted.')
-    expect(screen.getByRole('link', { name: 'See the evidence' })).toHaveAttribute('href', '#stage-evidence')
+    expect(card).not.toHaveTextContent('Your call')
+    expect(screen.queryByRole('link', { name: 'See the evidence' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Finish collection' })).toHaveAttribute('href', '#stage-evidence')
+  })
+
+  it('offers no next step on a closed case', async () => {
+    const closed = {
+      ...SUMMARY,
+      legal_status: 'fulfilled',
+      stages: SUMMARY.stages.map((stage) => ({ ...stage, state: 'done' })),
+    }
+    renderCase('/requests/PRR-2026-0001/intake', ['records_officer'], withCollections([], (url) => (
+      url.endsWith('/workspace-summary/') ? fakeResponse(closed) : null
+    )))
+
+    await screen.findByRole('heading', { name: 'Board minutes for the spring term', level: 1 })
+    expect(screen.queryByRole('link', { name: 'Finish collection' })).not.toBeInTheDocument()
+    expect(screen.queryByText('No due date')).not.toBeInTheDocument()
   })
 
   it('says a finished stage is done', async () => {

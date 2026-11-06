@@ -218,6 +218,35 @@ def description_snippet(description: str | None) -> str:
     return collapsed[:DESCRIPTION_SNIPPET_LENGTH].rstrip() + "…"
 
 
+#: Long enough for two lines at the top of a case page.
+CASE_SUMMARY_LENGTH = 280
+
+
+def description_preview(description: str | None) -> str:
+    """The opening of a request, collapsed to about two lines.
+
+    Like ``description_snippet``, a reading of the legal record that never
+    writes it (rule 9).
+    """
+    collapsed = " ".join((description or "").split())
+    if len(collapsed) <= CASE_SUMMARY_LENGTH:
+        return collapsed
+    return collapsed[:CASE_SUMMARY_LENGTH].rstrip() + "…"
+
+
+def latest_intent_summary(prr) -> str:
+    """The summary from the case's newest completed request-intent run, or
+    "". Advisory text a person has not adopted; callers gate it to Records
+    Officers, the same boundary as the advisory title."""
+    run = AdvisoryRun.objects.filter(
+        request=prr,
+        kind=AdvisoryRun.Kind.REQUEST_INTENT,
+        state=AdvisoryRun.State.COMPLETE,
+    ).order_by("-created_at", "-pk").first()
+    summary = (run.proposal or {}).get("summary") if run else None
+    return summary.strip() if isinstance(summary, str) else ""
+
+
 def advisory_short_title(obj) -> str:
     """The annotated advisory short title, or "" when there is none.
 
@@ -1234,6 +1263,13 @@ class CaseWorkspaceSummarySerializer(serializers.Serializer):
     counts = CaseWorkspaceCountsSerializer()
     next_action = CaseWorkspaceNextActionSerializer(allow_null=True)
     stages = CaseStageSerializer(many=True)
+    title = serializers.CharField()
+    summary = serializers.CharField(allow_blank=True)
+    matter_kind = serializers.CharField()
+    next_due = serializers.DateField(allow_null=True)
+    next_due_basis = serializers.ChoiceField(
+        choices=list(DueBasis.CHOICES), allow_null=True,
+    )
 
 
 class CaseActivityEntrySerializer(serializers.Serializer):
@@ -1903,7 +1939,20 @@ class RequestsViewSet(
                 ),
             }
         response_plan = initial_response_plan(prr)
+        is_officer = has_staff_role(request.user, StaffRole.RECORDS_OFFICER)
+        # What the case is about, at the top of its page: the advisory title
+        # and summary for a Records Officer (``advisory_short_title`` is
+        # already officer-only), the opening of the request for everyone.
+        due = next_response_due(prr)
         payload = {
+            "title": advisory_short_title(prr) or description_snippet(prr.description),
+            "summary": (
+                (latest_intent_summary(prr) if is_officer else "")
+                or description_preview(prr.description)
+            ),
+            "matter_kind": prr.matter_kind,
+            "next_due": due.date.isoformat() if due.date else None,
+            "next_due_basis": due.basis,
             "number": prr.number,
             "legal_status": prr.status,
             "requester": requester,

@@ -1825,10 +1825,6 @@ export function CorrespondencePanel({
           : undefined
       }
     >
-      <p className="mb-4 text-sm text-ink-muted">
-        Django owns the exact conversation record. Request state changes only after
-        confirmed delivery, never when a message is merely queued.
-      </p>
 
       {statutoryResponse && (
         <StatutoryResponseBanner

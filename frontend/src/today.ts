@@ -26,7 +26,7 @@ export function plural(count: number, one: string, many: string) {
 }
 
 /** The one thing to do on a case, and where it is done. */
-export function nextStep(row: TodayCase): NextStep {
+export function nextStep(row: Pick<TodayCase, 'number' | 'matter_kind' | 'stage'>): NextStep {
   const stage = row.stage
   const at = (tab: string, label: string, waiting = false) => ({
     label,
@@ -86,3 +86,11 @@ export function dueLabel(due: string | null): DueLabel {
   })
   return { text: `Due ${date}`, tone: 'calm' }
 }
+
+/** Pill colors for each due tone. */
+export const DUE_TONE = {
+  late: 'bg-danger-soft text-danger-ink',
+  soon: 'bg-warning-soft text-warning-ink',
+  calm: 'bg-surface-sunken text-ink',
+  none: 'bg-surface-sunken text-ink-muted',
+} as const

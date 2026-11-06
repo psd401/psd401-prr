@@ -12,14 +12,12 @@ import { Installments } from '../pages/Installments'
 import { Preservations } from '../pages/Preservations'
 import { RecordItems } from '../pages/RecordItems'
 import { RequestDetail } from '../pages/RequestDetail'
-import {
-  STATUTORY_RESPONSE_LABELS,
-  type StatutoryResponse,
-} from '../statutory'
+import type { StatutoryResponse } from '../statutory'
 import { Tasks } from '../pages/Tasks'
 import { TimeEntries } from '../pages/TimeEntries'
 import { Badge, Card, EmptyState, ErrorNote, Spinner } from '../ui'
 import { statusLabel, statusTone, TERMINAL_STATUSES } from '../caseStatus'
+import { DUE_TONE, dueLabel, nextStep } from '../today'
 import { CaseActivityFeed } from './CaseActivityFeed'
 import { CollectionCards } from './CollectionCards'
 import { useCaseCollections } from './caseCollections'
@@ -67,6 +65,12 @@ interface CaseSummary {
     work_item_id: string
   } | null
   stages: StageSummary[]
+  /** The advisory title for a Records Officer, else the request's opening. */
+  title: string
+  /** About two lines on what was asked. */
+  summary: string
+  matter_kind: string
+  next_due: string | null
 }
 
 interface ClosureReadiness {
@@ -124,90 +128,66 @@ function isCaseTab(tab: string): tab is CaseTab {
   ].includes(tab)
 }
 
+/**
+ * The top of a case: when it is due, what it is, what was asked in two
+ * lines, and the one next step. Everything else is below, stage by stage.
+ */
 function CaseHeader({
   summary,
   roles,
+  tab,
 }: {
   summary: CaseSummary
   roles: StaffRole[]
+  tab: CaseTab
 }) {
   const requester = roles.includes('records_officer') ? summary.requester : null
+  const closed = TERMINAL_STATUSES.has(summary.legal_status)
+  const current = summary.stages.find(
+    (stage) => stage.state === 'current' || stage.state === 'blocked',
+  ) ?? null
+  const step = closed || !current
+    ? null
+    : nextStep({ number: summary.number, matter_kind: summary.matter_kind, stage: current })
+  const due = closed ? null : dueLabel(summary.next_due)
+  // Already on the page where the step is done: the button jumps to it.
+  const here = step?.path === `/requests/${summary.number}/${tab}`
+  const stepClass = `nx-btn ${step?.waiting ? 'nx-btn--secondary' : 'nx-btn--primary'} mt-5 h-auto min-h-12 px-6 py-3 text-base focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus`
   return (
-    <>
-      <PageHeader
-        title={summary.number}
-        subtitle="Public records case workspace"
-        actions={(
-          <Badge tone={statusTone(summary.legal_status)}>
-            {statusLabel(summary.legal_status)}
-          </Badge>
+    <header className="mb-6 border-b border-line pb-6" aria-label="Case summary">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        {due && (
+          <span className={`rounded-full px-3 py-1 font-semibold ${DUE_TONE[due.tone]}`}>
+            {due.text}
+          </span>
         )}
-      />
-      <Card className="mb-4" aria-label="Case summary">
-        <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-3 xl:grid-cols-6">
-          <div>
-            <dt className="text-ink-muted">Requester</dt>
-            <dd className="font-heading font-bold text-ink">
-              {requester?.name ?? 'Restricted'}
-            </dd>
-            {requester?.email && (
-              <dd className="break-all text-xs text-ink-muted">{requester.email}</dd>
-            )}
-          </div>
-          <div>
-            <dt className="text-ink-muted">Case owner</dt>
-            <dd className="font-heading font-bold text-ink">
-              {summary.owner?.display_name ?? 'Unassigned'}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-ink-muted">Statutory response</dt>
-            <dd className="font-heading font-bold text-ink">
-              {STATUTORY_RESPONSE_LABELS[summary.statutory_response.state]
-                ?? summary.statutory_response.state}
-            </dd>
-            <dd className="text-xs text-ink-muted">
-              Due {summary.statutory_response.due_date ?? '—'}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-ink-muted">Estimate</dt>
-            <dd className="font-heading font-bold text-ink">
-              {summary.estimated_completion ?? '—'}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-ink-muted">Work counts</dt>
-            <dd className="flex flex-wrap gap-2 pt-1">
-              <Badge tone={summary.counts.new ? 'blue' : 'neutral'}>
-                {summary.counts.new} new
-              </Badge>
-              <Badge tone={summary.counts.needs_attention ? 'amber' : 'neutral'}>
-                {summary.counts.needs_attention} need attention
-              </Badge>
-            </dd>
-          </div>
-          <div>
-            <dt className="text-ink-muted">Next action</dt>
-            {summary.next_action ? (
-              <dd>
-                <Link
-                  className="font-heading font-bold text-accent underline-offset-2 hover:underline"
-                  to={caseTabPath(summary.number, summary.next_action.tab)}
-                >
-                  {summary.next_action.label}
-                </Link>
-                <p className="mt-1 text-xs text-ink-muted">
-                  {summary.next_action.detail}
-                </p>
-              </dd>
-            ) : (
-              <dd className="font-heading font-bold text-ink">No role-scoped action</dd>
-            )}
-          </div>
-        </dl>
-      </Card>
-    </>
+        <Badge tone={statusTone(summary.legal_status)}>
+          {statusLabel(summary.legal_status)}
+        </Badge>
+      </div>
+      <h1 className="mt-3 text-3xl font-bold leading-tight tracking-tight text-ink lg:text-4xl">
+        {summary.title}
+      </h1>
+      <p className="mt-1.5 flex flex-wrap gap-x-2 text-sm text-ink-muted">
+        <span>{summary.number}</span>
+        <span aria-hidden="true">·</span>
+        <span>{requester ? (requester.name || requester.email) : 'Restricted'}</span>
+        {summary.owner && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>{summary.owner.display_name}</span>
+          </>
+        )}
+      </p>
+      {summary.summary && (
+        <p className="mt-3 line-clamp-2 max-w-3xl font-editorial text-lg leading-relaxed text-ink">
+          {summary.summary}
+        </p>
+      )}
+      {step && (here
+        ? <a href="#stage-evidence" className={stepClass}>{step.label}</a>
+        : <Link to={step.path} className={stepClass}>{step.label}</Link>)}
+    </header>
   )
 }
 
@@ -315,9 +295,9 @@ function StageRail({
 }
 
 /**
- * The stage's lead (Nexus DecisionCard): the decision it needs, why, what is
- * at stake, the evidence one click away, and the way back where one exists.
- * No model recommends these calls, so the card is the person's (`--needs`).
+ * The stage's heading: what it asks, how much is open, and the way back
+ * where one exists. The case header carries the one button; the stage's own
+ * work follows directly below.
  */
 function StageDecision({ stage }: { stage: StageSummary }) {
   const decision = STAGE_DECISIONS[stage.id]
@@ -337,25 +317,6 @@ function StageDecision({ stage }: { stage: StageSummary }) {
       <span className="nx-eyebrow">{stage.label} · {STATE_TEXT[stage.state]}</span>
       <h3 className="nx-decision__title">{title}</h3>
       <p className="nx-decision__why">{why}</p>
-      {/* Only the stage the case is in asks for a call; the others stay
-          compact so their own work leads the page. */}
-      {open && (
-        <div className="nx-decision__rec">
-          <span className="nx-decision__rec-label">Your call</span>
-          <span className="nx-decision__conf">
-            <b>{stage.open_count}</b>
-            open
-          </span>
-        </div>
-      )}
-      <div className="nx-decision__actions">
-        <a
-          href="#stage-evidence"
-          className="rounded-md border border-line px-3 py-1.5 text-sm font-semibold text-accent hover:bg-surface-hover"
-        >
-          See the evidence
-        </a>
-      </div>
       {decision.undo && <p className="nx-decision__undo">{decision.undo}</p>}
     </section>
   )
@@ -614,7 +575,7 @@ export function CaseWorkspace({ roles }: { roles: StaffRole[] }) {
 
   return (
     <>
-      <CaseHeader summary={summary.data} roles={roles} />
+      <CaseHeader summary={summary.data} roles={roles} tab={tab} />
       {roles.includes('records_officer') && <EstimateLetterCard number={number} />}
       <StageRail number={number} stages={stages} active={tab} roles={roles} />
       <section aria-labelledby={`case-tab-${tab}`}>
