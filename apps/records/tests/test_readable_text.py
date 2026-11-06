@@ -65,6 +65,10 @@ class ReadableTextTests(SimpleTestCase):
             "See <https://example.org/permit-12>\nContact <mailto:jane@example.org> or",
         )
 
+    def test_keeps_any_angle_bracket_text_that_is_not_an_html_element(self):
+        raw = "Sender: <REDACTED>\nContact <see attached> or <Jane Doe> at <HTTPS://example.org>"
+        self.assertEqual(readable_text(raw), raw)
+
     def test_plain_text_is_unchanged(self):
         text = "Date: Fri, 28 Aug 2026\nFrom: someone@example.org\n\nThank you."
         self.assertEqual(readable_text(text), text)

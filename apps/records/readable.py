@@ -24,10 +24,23 @@ _CONDITIONAL = re.compile(r"<!--\[if[^\]]*\]>.*?<!\[endif\]-->", re.DOTALL | re.
 _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _BLOCK = re.compile(r"<(style|script|head)\b.*?</\1\s*>", re.DOTALL | re.IGNORECASE)
 _BREAK = re.compile(r"<\s*(br|/p|/div|/tr|/li|/h[1-6]|/table)\b[^>]*>", re.IGNORECASE)
-#: Only tag-shaped spans: a name right after "<" (or "</", "<!"), then
-#: whitespace, "/" or ">". "<jane@example.org>", "a < b", and autolinks such
-#: as "<https://...>" or "<mailto:...>" are text and stay.
-_TAG = re.compile(r"<(?!(?:https?|mailto|ftp|tel):)(?:/?[A-Za-z][A-Za-z0-9:-]*(?:[\s/][^<>]*)?|![A-Za-z][^<>]*)>")
+#: Real HTML element names, and namespaced Outlook ones such as v:background
+#: or o:p. Any other "<...>" is text a person wrote ("<REDACTED>",
+#: "<jane@example.org>", "<https://...>", "a < b") and stays.
+_ELEMENTS = (
+    "a|abbr|address|area|article|aside|b|base|bdi|bdo|blockquote|body|br|button|"
+    "caption|center|cite|code|col|colgroup|dd|del|details|dfn|div|dl|dt|em|embed|"
+    "fieldset|figcaption|figure|font|footer|form|h[1-6]|head|header|hr|html|i|iframe|"
+    "img|input|ins|kbd|label|legend|li|link|main|map|mark|meta|nav|noscript|object|"
+    "ol|optgroup|option|p|param|picture|pre|q|s|samp|section|select|small|source|"
+    "span|strike|strong|style|sub|summary|sup|svg|table|tbody|td|template|"
+    "textarea|tfoot|th|thead|time|title|tr|track|tt|u|ul|var|video|wbr|xml"
+)
+_TAG = re.compile(
+    r"<(?:/?(?:(?:" + _ELEMENTS + r")|(?!(?:https?|mailto|ftp|tel):)[a-z]+:[a-z]+)"
+    r"(?=[\s/>])[^<>]*|!doctype[^<>]*)>",
+    re.IGNORECASE,
+)
 _IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _LINK = re.compile(r"\[([^\]]+)\]\((?:https?|mailto):[^)]*\)")
 _HEADING = re.compile(r"^#{1,6}\s+", re.MULTILINE)
