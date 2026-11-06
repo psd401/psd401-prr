@@ -32,7 +32,9 @@ which MCP tool, if any, exposes the action.
 `CAPABILITIES` is a tuple of rows built by `_capability(...)`. A row carries:
 
 - `id`, `outcome`, `method`, and `path`, which is the REST primitive.
-- `ui_routes`, the canonical staff UI routes where the same outcome appears.
+- `ui_routes`, the canonical staff UI routes where the same outcome appears. Case routes
+  name a stage of the rail (`/requests/:number/<stage>`), and each stage must be one the
+  frontend authorizes ([case stage rail](../domain/case-workspace.md#case-stage-rail)).
 - `execution`, the policy below.
 - `risk` (`read`, `low`, `moderate`, or `high`).
 - `constraints`, names from `AGENT_CONSTRAINT_DEFINITIONS` such as
