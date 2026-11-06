@@ -91,9 +91,10 @@ class HumanOnlyRuntimeBoundaryTests(TestCase):
         )
         self.assert_handoff(response)
 
-    def test_token_cannot_release_a_preservation(self):
+    def test_token_has_no_release_route(self):
+        # Release is automatic (rule 7); there is no route to hand off.
         PublicRecordsRequest.objects.filter(pk=self.prr.pk).update(
-            status=RequestStatus.FULFILLED,
+            status=RequestStatus.FULFILLED, closed_at=timezone.now(),
         )
         preservation = FootagePreservation.objects.create(
             request=self.prr,
@@ -110,10 +111,7 @@ class HumanOnlyRuntimeBoundaryTests(TestCase):
             content_type="application/json",
             **self.auth,
         )
-        self.assert_handoff(response)
-        self.assertEqual(
-            response.json()["handoff"]["capability_id"], "preservations.release",
-        )
+        self.assertIn(response.status_code, (404, 405))
         preservation.refresh_from_db()
         self.assertEqual(preservation.state, FootagePreservation.State.HELD)
 

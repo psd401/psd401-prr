@@ -1,5 +1,5 @@
 # ABOUTME: Staff read-only view of footage preservation holds plus the gated
-# ABOUTME: camera-exclusion and release actions (human + reason, triage.py).
+# ABOUTME: camera-exclusion and widen actions; release is automatic (triage.py).
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
@@ -34,19 +34,21 @@ class PreservationSerializer(serializers.ModelSerializer):
     request_closed = serializers.SerializerMethodField()
     confirmation_text = serializers.SerializerMethodField()
     widenable = serializers.SerializerMethodField()
-    releasable = serializers.SerializerMethodField()
+    release_eligible_at = serializers.SerializerMethodField()
 
     class Meta:
         model = FootagePreservation
         fields = ["id", "request_number", "state", "window_start", "window_end",
                   "detected_dates_note", "site_codes", "site_resolution",
                   "held_count", "camera_holds", "confirmation_text",
-                  "request_closed", "releasable", "widenable", "released_at",
+                  "request_closed", "release_eligible_at", "widenable", "released_at",
                   "released_by", "release_reason"]
 
-    @extend_schema_field(serializers.BooleanField())
-    def get_releasable(self, obj):
-        return triage.is_releasable(obj)
+    @extend_schema_field(serializers.DateTimeField(allow_null=True))
+    def get_release_eligible_at(self, obj):
+        # When the automatic release lets the footage go; null while it won't.
+        at = triage.release_eligible_at(obj)
+        return serializers.DateTimeField().to_representation(at) if at else None
 
     @extend_schema_field(serializers.BooleanField())
     def get_widenable(self, obj):
@@ -81,7 +83,6 @@ class PreservationViewSet(viewsets.ReadOnlyModelViewSet):
         "list": {StaffRole.RECORDS_OFFICER, StaffRole.ADMIN},
         "retrieve": {StaffRole.RECORDS_OFFICER, StaffRole.ADMIN},
         "exclude_camera": {StaffRole.RECORDS_OFFICER},
-        "release": {StaffRole.RECORDS_OFFICER},
         "widen": {StaffRole.RECORDS_OFFICER},
     }
 
@@ -120,36 +121,6 @@ class PreservationViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(PreservationCameraHoldSerializer(camera_hold).data)
-
-    @action(detail=True, methods=["post"], url_path="release")
-    def release(self, request, pk=None):
-        handoff = human_only_handoff(
-            request,
-            capability_id="preservations.release",
-            action=(
-                "Release a closed request's preservation hold and delete its "
-                "Aware bookmarks."
-            ),
-        )
-        if handoff:
-            return handoff
-        preservation = self.get_object()
-        try:
-            triage.release_preservation(
-                preservation,
-                actor=request.user,
-                reason=request.data.get("reason", ""),
-                # Only a JSON true attests; triage refuses anything else.
-                attest_no_litigation_hold=request.data.get(
-                    "attest_no_litigation_hold"
-                ),
-            )
-        except triage.PreservationRefused as exc:
-            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response(
-            PreservationSerializer(self.get_queryset().get(pk=preservation.pk)).data
-        )
 
     @action(detail=True, methods=["post"], url_path="widen")
     def widen(self, request, pk=None):

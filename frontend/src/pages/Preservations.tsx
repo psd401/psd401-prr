@@ -1,5 +1,5 @@
 // ABOUTME: Footage preservation holds screen — the retention race dashboard.
-// ABOUTME: Cards per Aware bookmark hold: cameras, exclusions, confirmation, release.
+// ABOUTME: Cards per Aware bookmark hold: cameras, exclusions, confirmation, auto-release.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router'
@@ -52,9 +52,9 @@ interface Preservation {
   camera_holds: CameraHold[]
   confirmation_text: string | null
   request_closed: boolean
-  /** Server-computed: closed, not a merged target, and held/partial — or
-   * released with cameras whose bookmark delete failed (a retry). */
-  releasable: boolean
+  /** Server-computed: when the automatic release lets the footage go (or
+   * retries unconfirmed deletes); null while it will not. */
+  release_eligible_at: string | null
   /** Server-computed: narrowed to specific sites and not released. */
   widenable: boolean
   released_at: string | null
@@ -72,7 +72,7 @@ const PRESERVATION_STATES = [
   'released',
 ] as const
 
-/** Release, widen and exclude reasons are capped at 500 on the server. */
+/** Widen and exclude reasons are capped at 500 on the server. */
 const MAX_REASON_LENGTH = 500
 
 // Exclusion narrows a live hold. A released hold has nothing left to narrow,
@@ -90,6 +90,21 @@ function excludable(preservation: Preservation, hold: CameraHold) {
 /** A release already ran but some Aware bookmarks may still exist. */
 function hasReleaseFailures(preservation: Preservation) {
   return preservation.camera_holds.some((h) => h.state === 'release_failed')
+}
+
+// Holds the automatic release can still let go of (triage.RELEASABLE_PRESERVATION_STATES).
+const RELEASABLE_STATES = new Set(['held', 'partial'])
+
+/** When the footage is let go: release is automatic, never a click. */
+function releaseNote(preservation: Preservation) {
+  if (preservation.state === 'released') {
+    return hasReleaseFailures(preservation) ? 'Release retrying' : null
+  }
+  if (!RELEASABLE_STATES.has(preservation.state)) return null
+  if (preservation.release_eligible_at) {
+    return `Releases automatically on ${preservation.release_eligible_at.slice(0, 10)}`
+  }
+  return preservation.request_closed ? null : 'Releases automatically after the request closes'
 }
 
 /** Filter buttons use the badge label up to its "— detail" suffix. */
@@ -159,16 +174,13 @@ function ConfirmationText({ text }: { text: string }) {
 /** Records Officer controls in a preservation card's header. */
 function HoldActions({
   preservation,
-  onRelease,
   onWiden,
 }: {
   preservation: Preservation
-  onRelease: () => void
   onWiden: () => void
 }) {
   // Accessible names carry the request number: the all-preservations list
   // shows many cards, and identical names make the buttons indistinguishable.
-  const releaseLabel = hasReleaseFailures(preservation) ? 'Retry release' : 'Release hold'
   return (
     <>
       {preservation.widenable && (
@@ -178,15 +190,6 @@ function HoldActions({
           aria-label={`Widen to district-wide — ${preservation.request_number}`}
         >
           Widen to district-wide
-        </Button>
-      )}
-      {preservation.releasable && (
-        <Button
-          variant="ghost"
-          onClick={onRelease}
-          aria-label={`${releaseLabel} — ${preservation.request_number}`}
-        >
-          {releaseLabel}
         </Button>
       )}
     </>
@@ -316,87 +319,6 @@ function ExcludeDialog({
   )
 }
 
-/**
- * Release a closed request's hold, deleting its Aware bookmarks. Also retries
- * the deletes that failed on an earlier release.
- */
-function ReleaseDialog({
-  preservation,
-  pending,
-  error,
-  onClose,
-  onSubmit,
-}: {
-  preservation: Preservation
-  pending: boolean
-  error: unknown
-  onClose: () => void
-  onSubmit: (reason: string) => void
-}) {
-  const [reason, setReason] = useState('')
-  const [attested, setAttested] = useState(false)
-  const action = hasReleaseFailures(preservation) ? 'Retry release' : 'Release preservation'
-
-  function submit(e: FormEvent) {
-    e.preventDefault()
-    if (reasonTooShort(reason) || !attested) return
-    onSubmit(reason)
-  }
-
-  return (
-    <Modal
-      open
-      title={`${action} for ${preservation.request_number}`}
-      onClose={onClose}
-      dismissible={!pending}
-    >
-      <form onSubmit={submit} className="space-y-4">
-        <p className="text-sm text-ink-muted">
-          Releasing deletes every Aware bookmark on this hold. The footage then
-          ages out on each camera's normal schedule and cannot be recovered.
-        </p>
-        <Field
-          label="Reason"
-          hint={reasonHint('say why the footage no longer needs to be kept')}
-        >
-          <Textarea
-            rows={3}
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            minLength={MIN_REASON_LENGTH}
-            maxLength={MAX_REASON_LENGTH}
-            required
-          />
-        </Field>
-        {reasonShortfall(reason) && (
-          <p className="text-sm text-ink-muted">{reasonShortfall(reason)}</p>
-        )}
-        <label className="flex items-start gap-2 text-sm text-ink">
-          <input
-            type="checkbox"
-            checked={attested}
-            onChange={(e) => setAttested(e.target.checked)}
-            required
-          />
-          <span>
-            I attest that no litigation hold, pending lawsuit, or reasonably
-            anticipated litigation covers this footage.
-          </span>
-        </label>
-        {error != null && <ErrorNote error={error} />}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onClose} disabled={pending}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={pending || reasonTooShort(reason) || !attested}>
-            {pending ? 'Releasing…' : 'Release and delete bookmarks'}
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  )
-}
-
 export function Preservations({
   roles,
   requestNumber,
@@ -411,7 +333,6 @@ export function Preservations({
   const activeStateFilter = searchParams.get('preservation_state') ?? ''
   // Only Records Officer buttons set these, so a set target implies canExclude.
   const [excluding, setExcluding] = useState<ExcludeTarget | null>(null)
-  const [releasing, setReleasing] = useState<Preservation | null>(null)
   const [widening, setWidening] = useState<Preservation | null>(null)
 
   const list = useQuery({
@@ -449,19 +370,6 @@ export function Preservations({
     },
   })
 
-  const release = useMutation({
-    mutationFn: ({ preservationId, reason }: { preservationId: number; requestNumber: string; reason: string }) =>
-      api<Preservation>(`/api/staff/preservations/${preservationId}/release/`, {
-        method: 'POST',
-        body: { reason, attest_no_litigation_hold: true },
-      }),
-    onSuccess: (_preservation, { requestNumber }) => {
-      refreshAfterChange(requestNumber)
-      toast('success', 'Preservation hold released; Aware bookmarks are being deleted.')
-      closeRelease()
-    },
-  })
-
   const widen = useMutation({
     mutationFn: ({ preservationId, reason }: { preservationId: number; requestNumber: string; reason: string }) =>
       api<Preservation>(`/api/staff/preservations/${preservationId}/widen/`, {
@@ -483,16 +391,6 @@ export function Preservations({
   function closeWiden() {
     setWidening(null)
     widen.reset()
-  }
-
-  function openRelease(preservation: Preservation) {
-    release.reset()
-    setReleasing(preservation)
-  }
-
-  function closeRelease() {
-    setReleasing(null)
-    release.reset()
   }
 
   function openExclude(preservationId: number, requestNumber: string, hold: CameraHold) {
@@ -567,20 +465,21 @@ export function Preservations({
                 <div className="flex flex-wrap items-center gap-2">
                   <StateBadge state={p.state} />
                   {canExclude && (
-                    <HoldActions
-                      preservation={p}
-                      onRelease={() => openRelease(p)}
-                      onWiden={() => openWiden(p)}
-                    />
+                    <HoldActions preservation={p} onWiden={() => openWiden(p)} />
                   )}
                 </div>
               </div>
 
               {p.confirmation_text && <ConfirmationText text={p.confirmation_text} />}
 
+              {releaseNote(p) && (
+                <p className="mb-4 text-sm text-ink-muted">{releaseNote(p)}</p>
+              )}
+
               {p.released_at && (
                 <p className="mb-4 text-sm text-ink-muted">
-                  Released {p.released_at.slice(0, 10)} by {p.released_by ?? '—'}
+                  Released {p.released_at.slice(0, 10)}
+                  {p.released_by && <> by {p.released_by}</>}
                   {p.release_reason && <> — {p.release_reason}</>}
                 </p>
               )}
@@ -660,7 +559,7 @@ export function Preservations({
               )}
 
               <p className="mt-3 text-xs text-ink-muted">
-                Exclusions and releases are logged with your name and reason — RCW 42.56 audit trail.
+                Exclusions are logged with your name and reason; automatic releases are logged too — RCW 42.56 audit trail.
               </p>
             </Card>
           ))}
@@ -679,22 +578,6 @@ export function Preservations({
               requestNumber: excluding.requestNumber,
               holdId: excluding.hold.id,
               reason: excludeReason,
-            })
-          }
-        />
-      )}
-
-      {releasing && (
-        <ReleaseDialog
-          preservation={releasing}
-          pending={release.isPending}
-          error={release.error}
-          onClose={closeRelease}
-          onSubmit={(releaseReason) =>
-            release.mutate({
-              preservationId: releasing.id,
-              requestNumber: releasing.request_number,
-              reason: releaseReason,
             })
           }
         />

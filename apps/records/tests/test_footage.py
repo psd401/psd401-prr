@@ -6,6 +6,8 @@ from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
+from django.db.models import F, Value
+from django.db.models.functions import Concat
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
@@ -1665,7 +1667,8 @@ class ExclusionGateTests(TestCase):
             )
 
     def test_no_automated_exclusion_path(self):
-        """Guard rail: no background task may call exclude_camera."""
+        """Guard rail: no background task may call exclude_camera, or delete
+        a bookmark except through the automatic release."""
         import ast
         import inspect
         tree = ast.parse(inspect.getsource(tasks))
@@ -1673,7 +1676,7 @@ class ExclusionGateTests(TestCase):
             node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
             for node in ast.walk(tree) if isinstance(node, ast.Call)
         ]
-        for forbidden in ("exclude_camera", "release_preservation", "delete_bookmark"):
+        for forbidden in ("exclude_camera", "delete_bookmark"):
             self.assertNotIn(forbidden, calls)
 
 
@@ -1796,9 +1799,8 @@ class ConfirmationTextTests(TestCase):
                 self.assertIsNone(triage.preservation_confirmation_text(fp))
 
 
-RELEASE_REASON = (
-    "Request fulfilled; installment produced and the requester confirmed receipt."
-)
+def closed_ago(days: float = 0, *, minutes: float = 1) -> dt.datetime:
+    return timezone.now() - dt.timedelta(days=days, minutes=minutes)
 
 
 @override_settings(
@@ -1806,10 +1808,11 @@ RELEASE_REASON = (
     CAMERA_RETENTION_DAYS=10,
     PRR_LOCAL_IMPLICIT_STAFF_ROLES=(),
 )
-class ReleaseGateTests(TestCase):
+class AutomaticReleaseTests(TestCase):
     """Release ends a hold for good: Aware deletes the bookmarks, and the
-    footage ages out. Only a current Records Officer, after the request
-    closes, with a reason and a litigation-hold attestation."""
+    footage ages out. It runs by itself once the request is closed: at
+    closing for most closures, a year after for the ones a requester is most
+    likely to sue over (RCW 42.56.550(6))."""
 
     def _records_officer(self):
         officer = get_user_model().objects.create_user(
@@ -1820,22 +1823,20 @@ class ReleaseGateTests(TestCase):
         apply_staff_roles(officer, {StaffRole.RECORDS_OFFICER})
         return officer
 
-    def _held_preservation(self, *, status=RequestStatus.FULFILLED, hold=full_hold):
+    def _held_preservation(
+        self, *, status=RequestStatus.FULFILLED, closed_at=None, hold=full_hold,
+    ):
         with aware(hold=hold):
             prr = make_request(f"gym entrance footage {days_ago(1)}")
             fp = preserve(prr)
-        PublicRecordsRequest.objects.filter(pk=prr.pk).update(status=status)
+        PublicRecordsRequest.objects.filter(pk=prr.pk).update(
+            status=status, closed_at=closed_at or closed_ago(),
+        )
         fp.refresh_from_db()
         return fp
 
-    def _release(self, fp, **overrides):
-        kwargs = {
-            "actor": overrides.pop("actor", None) or self._records_officer(),
-            "reason": RELEASE_REASON,
-            "attest_no_litigation_hold": True,
-        }
-        kwargs.update(overrides)
-        return triage.release_preservation(fp, **kwargs)
+    def _release(self, fp):
+        return triage.release_preservation(fp)
 
     def assertNothingReleased(self, fp, delete_bookmark):
         delete_bookmark.assert_not_called()
@@ -1845,7 +1846,7 @@ class ReleaseGateTests(TestCase):
             (FootagePreservation.State.HELD, FootagePreservation.State.PARTIAL),
         )
         self.assertIsNone(fp.released_at)
-        self.assertIsNone(fp.released_by_id)
+        self.assertIsNone(fp.released_by)
         self.assertEqual(fp.release_reason, "")
         self.assertFalse(
             fp.camera_holds.filter(state=CameraHold.State.RELEASED).exists()
@@ -1854,99 +1855,129 @@ class ReleaseGateTests(TestCase):
             AuditLog.objects.filter(action="footage.preservation_released").exists()
         )
 
-    @mock.patch(f"{CLIENT}.delete_bookmark")
-    def test_release_requires_a_current_records_officer(self, delete_bookmark):
-        fp = self._held_preservation()
-        administrator = get_user_model().objects.create_user(
-            "release-application-admin", password="pw", is_staff=True,
-        )
-        apply_staff_roles(administrator, {StaffRole.ADMIN})
-        revoked = self._records_officer()
-        apply_staff_roles(revoked, set())
+    # -- when a preservation is due ---------------------------------------
 
-        for actor in (None, administrator, revoked):
-            with (
-                self.subTest(actor=getattr(actor, "username", None)),
-                self.assertRaisesMessage(
-                    PermissionDenied,
-                    "Current Records Officer authority is required to release "
-                    "a preservation hold.",
-                ),
-                self.captureOnCommitCallbacks(execute=True),
-            ):
-                triage.release_preservation(
-                    fp,
-                    actor=actor,
-                    reason=RELEASE_REASON,
-                    attest_no_litigation_hold=True,
+    def test_the_two_closure_groups_cover_every_closed_status(self):
+        from apps.records.services import CLOSED_STATUSES
+
+        at_closing = triage.RELEASE_AT_CLOSING_STATUSES
+        after_a_year = triage.RELEASE_AFTER_SUIT_WINDOW_STATUSES
+        self.assertFalse(at_closing & after_a_year)
+        self.assertEqual(at_closing | after_a_year, CLOSED_STATUSES)
+        self.assertEqual(triage.PRA_SUIT_WINDOW, dt.timedelta(days=365))
+
+    def test_ordinary_closures_release_at_closing(self):
+        for status in (
+            RequestStatus.FULFILLED,
+            RequestStatus.CLOSED_WITHDRAWN,
+            RequestStatus.CLOSED_DUPLICATE,
+            RequestStatus.CLOSED_NON_REQUEST,
+        ):
+            closed_at = closed_ago()
+            fp = self._held_preservation(status=status, closed_at=closed_at)
+            with self.subTest(status=status):
+                self.assertEqual(triage.release_eligible_at(fp), closed_at)
+                self.assertTrue(triage.is_releasable(fp))
+
+    def test_closures_a_requester_may_sue_over_wait_one_year(self):
+        for status in (
+            RequestStatus.DENIED,
+            RequestStatus.CLOSED_NO_RECORDS,
+            RequestStatus.CLOSED_ABANDONED,
+        ):
+            closed_at = closed_ago(364)
+            fp = self._held_preservation(status=status, closed_at=closed_at)
+            with self.subTest(status=status):
+                self.assertEqual(
+                    triage.release_eligible_at(fp),
+                    closed_at + dt.timedelta(days=365),
                 )
-        self.assertNothingReleased(fp, delete_bookmark)
+                self.assertFalse(triage.is_releasable(fp))
+                PublicRecordsRequest.objects.filter(pk=fp.request.pk).update(
+                    closed_at=closed_ago(365),
+                )
+                fp.refresh_from_db()
+                self.assertTrue(triage.is_releasable(fp))
 
     @mock.patch(f"{CLIENT}.delete_bookmark")
-    def test_release_requires_a_substantive_reason(self, delete_bookmark):
-        fp = self._held_preservation()
-        for bad in ("", "   ", "n/a", None, "x" * 501):
-            with (
-                self.subTest(reason=bad if bad is None else bad[:12]),
-                self.assertRaises(ValueError),
-                self.captureOnCommitCallbacks(execute=True),
-            ):
-                self._release(fp, reason=bad)
+    def test_a_denial_is_not_released_before_its_year_is_up(self, delete_bookmark):
+        fp = self._held_preservation(
+            status=RequestStatus.DENIED, closed_at=closed_ago(364),
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertIsNone(self._release(fp))
         self.assertNothingReleased(fp, delete_bookmark)
 
-    @mock.patch(f"{CLIENT}.delete_bookmark")
-    def test_release_requires_the_litigation_hold_attestation(self, delete_bookmark):
-        fp = self._held_preservation()
-        for attestation in (False, None, "true", 1):
-            with (
-                self.subTest(attestation=attestation),
-                self.assertRaisesMessage(ValueError, "litigation hold"),
-                self.captureOnCommitCallbacks(execute=True),
-            ):
-                self._release(fp, attest_no_litigation_hold=attestation)
-        self.assertNothingReleased(fp, delete_bookmark)
-
-    @mock.patch(f"{CLIENT}.delete_bookmark")
-    def test_release_refuses_a_request_that_is_still_open(self, delete_bookmark):
+    def test_an_open_request_is_not_eligible(self):
         for status in (RequestStatus.RECEIVED, RequestStatus.ACKNOWLEDGED):
             fp = self._held_preservation(status=status)
-            with (
-                self.subTest(status=status),
-                self.assertRaisesMessage(ValueError, "still open"),
-                self.captureOnCommitCallbacks(execute=True),
-            ):
-                self._release(fp)
-            self.assertNothingReleased(fp, delete_bookmark)
+            with self.subTest(status=status):
+                self.assertIsNone(triage.release_eligible_at(fp))
 
-    @mock.patch(f"{CLIENT}.delete_bookmark")
-    def test_release_refuses_a_duplicate_whose_case_of_record_is_open(
-        self, delete_bookmark,
-    ):
-        # A merge leaves the preservation on the duplicate, so its bookmarks
-        # still hold the footage the case of record is answering for.
-        fp = self._held_preservation(status=RequestStatus.CLOSED_DUPLICATE)
+    def test_a_closed_request_with_no_closing_time_is_never_released_on_a_guess(self):
+        fp = self._held_preservation()
+        PublicRecordsRequest.objects.filter(pk=fp.request.pk).update(closed_at=None)
+        fp.refresh_from_db()
+        with self.assertLogs("apps.records.triage", level="WARNING") as logs:
+            self.assertIsNone(triage.release_eligible_at(fp))
+        self.assertIn(fp.request.number, logs.output[0])
+
+    def test_a_merged_duplicate_waits_for_the_later_of_the_two_dates(self):
+        fp = self._held_preservation(
+            status=RequestStatus.CLOSED_DUPLICATE, closed_at=closed_ago(10),
+        )
         target = make_request("the same footage request, filed again")
-        PublicRecordsRequest.objects.filter(pk=fp.request_id).update(
+        PublicRecordsRequest.objects.filter(pk=fp.request.pk).update(
             merged_into=target,
         )
-        with (
-            self.assertRaisesMessage(ValueError, target.number),
-            self.captureOnCommitCallbacks(execute=True),
-        ):
-            self._release(fp)
+        fp.refresh_from_db()
+        # The case of record is still open: the hold preserves its footage.
+        self.assertIsNone(triage.release_eligible_at(fp))
+
+        # Case of record denied later: its year decides.
+        target_closed = closed_ago(5)
+        PublicRecordsRequest.objects.filter(pk=target.pk).update(
+            status=RequestStatus.DENIED, closed_at=target_closed,
+        )
+        fp.refresh_from_db()
+        self.assertEqual(
+            triage.release_eligible_at(fp), target_closed + dt.timedelta(days=365),
+        )
+
+        # Duplicate's own wait is the longer one: it decides.
+        source_closed = closed_ago(20)
+        PublicRecordsRequest.objects.filter(pk=fp.request.pk).update(
+            status=RequestStatus.CLOSED_ABANDONED, closed_at=source_closed,
+        )
+        PublicRecordsRequest.objects.filter(pk=target.pk).update(
+            status=RequestStatus.FULFILLED, closed_at=closed_ago(1),
+        )
+        fp.refresh_from_db()
+        self.assertEqual(
+            triage.release_eligible_at(fp), source_closed + dt.timedelta(days=365),
+        )
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_a_duplicate_releases_once_its_case_of_record_closes(self, delete_bookmark):
+        fp = self._held_preservation(status=RequestStatus.CLOSED_DUPLICATE)
+        target = make_request("the same footage request, filed again")
+        PublicRecordsRequest.objects.filter(pk=fp.request.pk).update(
+            merged_into=target,
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertIsNone(self._release(fp))
         self.assertNothingReleased(fp, delete_bookmark)
 
         PublicRecordsRequest.objects.filter(pk=target.pk).update(
-            status=RequestStatus.FULFILLED,
+            status=RequestStatus.FULFILLED, closed_at=closed_ago(),
         )
         with self.captureOnCommitCallbacks(execute=True):
             released = self._release(fp)
+        assert released is not None
         self.assertEqual(released.state, FootagePreservation.State.RELEASED)
+        self.assertIn(target.number, released.release_reason)
 
-    @mock.patch(f"{CLIENT}.delete_bookmark")
-    def test_release_refuses_a_preservation_that_holds_nothing(
-        self, delete_bookmark,
-    ):
+    def test_a_preservation_that_holds_nothing_is_not_eligible(self):
         fp = self._held_preservation()
         for state in (
             FootagePreservation.State.PENDING,
@@ -1956,42 +1987,63 @@ class ReleaseGateTests(TestCase):
             FootagePreservation.State.RELEASED,
         ):
             FootagePreservation.objects.filter(pk=fp.pk).update(state=state)
-            with (
-                self.subTest(state=state),
-                self.assertRaisesMessage(ValueError, "Only a held or partly held"),
-                self.captureOnCommitCallbacks(execute=True),
-            ):
-                self._release(fp)
+            fp.refresh_from_db()
+            with self.subTest(state=state):
+                self.assertIsNone(triage.release_eligible_at(fp))
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_a_preservation_that_holds_nothing_is_skipped(self, delete_bookmark):
+        fp = self._held_preservation()
+        FootagePreservation.objects.filter(pk=fp.pk).update(
+            state=FootagePreservation.State.MANUAL,
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertIsNone(self._release(fp))
         delete_bookmark.assert_not_called()
 
     @mock.patch(f"{CLIENT}.delete_bookmark")
-    def test_valid_release_deletes_every_bookmark_and_records_why(
-        self, delete_bookmark,
-    ):
+    def test_a_hold_run_still_bookmarking_is_skipped(self, delete_bookmark):
+        # A widen keeps the state HELD while its run bookmarks more cameras;
+        # a release now would miss the bookmarks the run makes next.
         fp = self._held_preservation()
-        officer = self._records_officer()
+        FootagePreservation.objects.filter(pk=fp.pk).update(
+            hold_run_started_at=timezone.now(), hold_heartbeat_at=timezone.now(),
+        )
+        fp.refresh_from_db()
+
+        self.assertIsNone(triage.release_eligible_at(fp))
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertIsNone(self._release(fp))
+        self.assertNothingReleased(fp, delete_bookmark)
+
+    # -- what a release does ------------------------------------------------
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_release_deletes_every_bookmark_and_records_why(self, delete_bookmark):
+        closed_at = timezone.make_aware(dt.datetime(2026, 11, 2, 9, 30))
+        fp = self._held_preservation(closed_at=closed_at)
         with self.captureOnCommitCallbacks(execute=True):
             triage.exclude_camera(
                 fp.camera_holds.get(camera_id="cam-2"),
                 "Camera faces staff parking; request concerns the gym entrance only.",
-                actor=officer,
+                actor=self._records_officer(),
             )
         delete_bookmark.reset_mock()
 
         with self.captureOnCommitCallbacks(execute=True):
-            released = triage.release_preservation(
-                fp,
-                actor=officer,
-                reason=f"  {RELEASE_REASON}  ",
-                attest_no_litigation_hold=True,
-            )
+            released = self._release(fp)
 
         fp.refresh_from_db()
+        assert released is not None
         self.assertEqual(released.pk, fp.pk)
         self.assertEqual(fp.state, FootagePreservation.State.RELEASED)
         self.assertIsNotNone(fp.released_at)
-        self.assertEqual(fp.released_by, officer)
-        self.assertEqual(fp.release_reason, RELEASE_REASON)
+        self.assertIsNone(fp.released_by)
+        reason = (
+            f"Released automatically: {fp.request.number} closed (Fulfilled) "
+            "on 2026-11-02."
+        )
+        self.assertEqual(fp.release_reason, reason)
         self.assertEqual(fp.held_count, 0)
         # The excluded camera's bookmark went with its exclusion; only the
         # cameras still held are deleted now.
@@ -2003,21 +2055,35 @@ class ReleaseGateTests(TestCase):
             set(fp.camera_holds.values_list("state", flat=True)),
             {CameraHold.State.RELEASED},
         )
-        excluded = fp.camera_holds.get(camera_id="cam-2")
-        self.assertIsNotNone(excluded.excluded_at)
+        self.assertIsNotNone(fp.camera_holds.get(camera_id="cam-2").excluded_at)
 
         log = AuditLog.objects.get(action="footage.preservation_released")
-        self.assertEqual(log.actor, officer)
+        self.assertIsNone(log.actor)
         self.assertEqual(log.target, fp.request.number)
-        self.assertEqual(log.detail["reason"], RELEASE_REASON)
-        self.assertIs(log.detail["attest_no_litigation_hold"], True)
+        self.assertEqual(log.detail["reason"], reason)
         self.assertEqual(log.detail["bookmarks"], 2)
+        self.assertNotIn("attest_no_litigation_hold", log.detail)
 
         event = fp.request.events.get(note__startswith="Footage preservation released")
-        self.assertEqual(event.actor, officer)
-        self.assertIn(RELEASE_REASON, event.note)
-        self.assertIn("litigation hold", event.note)
+        self.assertIsNone(event.actor)
+        self.assertIn(reason, event.note)
         self.assertFalse(event.visible_to_requester)
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_a_release_after_the_wait_cites_the_suit_window(self, delete_bookmark):
+        closed_at = timezone.make_aware(dt.datetime(2025, 11, 3, 16, 0))
+        fp = self._held_preservation(status=RequestStatus.DENIED, closed_at=closed_at)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self._release(fp)
+
+        fp.refresh_from_db()
+        self.assertEqual(
+            fp.release_reason,
+            f"Released automatically: {fp.request.number} closed (Denied (fully "
+            "exempt)) on 2025-11-03; released one year after closing, "
+            "RCW 42.56.550(6).",
+        )
 
     @mock.patch(f"{CLIENT}.delete_bookmark")
     def test_partial_preservation_releases_gap_bookmarks_too(self, delete_bookmark):
@@ -2054,7 +2120,6 @@ class ReleaseGateTests(TestCase):
         self, delete_bookmark, audit,
     ):
         fp = self._held_preservation()
-        officer = self._records_officer()
         audit.reset_mock()
         audit.side_effect = RuntimeError("audit persistence failed")
 
@@ -2062,7 +2127,7 @@ class ReleaseGateTests(TestCase):
             self.assertRaisesMessage(RuntimeError, "audit persistence failed"),
             self.captureOnCommitCallbacks(execute=True),
         ):
-            self._release(fp, actor=officer)
+            self._release(fp)
 
         audit.assert_called_once()
         self.assertNothingReleased(fp, delete_bookmark)
@@ -2075,10 +2140,9 @@ class ReleaseGateTests(TestCase):
         self, delete_bookmark,
     ):
         fp = self._held_preservation()
-        officer = self._records_officer()
 
         with self.captureOnCommitCallbacks(execute=True):
-            self._release(fp, actor=officer)
+            self._release(fp)
 
         fp.refresh_from_db()
         self.assertEqual(fp.state, FootagePreservation.State.RELEASED)
@@ -2086,14 +2150,16 @@ class ReleaseGateTests(TestCase):
         failures = AuditLog.objects.filter(action="footage.bookmark_release_failed")
         self.assertEqual(failures.count(), 3)
         failure = failures.get(detail__bookmark="bm-cam-1")
-        self.assertEqual(failure.actor, officer)
+        self.assertIsNone(failure.actor)
         self.assertEqual(failure.detail["camera"], "Gym Entrance")
         self.assertEqual(failure.detail["error"], "Aware bookmark delete failed (AltaError).")
+        note = fp.request.events.get(note__contains="could not be deleted").note
+        self.assertIn("retried automatically", note)
 
-    # A bookmark Aware would not delete stays visible and can be retried.
+    # A bookmark Aware would not delete stays visible and is retried.
 
     @mock.patch(f"{CLIENT}.delete_bookmark")
-    def test_a_failed_delete_is_recorded_and_a_repost_retries_only_it(
+    def test_a_failed_delete_is_recorded_and_the_next_run_retries_only_it(
         self, delete_bookmark,
     ):
         fp = self._held_preservation()
@@ -2104,7 +2170,7 @@ class ReleaseGateTests(TestCase):
 
         delete_bookmark.side_effect = refuse_cam_3
         with self.captureOnCommitCallbacks(execute=True):
-            self._release(fp)
+            tasks.release_due_footage_preservations()
 
         failed = fp.camera_holds.get(camera_id="cam-3")
         self.assertEqual(failed.state, CameraHold.State.RELEASE_FAILED)
@@ -2116,17 +2182,25 @@ class ReleaseGateTests(TestCase):
         self.assertTrue(
             fp.request.events.filter(note__contains="could not be deleted").exists()
         )
+        fp.refresh_from_db()
+        self.assertTrue(triage.is_releasable(fp))
+        events = fp.request.events.count()
 
         delete_bookmark.reset_mock()
         delete_bookmark.side_effect = None
         with self.captureOnCommitCallbacks(execute=True):
-            self._release(fp)
+            tasks.release_due_footage_preservations()
 
         delete_bookmark.assert_called_once_with("bm-cam-3")
         failed.refresh_from_db()
         self.assertEqual(failed.state, CameraHold.State.RELEASED)
         fp.refresh_from_db()
         self.assertEqual(fp.state, FootagePreservation.State.RELEASED)
+        self.assertTrue(
+            AuditLog.objects.filter(action="footage.preservation_release_retried").exists()
+        )
+        # A retry runs every beat; it is audited, not added to the timeline.
+        self.assertEqual(fp.request.events.count(), events)
 
     @mock.patch(f"{CLIENT}.delete_bookmark")
     def test_a_bookmark_is_not_released_until_aware_confirms_its_delete(
@@ -2185,8 +2259,8 @@ class ReleaseGateTests(TestCase):
             self._release(fp)
         delete_bookmark.reset_mock()
 
-        with self.assertRaises(ValueError), self.captureOnCommitCallbacks(execute=True):
-            self._release(fp)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertIsNone(self._release(fp))
         delete_bookmark.assert_not_called()
 
     @mock.patch(f"{CLIENT}.delete_bookmark")
@@ -2276,27 +2350,6 @@ class ReleaseGateTests(TestCase):
         self.assertEqual(hold.state, CameraHold.State.RELEASED)
 
     @mock.patch(f"{CLIENT}.delete_bookmark")
-    def test_release_is_refused_while_a_hold_run_is_still_bookmarking(
-        self, delete_bookmark,
-    ):
-        # A widen keeps the state HELD while its run bookmarks more cameras;
-        # a release now would miss the bookmarks the run makes next.
-        fp = self._held_preservation()
-        FootagePreservation.objects.filter(pk=fp.pk).update(
-            hold_run_started_at=timezone.now(), hold_heartbeat_at=timezone.now(),
-        )
-        fp.refresh_from_db()
-
-        self.assertFalse(triage.is_releasable(fp))
-        with self.captureOnCommitCallbacks(execute=True):
-            with self.assertRaisesRegex(triage.PreservationRefused, "still running") as refused:
-                self._release(fp)
-        # A crashed run holds the marker until the sweeper clears it.
-        self.assertIn("stalled", refused.exception.message)
-        self.assertIn("15 minutes", refused.exception.message)
-        self.assertNothingReleased(fp, delete_bookmark)
-
-    @mock.patch(f"{CLIENT}.delete_bookmark")
     def test_release_names_cameras_whose_uncertain_create_may_have_left_a_bookmark(
         self, delete_bookmark,
     ):
@@ -2321,17 +2374,182 @@ class ReleaseGateTests(TestCase):
         )
 
 
+@override_settings(
+    CELERY_TASK_ALWAYS_EAGER=True,
+    CAMERA_RETENTION_DAYS=10,
+    PRR_LOCAL_IMPLICIT_STAFF_ROLES=(),
+)
+class ReleaseTaskTests(TestCase):
+    """The beat task and the closing transition that start the release."""
+
+    def _held_preservation(self, *, status=RequestStatus.FULFILLED, closed_at=None):
+        with aware():
+            prr = make_request(f"gym entrance footage {days_ago(1)}")
+            fp = preserve(prr)
+        PublicRecordsRequest.objects.filter(pk=prr.pk).update(
+            status=status, closed_at=closed_at or closed_ago(),
+        )
+        fp.refresh_from_db()
+        return fp
+
+    def _run(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            return tasks.release_due_footage_preservations()
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_the_task_releases_every_due_preservation_and_only_those(
+        self, delete_bookmark,
+    ):
+        due = [
+            self._held_preservation(),
+            self._held_preservation(
+                status=RequestStatus.CLOSED_NO_RECORDS, closed_at=closed_ago(366),
+            ),
+        ]
+        waiting = self._held_preservation(
+            status=RequestStatus.CLOSED_NO_RECORDS, closed_at=closed_ago(30),
+        )
+        still_open = self._held_preservation(status=RequestStatus.GATHERING)
+
+        self.assertEqual(self._run(), 2)
+
+        for fp in due:
+            fp.refresh_from_db()
+            self.assertEqual(fp.state, FootagePreservation.State.RELEASED)
+        for fp in (waiting, still_open):
+            fp.refresh_from_db()
+            self.assertEqual(fp.state, FootagePreservation.State.HELD)
+        self.assertEqual(delete_bookmark.call_count, 6)
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_one_failure_never_stops_the_rest(self, delete_bookmark):
+        first = self._held_preservation()
+        second = self._held_preservation()
+        real = triage.release_preservation
+
+        def explode_on_first(fp):
+            if fp.pk == first.pk:
+                raise RuntimeError("database hiccup")
+            return real(fp)
+
+        with (
+            mock.patch.object(triage, "release_preservation", side_effect=explode_on_first),
+            self.assertLogs("apps.records.tasks", level="ERROR"),
+        ):
+            self.assertEqual(self._run(), 1)
+
+        second.refresh_from_db()
+        self.assertEqual(second.state, FootagePreservation.State.RELEASED)
+        first.refresh_from_db()
+        self.assertEqual(first.state, FootagePreservation.State.HELD)
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_an_aware_error_on_one_preservation_does_not_stop_another(
+        self, delete_bookmark,
+    ):
+        first = self._held_preservation()
+        second = self._held_preservation()
+        first_bookmarks = set(first.camera_holds.values_list("clip_id", flat=True))
+        # Both fixtures share camera ids; tell their bookmarks apart.
+        second.camera_holds.update(clip_id=Concat(F("clip_id"), Value("-b")))
+
+        def refuse_first(bookmark_id):
+            if bookmark_id in first_bookmarks:
+                raise alta.AltaError("Aware delete unavailable")
+
+        delete_bookmark.side_effect = refuse_first
+        self.assertEqual(self._run(), 2)
+
+        self.assertEqual(
+            set(first.camera_holds.values_list("state", flat=True)),
+            {CameraHold.State.RELEASE_FAILED},
+        )
+        self.assertEqual(
+            set(second.camera_holds.values_list("state", flat=True)),
+            {CameraHold.State.RELEASED},
+        )
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_a_hold_run_in_progress_is_skipped_until_it_finishes(self, delete_bookmark):
+        fp = self._held_preservation()
+        FootagePreservation.objects.filter(pk=fp.pk).update(
+            hold_run_started_at=timezone.now(),
+        )
+        self.assertEqual(self._run(), 0)
+        delete_bookmark.assert_not_called()
+
+        FootagePreservation.objects.filter(pk=fp.pk).update(hold_run_started_at=None)
+        self.assertEqual(self._run(), 1)
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_a_request_reopened_before_release_is_not_released(self, delete_bookmark):
+        from apps.records import services
+
+        officer = get_user_model().objects.create_user(
+            "reopen-officer", password="pw", is_staff=True,
+        )
+        apply_staff_roles(officer, {StaffRole.RECORDS_OFFICER})
+        fp = self._held_preservation(
+            status=RequestStatus.CLOSED_ABANDONED, closed_at=closed_ago(30),
+        )
+        services.reopen_request(
+            fp.request, RequestStatus.GATHERING, actor=officer,
+            reason="Requester followed up with the clarification we asked for.",
+        )
+        fp.refresh_from_db()
+        self.assertIsNone(fp.request.closed_at)
+        self.assertIsNone(triage.release_eligible_at(fp))
+
+        self.assertEqual(self._run(), 0)
+        delete_bookmark.assert_not_called()
+
+    def test_the_beat_schedule_runs_the_task(self):
+        from config.celery import app
+
+        entries = [
+            entry for entry in app.conf.beat_schedule.values()
+            if entry["task"] == "apps.records.tasks.release_due_footage_preservations"
+        ]
+        self.assertEqual(len(entries), 1)
+
+    @mock.patch("apps.records.tasks.release_due_footage_preservations.delay")
+    def test_a_closing_transition_starts_the_release_after_commit(self, delay):
+        from apps.records import services
+
+        officer = get_user_model().objects.create_user(
+            "closing-officer", password="pw", is_staff=True,
+        )
+        apply_staff_roles(officer, {StaffRole.RECORDS_OFFICER})
+        prr = make_request("gym entrance footage")
+
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            services.transition(prr, RequestStatus.GATHERING, actor=officer)
+        for callback in callbacks:
+            callback()
+        delay.assert_not_called()
+
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            services.transition(
+                prr, RequestStatus.CLOSED_WITHDRAWN, actor=officer,
+                note="Requester withdrew the request by email today.",
+            )
+            delay.assert_not_called()  # only once the closure commits
+        for callback in callbacks:
+            callback()
+        delay.assert_called_once_with()
+
+
 class HoldRunOwnershipTests(TestCase):
-    """A run that lost its marker (the sweeper reported it, then a Records
-    Officer released the hold) must stop making bookmarks nobody tracks."""
+    """A run that lost its marker (the sweeper reported it, then the
+    automatic release ran) must stop making bookmarks nobody tracks."""
 
     def test_a_run_that_lost_its_marker_stops_and_flags_its_last_bookmark(self):
         prr = make_request(f"gym entrance footage {days_ago(1)}")
 
         def hold_then_lose_the_run(cam, start, end, *, name, description):
-            # The request closed and a Records Officer released the hold.
+            # The request closed and the automatic release ran.
             PublicRecordsRequest.objects.filter(pk=prr.pk).update(
-                status=RequestStatus.FULFILLED,
+                status=RequestStatus.FULFILLED, closed_at=closed_ago(),
             )
             FootagePreservation.objects.filter(request=prr).update(
                 state=FootagePreservation.State.RELEASED, hold_run_started_at=None,

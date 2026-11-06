@@ -483,7 +483,7 @@ describe('CaseWorkspace', () => {
       preservation: {
         id: 9, state: 'released', confirmation_text: null, has_release_failures: true,
       },
-      label: 'Not yet confirmed deleted — bookmark may still exist; retry the release',
+      label: 'Not yet confirmed deleted — bookmark may still exist; the release retries automatically',
       tone: 'nx-badge--danger',
     },
     {

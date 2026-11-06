@@ -9,7 +9,7 @@ Centralizing this is what keeps the compliance record coherent.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -762,6 +762,16 @@ def transition(
     )
     if to_status in CLOSED_STATUSES:
         _retire_inbox_rows_on_closure(prr, actor=actor, to_status=to_status)
+        from celery import Task
+
+        from .tasks import release_due_footage_preservations
+
+        # Footage due at closing is released now rather than at the next
+        # beat; the task decides what is due.
+        transaction.on_commit(
+            lambda: cast(Task, release_due_footage_preservations).delay(),
+            robust=True,
+        )
 
     if to_status == RequestStatus.CLARIFICATION:
         from apps.correspondence.models import ClarificationCycle

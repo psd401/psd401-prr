@@ -1407,8 +1407,8 @@ def _released_during_run(fp, ch) -> bool:
             request=fp.request,
             note=(
                 f"An Aware bookmark on {camera} was made after the hold was "
-                "released and is not yet confirmed deleted. Post the release "
-                "again to delete it."
+                "released and is not yet confirmed deleted. The automatic "
+                "release deletes it on its next run."
             ),
         )
     return True
@@ -1698,3 +1698,44 @@ def build_pending_record_derivatives(*, limit: int = 25) -> int:
         if built >= limit:
             break
     return built
+
+
+@shared_task
+def release_due_footage_preservations() -> int:
+    """Release every footage preservation whose request has closed and whose
+    wait is over (triage.release_eligible_at), and retry each bookmark delete
+    Aware has not confirmed. The only automated caller of
+    triage.release_preservation. Each preservation commits on its own, so
+    one failure never stops the rest; the next run retries it. Returns how
+    many were released or retried."""
+    from . import triage
+    from .models import CameraHold, FootagePreservation
+    from .services import CLOSED_STATUSES
+
+    candidates = list(
+        FootagePreservation.objects.filter(
+            request__status__in=CLOSED_STATUSES,
+            hold_run_started_at__isnull=True,
+        )
+        .filter(
+            Q(state__in=triage.RELEASABLE_PRESERVATION_STATES)
+            | Q(
+                state=FootagePreservation.State.RELEASED,
+                camera_holds__state=CameraHold.State.RELEASE_FAILED,
+            )
+        )
+        .distinct()
+        .order_by("pk")
+    )
+    released = 0
+    for fp in candidates:
+        try:
+            if triage.release_preservation(fp) is not None:
+                released += 1
+        except Exception:
+            logger.exception(
+                "Automatic footage release failed for preservation %s; the "
+                "next run retries it.",
+                fp.pk,
+            )
+    return released
