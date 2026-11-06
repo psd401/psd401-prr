@@ -43,6 +43,7 @@ from apps.api.identity import (
     has_staff_role,
     staff_roles,
 )
+from apps.api.pagination import CaseListPagination
 from apps.api.resources.collection_tasks import CollectionTaskSerializer
 from apps.api.resources.records_misc import InstallmentSerializer
 from apps.api.resources.work_items import (
@@ -1529,6 +1530,8 @@ class RequestsViewSet(
     drive status changes through the service layer, never the model directly.
     Estimate revisions use the durable correspondence resource.
     """
+
+    pagination_class = CaseListPagination
     lookup_field = "number"
     http_method_names = ["get", "patch", "post", "head", "options"]
     role_permissions = {
