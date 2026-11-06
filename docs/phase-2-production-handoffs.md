@@ -326,8 +326,8 @@ in `test_compliance`.
   Fable 5.1 is still refused ("data retention mode 'none' is not available")
   although the district reports zero-retention access for all models, so it
   is not used until AWS applies that access and its verification passes.
-- **2026-11-06, intake model evaluation (#32). Status: proposed, awaiting
-  the CIO's sign-off.** `evaluate_models` scored six profiles on one intake
+- **2026-11-06, intake model evaluation (#32). Signed off by the CIO /
+  Public Records Officer on 2026-11-06.** `evaluate_models` scored six profiles on one intake
   `EvaluationSet` of 110 past production decisions (78 `new`, 14 `existing`,
   18 `not_request`). The runs are `f17a4264-46ec-4017-9c72-ca07c8bca4d9` (Nova,
   Sonnet) and `df96e815-f8bf-4d45-8d20-38d7736a22d8` (the rest), stored as
