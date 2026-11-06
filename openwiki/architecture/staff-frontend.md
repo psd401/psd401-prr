@@ -6,14 +6,14 @@ tags: [architecture, frontend, routing, react, access-control]
 openwiki:
   roles: [architecture, integration]
   change_kinds: [route, navigation, frontend-api-client]
-  source_paths: [frontend/src/App.tsx, frontend/src/nav.ts, frontend/src/api/client.ts, frontend/src/layout/AppLayout.tsx, frontend/src/caseStatus.ts, frontend/src/work.ts, frontend/src/statutory.ts, frontend/src/vaultQuery.ts, frontend/src/scopeCountNotice.ts, frontend/src/caseSort.ts, frontend/src/queueCounts.tsx, frontend/src/messages/MessageWorkspace.tsx, frontend/src/messages/boundedInfiniteCache.ts, frontend/src/theme.ts, frontend/src/main.tsx, frontend/src/ui/ThemePicker.tsx, frontend/src/index.css, frontend/src/nexus/SOURCE.txt, frontend/vite.config.ts, frontend/package.json, apps/api/spa.py, apps/api/resources/correspondence.py, apps/api/resources/work_items.py]
-  symbols: [App, StaffApp, AuthorizedRoute, routeIsAuthorized, defaultLanding, PRIMARY_NAV, CONFIGURATION_NAV, OVERSIGHT_NAV, CASE_TAB_ROLES, api, ApiError, index, MessageWorkspace, invalidateBoundedInfiniteQueries, markBoundedInfiniteQueriesStale, thread_messages, statusLabel, statusTone, isTerminalStatus, CASE_STATUS_CHOICES, WorkItemDetail, DISPOSITION_LABELS, THEMES, resolveTheme, applyTheme, startTheme, ThemePicker]
+  source_paths: [frontend/src/App.tsx, frontend/src/nav.ts, frontend/src/api/client.ts, frontend/src/case/CaseWorkspace.tsx, frontend/src/layout/AppLayout.tsx, frontend/src/caseStatus.ts, frontend/src/work.ts, frontend/src/statutory.ts, frontend/src/vaultQuery.ts, frontend/src/scopeCountNotice.ts, frontend/src/caseSort.ts, frontend/src/queueCounts.tsx, frontend/src/messages/MessageWorkspace.tsx, frontend/src/messages/boundedInfiniteCache.ts, frontend/src/theme.ts, frontend/src/main.tsx, frontend/src/ui/ThemePicker.tsx, frontend/src/index.css, frontend/src/nexus/SOURCE.txt, frontend/vite.config.ts, frontend/package.json, apps/api/spa.py, apps/api/resources/correspondence.py, apps/api/resources/work_items.py]
+  symbols: [App, StaffApp, AuthorizedRoute, routeIsAuthorized, defaultLanding, PRIMARY_NAV, CONFIGURATION_NAV, OVERSIGHT_NAV, CASE_TAB_ROLES, STAGE_ROLES, LEGACY_CASE_TABS, caseTabPath, stageLabel, CaseWorkspace, StageRail, api, ApiError, index, MessageWorkspace, invalidateBoundedInfiniteQueries, markBoundedInfiniteQueriesStale, thread_messages, statusLabel, statusTone, isTerminalStatus, CASE_STATUS_CHOICES, WorkItemDetail, DISPOSITION_LABELS, THEMES, resolveTheme, applyTheme, startTheme, ThemePicker]
   test_paths: [frontend/src/App.test.tsx, frontend/src/AppAuthorizedRoutes.test.tsx, frontend/src/nav.test.ts, frontend/src/layout/AppLayout.test.tsx, frontend/src/case/CaseWorkspace.test.tsx, frontend/src/vaultQuery.test.ts, frontend/src/scopeCountNotice.test.ts, frontend/src/caseSort.test.ts, frontend/src/queueCounts.test.tsx, frontend/src/messages/MessageWorkspace.test.tsx, frontend/src/messages/boundedInfiniteCache.test.ts, frontend/src/pages/RequestDetail.test.tsx, frontend/src/pages/Inbox.test.tsx, frontend/src/theme.test.ts, frontend/src/nexus-foundation.test.ts, frontend/src/ui/TrustFooter.test.tsx]
   invariants:
     - Route and navigation roles are a client-side convenience; every API endpoint enforces its own role check.
     - Compliance logic stays in Django; the SPA only renders and submits.
     - Non-GET API calls send the Django CSRF token from the csrftoken cookie.
-    - Every role-restricted case tab is listed in CASE_TAB_ROLES and enforced by routeIsAuthorized.
+    - Every role-restricted case segment (stage or side view) is listed in CASE_TAB_ROLES and enforced by routeIsAuthorized and CaseWorkspace.
   validation_commands: ["cd frontend && bun run test", "cd frontend && bun run lint"]
 ---
 
@@ -77,15 +77,40 @@ Role names come from `StaffRole` in `frontend/src/api/auth.ts`. Current values a
 `records_officer`, `liaison`, `reviewer`, `intake_clerk`, and `admin`. Those names must match the
 server's roles. `nav.ts` says that API role policies remain authoritative.
 
-### Case tabs
+### Case stages and views
 
-A case opens at `/requests/:number/:tab`. `CASE_TAB_ROLES` gives each tab its roles:
-`overview`, `messages`, `collection`, `records`, `review`, `releases`, and `activity`. The
-`review` tab mounts the keyboard-first `ReviewFlight` screen, which is limited to records
-officers and reviewers ([record review](../domain/record-review-and-handling.md#keyboard-review-in-the-case-review-tab)).
-A liaison, for example, sees messages and collection but not records, review, or releases. A
-direct URL to a tab the user cannot use shows a denial and does not mount the tab
-(`CaseWorkspace.test.tsx`, "shows a useful denial without mounting an unauthorized direct tab").
+A case opens at `/requests/:number/:segment`. `CaseWorkspace` in
+`frontend/src/case/CaseWorkspace.tsx` accepts seven stage segments (`intake`, `scope`,
+`collect`, `review`, `redact`, `release`, `close`) and two side views (`messages`,
+`activity`). The stage rail that orders them is derived on the server
+([case stage rail](../domain/case-workspace.md#case-stage-rail)).
+
+- **Roles.** `CASE_TAB_ROLES` in `nav.ts` gives each segment its roles. Stage roles come
+  from `STAGE_ROLES`, so `scope` is Records Officer only, and `review` is Records Officer,
+  Reviewer, and Admin. `messages` is Records Officer and Liaison. `activity` is every
+  workflow role.
+- **Shown, not linked.** The rail lists every stage so progress reads the same for
+  everyone. A stage the viewer cannot open renders without a link (`StageRail` and
+  `roleCanOpen`).
+- **Direct URLs.** A direct URL to a segment the user cannot use shows a "Not authorized"
+  screen and does not mount the content (`CaseWorkspace.test.tsx`, "shows a useful denial
+  without mounting an unauthorized direct tab").
+- **What each stage mounts.** `TabContent` picks one stage's screens. Intake shows
+  `RequestDetail` in overview mode, with the running log and the time-entries panel. Scope
+  shows the scoping trail and the Vault count form. Collect shows `CollectionCards`,
+  Tasks, Preservations, and the upload panel. Review shows `ReviewFlight` by default, or
+  the record list with `?view=records`. `ReviewFlight` is the keyboard-first screen, limited
+  to Records Officers and Reviewers
+  ([record review](../domain/record-review-and-handling.md#keyboard-review-in-the-case-review-tab)).
+  Redact shows `RedactionProposals`, and Release shows `Installments`. Close shows the
+  closure readiness card and the close-mode `RequestDetail`. Messages mounts
+  `CorrespondencePanel`, and Activity mounts `CaseActivityFeed` in full.
+- **Server tab names.** Some server payloads still name pre-rail tabs (`next_action.tab`,
+  closure blockers). `caseTabPath()` maps them to stage URLs, and `?view=records` is kept
+  for the record list. `stageLabel()` gives the rail name for either form.
+
+Each stage's decision card shows its state and open count. Only the current or blocked
+stage asks for a call, and the card links to the evidence below it (`#stage-evidence`).
 
 ### Retired URLs
 
@@ -93,6 +118,9 @@ direct URL to a tab the user cannot use shows a denial and does not mount the ta
 `/cases` and `/requests` go to `/inbox?view=cases`, `/my-work` to the personal
 queue in the Inbox, `/intake` to `/staff-intake`, `/registry` and other configuration
 paths to `/configuration/...`, and `/reporting` and `/audit` to `/oversight/...`.
+Pre-rail case tabs redirect to their stage. `LEGACY_CASE_TABS` maps `overview` to
+`intake`, `collection` to `collect`, `records` to `review`, and `releases` to `release`.
+`CaseWorkspace` keeps the query string, so `?view=records` still opens the record list.
 Legacy case-scoped correspondence URLs are handled by `LegacyScopedRoutes.tsx`. Its
 tests in `frontend/src/case/LegacyScopedRoutes.test.tsx` cover filter preservation and
 dropped filters.
@@ -152,7 +180,7 @@ Focused tests: `frontend/src/theme.test.ts` (resolution, persistence, and listen
 
 ## Case message workspace
 
-The case Messages tab renders `CorrespondencePanel`, which mounts `MessageWorkspace`
+The case Messages view renders `CorrespondencePanel`, which mounts `MessageWorkspace`
 (`frontend/src/messages/MessageWorkspace.tsx`) for one request. The workspace is a
 browser over that request's correspondence. The server decides which rows exist and
 which actions a role may take, as described in [correspondence](../domain/correspondence.md#staff-rest-api).
@@ -238,3 +266,5 @@ role can use it.
 - [Case workspace](../domain/case-workspace.md): the screens behind `/requests/:number/:tab`.
 - [Work queue](../domain/work-queue.md): the Inbox and work item screens.
 - [Configuration](configuration.md): the `PRR_AUTH_MODE` setting that `spa.py` reads.
+UTH_MODE` setting that `spa.py` reads.
+ that `spa.py` reads.
