@@ -56,6 +56,16 @@ from . import footage_sites, notifications
 from .models import FootagePreservation, PublicRecordsRequest, StatusEvent
 from .services import _require_current_records_officer
 
+
+class PreservationRefused(ValueError):
+    """A hold action refused for a reason staff can act on. ``message`` is
+    written for them, so the API shows it; any other error stays server-side."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
 BOOKMARK_NAME_MAX_LENGTH = 100
 BOOKMARK_DESCRIPTION = (
     "Public Records Act preservation hold. Do not delete. "
@@ -189,6 +199,18 @@ def preservation_confirmation_text(fp: FootagePreservation) -> str | None:
         parts.append(
             "none held at "
             + " and ".join(footage_sites.site_name(code) for code in unheld_codes)
+        )
+    # The bookmark spans the whole window, but whether Aware keeps footage
+    # recorded after the bookmark was made from pruning is not yet verified.
+    placed = max(
+        (hold.hold_claimed_at for hold in bookmarked if hold.hold_claimed_at),
+        default=None,
+    )
+    if placed is not None and placed < fp.window_end:
+        parts.append(
+            "footage recorded after the hold was placed "
+            f"({timezone.localtime(placed):%Y-%m-%d %H:%M}) is not yet "
+            "confirmed preserved"
         )
     return "; ".join(parts) + "."
 
@@ -386,7 +408,7 @@ def exclude_camera(camera_hold, reason: object, *, actor=None):
     )
     reason = _reason_text(reason)
     if len(reason) < 10:
-        raise ValueError(
+        raise PreservationRefused(
             "Excluding a camera from a preservation hold requires a substantive "
             "reason (e.g. 'camera faces staff parking lot; request concerns the "
             "gym entrance'). The exclusion record is part of the adequate-search "
@@ -396,7 +418,7 @@ def exclude_camera(camera_hold, reason: object, *, actor=None):
         "exclusion_reason",
     ).max_length
     if reason_max_length is not None and len(reason) > reason_max_length:
-        raise ValueError(
+        raise PreservationRefused(
             "A camera-exclusion reason must contain at most "
             f"{reason_max_length} characters."
         )
@@ -404,7 +426,7 @@ def exclude_camera(camera_hold, reason: object, *, actor=None):
         pk=camera_hold.preservation_id,
     )
     if preservation.state == FootagePreservation.State.RELEASED:
-        raise ValueError(
+        raise PreservationRefused(
             "This preservation is already released; there is no hold left to "
             "narrow."
         )
@@ -454,7 +476,7 @@ def _reason_text(reason: object) -> str:
     if reason is None:
         return ""
     if not isinstance(reason, str):
-        raise ValueError("A reason must be text.")
+        raise PreservationRefused("A reason must be text.")
     return reason.strip()
 
 
@@ -478,12 +500,12 @@ def widen_preservation(
     )
     reason = _reason_text(reason)
     if len(reason) < 10:
-        raise ValueError(
+        raise PreservationRefused(
             "Widening a preservation hold requires a substantive reason (e.g. "
             "'request also names the bus loop beside the gym')."
         )
     if len(reason) > WIDEN_REASON_MAX_LENGTH:
-        raise ValueError(
+        raise PreservationRefused(
             "A widen reason must contain at most "
             f"{WIDEN_REASON_MAX_LENGTH} characters."
         )
@@ -491,13 +513,13 @@ def widen_preservation(
         "request",
     ).get(pk=preservation.pk)
     if fp.state == FootagePreservation.State.RELEASED:
-        raise ValueError("A released preservation cannot be widened.")
+        raise PreservationRefused("A released preservation cannot be widened.")
     if fp.state == FootagePreservation.State.PENDING:
-        raise ValueError(
+        raise PreservationRefused(
             "The automatic hold is still running; widen it once it finishes."
         )
     if not fp.site_codes:
-        raise ValueError("This hold already covers every camera district-wide.")
+        raise PreservationRefused("This hold already covers every camera district-wide.")
 
     previous = list(fp.site_codes)
     fp.site_codes = []
@@ -540,6 +562,8 @@ def is_releasable(fp: FootagePreservation) -> bool:
     from .models import CameraHold
     from .services import CLOSED_STATUSES
 
+    if fp.hold_run_started_at is not None:
+        return False
     prr = fp.request
     if prr.status not in CLOSED_STATUSES:
         return False
@@ -581,7 +605,7 @@ def release_preservation(
     )
     reason = _reason_text(reason)
     if len(reason) < 10:
-        raise ValueError(
+        raise PreservationRefused(
             "Releasing a preservation hold requires a substantive reason (e.g. "
             "'request fulfilled; installment produced and the requester "
             "confirmed receipt'). The release record is part of the retention "
@@ -591,12 +615,12 @@ def release_preservation(
         "release_reason",
     ).max_length
     if reason_max_length is not None and len(reason) > reason_max_length:
-        raise ValueError(
+        raise PreservationRefused(
             "A preservation-release reason must contain at most "
             f"{reason_max_length} characters."
         )
     if attest_no_litigation_hold is not True:
-        raise ValueError(
+        raise PreservationRefused(
             "Releasing a preservation hold requires attesting that no "
             "litigation hold, pending lawsuit, or reasonably anticipated "
             "litigation covers this footage."
@@ -611,19 +635,26 @@ def release_preservation(
         state=CameraHold.State.RELEASE_FAILED,
     ).exists()
     if fp.state not in RELEASABLE_PRESERVATION_STATES and not retry:
-        raise ValueError(
+        raise PreservationRefused(
             "Only a held or partly held preservation can be released; this "
             f"one is {FootagePreservation.State(fp.state).label.lower()}."
         )
+    if fp.hold_run_started_at is not None:
+        # A widen keeps the state while it bookmarks more cameras; releasing
+        # now would miss every bookmark it makes after this point.
+        raise PreservationRefused(
+            "A hold run is still running for this preservation, adding Aware "
+            "bookmarks one camera at a time. Release it once the run finishes."
+        )
     prr = fp.request
     if prr.status not in CLOSED_STATUSES:
-        raise ValueError(
+        raise PreservationRefused(
             f"{prr.number} is still open ({prr.get_status_display()}). A "
             "preservation hold is released only after the request closes."
         )
     target = prr.merged_into
     if target is not None and target.status not in CLOSED_STATUSES:
-        raise ValueError(
+        raise PreservationRefused(
             f"{prr.number} was merged into {target.number}, which is still "
             "open. This hold preserves the footage that case answers for."
         )
@@ -647,6 +678,17 @@ def release_preservation(
         (hold.pk, hold.camera_name or hold.camera_id, hold.clip_id)
         for hold in holds
         if hold.clip_id
+    ]
+    # A create Aware never confirmed left no id to delete by, but the
+    # bookmark may exist: name it so a human can find and delete it.
+    from .tasks import BOOKMARK_MAY_EXIST
+
+    unconfirmed_creates = [] if retry else [
+        bookmark_name(prr, hold.camera_name or hold.camera_id)
+        for hold in rows.filter(
+            excluded_at__isnull=True, state=CameraHold.State.FAILED, clip_id="",
+            error__contains=BOOKMARK_MAY_EXIST,
+        ).order_by("pk")
     ]
     audit(
         "footage.preservation_release_retried" if retry
@@ -687,6 +729,12 @@ def release_preservation(
             + " The Records Officer attested that no litigation hold, pending "
             "lawsuit, or reasonably anticipated litigation covers this "
             f"footage. Reason: {reason}"
+            + (
+                f" {len(unconfirmed_creates)} camera(s) may still have a PRR "
+                "bookmark from a create Aware never confirmed; find and delete "
+                "it in Aware: " + "; ".join(unconfirmed_creates)[:1000] + "."
+                if unconfirmed_creates else ""
+            )
         ),
     )
 

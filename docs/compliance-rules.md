@@ -158,7 +158,14 @@ bookmark `RELEASE_FAILED` (not yet confirmed deleted) inside their
 transaction, and flip it to `RELEASED` only after Aware confirms the delete (or
 reports the bookmark already gone). A refused delete, or a crash partway
 through, therefore leaves the camera retryable and logged; posting the release
-again retries only those cameras, excluded ones included.
+again retries only those cameras, excluded ones included. Release is refused
+while a hold run (a widen included) is still bookmarking; if the sweeper
+cleared a stalled run that then makes one more bookmark after a release, that
+bookmark is marked `RELEASE_FAILED` so the retry deletes it. A camera whose
+create Aware never confirmed has no bookmark id to delete by, so the release's
+timeline entry names the bookmark for a human to find and delete in Aware.
+The confirmation text says when footage recorded after the hold was placed is
+not yet confirmed preserved.
 
 Intake enqueues the hold task only after its transaction commits. Each run
 claims a camera's row before calling Aware, so two runs never bookmark the

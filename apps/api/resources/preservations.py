@@ -116,8 +116,8 @@ class PreservationViewSet(viewsets.ReadOnlyModelViewSet):
 
         try:
             triage.exclude_camera(camera_hold, reason, actor=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except triage.PreservationRefused as exc:
+            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(PreservationCameraHoldSerializer(camera_hold).data)
 
@@ -144,8 +144,8 @@ class PreservationViewSet(viewsets.ReadOnlyModelViewSet):
                     "attest_no_litigation_hold"
                 ),
             )
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except triage.PreservationRefused as exc:
+            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(
             PreservationSerializer(self.get_queryset().get(pk=preservation.pk)).data
@@ -159,8 +159,8 @@ class PreservationViewSet(viewsets.ReadOnlyModelViewSet):
             triage.widen_preservation(
                 preservation, actor=request.user, reason=request.data.get("reason"),
             )
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except triage.PreservationRefused as exc:
+            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(
             PreservationSerializer(self.get_queryset().get(pk=preservation.pk)).data

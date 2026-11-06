@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from apps.api.identity import apply_staff_roles
 from apps.api.models import StaffRole
+from apps.records import triage
 from apps.records.models import (
     CameraHold,
     FootagePreservation,
@@ -513,3 +514,48 @@ class PreservationApiTests(TestCase):
         self.assertEqual(
             self.client.patch(url, {"state": "released"}, content_type="application/json").status_code, 405)
         self.assertEqual(self.client.delete(url).status_code, 405)
+
+    # -- error text --------------------------------------------------------
+
+    INTERNAL_TEXT = "internal detail at /srv/app/apps/records/triage.py"
+
+    def _post_each_action(self):
+        self._close_request()
+        self._narrow_to_phs()
+        base = f"/api/staff/preservations/{self.fp.id}"
+        bodies = {
+            "exclude_camera": ("exclude-camera", {
+                "camera_hold_id": self.other.id,
+                "reason": "Camera faces staff parking; request concerns the gym entrance only.",
+            }),
+            "release_preservation": ("release", {
+                "reason": "Request fulfilled; the requester confirmed receipt.",
+                "attest_no_litigation_hold": True,
+            }),
+            "widen_preservation": ("widen", {"reason": self.WIDEN_REASON}),
+        }
+        for function, (path, body) in bodies.items():
+            yield function, lambda path=path, body=body: self.client.post(
+                f"{base}/{path}/", body, content_type="application/json"
+            )
+
+    def test_a_refusal_shows_staff_its_message(self):
+        for function, post in self._post_each_action():
+            with self.subTest(action=function), mock.patch(
+                f"apps.records.triage.{function}",
+                side_effect=triage.PreservationRefused("Choose a closed request."),
+            ):
+                response = post()
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json(), {"detail": "Choose a closed request."})
+
+    def test_an_unexpected_error_is_never_echoed_to_staff(self):
+        self.client.raise_request_exception = False
+        for function, post in self._post_each_action():
+            with self.subTest(action=function), mock.patch(
+                f"apps.records.triage.{function}",
+                side_effect=ValueError(self.INTERNAL_TEXT),
+            ):
+                response = post()
+                self.assertEqual(response.status_code, 500)
+                self.assertNotIn("srv/app", response.content.decode())

@@ -2252,3 +2252,97 @@ class ReleaseGateTests(TestCase):
 
         hold.refresh_from_db()
         self.assertEqual(hold.state, CameraHold.State.RELEASED)
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_release_is_refused_while_a_hold_run_is_still_bookmarking(
+        self, delete_bookmark,
+    ):
+        # A widen keeps the state HELD while its run bookmarks more cameras;
+        # a release now would miss the bookmarks the run makes next.
+        fp = self._held_preservation()
+        FootagePreservation.objects.filter(pk=fp.pk).update(
+            hold_run_started_at=timezone.now(), hold_heartbeat_at=timezone.now(),
+        )
+        fp.refresh_from_db()
+
+        self.assertFalse(triage.is_releasable(fp))
+        with self.captureOnCommitCallbacks(execute=True):
+            with self.assertRaisesRegex(triage.PreservationRefused, "still running"):
+                self._release(fp)
+        self.assertNothingReleased(fp, delete_bookmark)
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_release_names_cameras_whose_uncertain_create_may_have_left_a_bookmark(
+        self, delete_bookmark,
+    ):
+        fp = self._held_preservation()
+        fp.camera_holds.filter(camera_id="cam-2").update(
+            state=CameraHold.State.FAILED, clip_id="",
+            error=f"Aware bookmark uncertain (AltaWriteUncertain): {tasks.BOOKMARK_MAY_EXIST}.",
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self._release(fp)
+
+        note = fp.request.events.get(
+            note__startswith="Footage preservation released",
+        ).note
+        self.assertIn("1 camera(s) may still have a PRR bookmark", note)
+        self.assertIn("Staff Parking", note)
+        self.assertIn(triage.bookmark_name(fp.request, "Staff Parking"), note)
+        self.assertEqual(
+            sorted(c.args[0] for c in delete_bookmark.call_args_list),
+            ["bm-cam-1", "bm-cam-3"],
+        )
+
+
+class HoldRunOwnershipTests(TestCase):
+    """A run that lost its marker (the sweeper reported it, then a Records
+    Officer released the hold) must stop making bookmarks nobody tracks."""
+
+    def test_a_run_that_lost_its_marker_stops_and_flags_its_last_bookmark(self):
+        prr = make_request(f"gym entrance footage {days_ago(1)}")
+
+        def hold_then_lose_the_run(cam, start, end, *, name, description):
+            # The request closed and a Records Officer released the hold.
+            PublicRecordsRequest.objects.filter(pk=prr.pk).update(
+                status=RequestStatus.FULFILLED,
+            )
+            FootagePreservation.objects.filter(request=prr).update(
+                state=FootagePreservation.State.RELEASED, hold_run_started_at=None,
+            )
+            return full_hold(cam, start, end, name=name, description=description)
+
+        with aware(hold=hold_then_lose_the_run) as m:
+            fp = preserve(prr)
+
+        self.assertEqual([c.args[0].id for c in m.hold.call_args_list], ["cam-1"])
+        self.assertEqual(fp.state, FootagePreservation.State.RELEASED)
+        made = fp.camera_holds.get(camera_id="cam-1")
+        self.assertEqual(made.clip_id, "bm-cam-1")
+        # Not yet confirmed deleted, so the release retry deletes it.
+        self.assertEqual(made.state, CameraHold.State.RELEASE_FAILED)
+        self.assertTrue(triage.is_releasable(fp))
+        self.assertTrue(fp.request.events.filter(
+            note__contains="made after the hold was released",
+        ).exists())
+
+
+class FutureWindowConfirmationTests(TestCase):
+    """A window that ends after the hold ran: the bookmark spans it, but
+    Aware's protection of footage recorded later is not yet confirmed."""
+
+    def test_the_confirmation_says_later_footage_is_not_yet_confirmed(self):
+        today = timezone.localdate().isoformat()
+        with aware():
+            fp = preserve(make_request(f"video at Peninsula High School on {today}"))
+
+        text = confirmation(fp)
+        self.assertIn("footage recorded after the hold was placed", text)
+        self.assertIn("not yet confirmed", text)
+
+    def test_a_past_window_says_nothing_about_later_footage(self):
+        with aware():
+            fp = preserve(make_request("video at Peninsula High School on 2026-09-22"))
+
+        self.assertNotIn("after the hold was placed", confirmation(fp))

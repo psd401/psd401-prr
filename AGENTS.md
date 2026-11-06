@@ -67,7 +67,8 @@ and cited from code, tests, and ADRs; never renumber them.
    that no litigation hold applies), both AST-guarded against background
    callers. Release and exclusion keep each bookmark `RELEASE_FAILED` (not yet
    confirmed deleted) until Aware confirms its delete, so a refusal or crash
-   stays retryable; posting the release again retries it. The hold task is
+   stays retryable; posting the release again retries it. Release is refused
+   while a hold run is still bookmarking. The hold task is
    enqueued only after intake commits, and claims each camera before calling
    Aware, so two runs never bookmark one camera. If Aware is down or
    unconfigured, or a hold task crashes or stops heartbeating for 15 minutes

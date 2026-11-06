@@ -1364,6 +1364,37 @@ def _execute_footage_hold(
         _end_hold_run(fp.pk, run)
 
 
+def _released_during_run(fp, ch) -> bool:
+    """Whether the hold was released while this run was bookmarking. Release
+    is refused while a run holds its marker, but the sweeper clears the
+    marker of a stalled run; if a release followed, the bookmark this run
+    just made is not in the release's delete list. Mark it not yet confirmed
+    deleted so the release retry deletes it, and stop the run."""
+    from apps.audit.models import audit
+
+    from .models import CameraHold, FootagePreservation, StatusEvent
+
+    if not FootagePreservation.objects.filter(
+        pk=fp.pk, state=FootagePreservation.State.RELEASED,
+    ).exists():
+        return False
+    if CameraHold.objects.filter(pk=ch.pk).exclude(clip_id="").update(
+        state=CameraHold.State.RELEASE_FAILED,
+    ):
+        camera = ch.camera_name or ch.camera_id
+        audit("footage.bookmark_made_after_release", target=fp.request.number,
+              camera=camera)
+        StatusEvent.objects.create(
+            request=fp.request,
+            note=(
+                f"An Aware bookmark on {camera} was made after the hold was "
+                "released and is not yet confirmed deleted. Post the release "
+                "again to delete it."
+            ),
+        )
+    return True
+
+
 def _run_footage_hold(fp, run: _HoldRun, *, only_new: bool, widened_from) -> None:
     from collections import Counter
 
@@ -1462,7 +1493,10 @@ def _run_footage_hold(fp, run: _HoldRun, *, only_new: bool, widened_from) -> Non
                 or ch.excluded_at is not None:
             continue
         # Claim the camera before calling Aware: a concurrent run that got
-        # here first owns it.
+        # here first owns it. A run that crashes between the claim and the
+        # create leaves the claim set, so no later run (a widen included)
+        # retries that camera; it stays PENDING and the partial notice
+        # counts it as not held.
         claimed_at = timezone.now()
         if not CameraHold.objects.filter(
             pk=ch.pk, clip_id="", hold_claimed_at__isnull=True,
@@ -1471,6 +1505,8 @@ def _run_footage_hold(fp, run: _HoldRun, *, only_new: bool, widened_from) -> Non
         ch.hold_claimed_at = claimed_at
         _heartbeat(fp, run)
         _hold_one_camera(fp, cam, ch)
+        if _released_during_run(fp, ch):
+            return
 
     holds = fp.camera_holds.filter(excluded_at__isnull=True).exclude(
         state=CameraHold.State.RELEASED,
