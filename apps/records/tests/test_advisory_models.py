@@ -16,8 +16,8 @@ from django.test import TestCase, override_settings
 from apps.api.identity import apply_staff_roles
 from apps.api.models import StaffRole
 from apps.records.advisory_ai import (
-    AdvisoryProviderError,
     MAX_OUTPUT_TOKENS,
+    AdvisoryProviderError,
     execute_advisory_run,
     invoke_advisory_model,
     model_for_kind,
