@@ -14,6 +14,8 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.utils.formats import date_format
 
+from apps.api.identity import apply_staff_roles
+from apps.api.models import StaffRole
 from apps.audit.models import AuditLog
 from apps.configuration import runtime
 from apps.configuration.models import AppSetting
@@ -267,6 +269,44 @@ class StaffNotificationServiceTests(TestCase):
         self.assertIn("Gym Entrance (PHS): failed", body)
         self.assertIn("Staff Parking (PHS): footage gap", body)
         self.assertNotIn("ALL cameras district-wide", body)
+
+    @mock.patch("apps.records.notifications.gmail_client.send_raw")
+    @mock.patch(
+        "apps.integrations.avigilon.client.list_device_cameras",
+        side_effect=AltaNotConfigured("not configured"),
+    )
+    def test_a_widen_while_aware_is_down_sends_new_manual_instructions(
+        self, _list_device_cameras, send_raw,
+    ):
+        send_raw.return_value = SentMessage("gmail-urgent", "thread-urgent")
+        officer = get_user_model().objects.create_user(
+            "widen-notice-officer", password="pw", is_staff=True,
+        )
+        apply_staff_roles(officer, {StaffRole.RECORDS_OFFICER})
+        request = make_request(description="Camera footage from yesterday")
+        preservation = FootagePreservation.objects.create(
+            request=request,
+            window_start=timezone.now() - dt.timedelta(days=1),
+            window_end=timezone.now(),
+            site_codes=["PHS"],
+        )
+        tasks.execute_footage_hold(preservation.id)
+        preservation.refresh_from_db()
+        self.assertEqual(preservation.state, FootagePreservation.State.MANUAL)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            triage.widen_preservation(
+                preservation, actor=officer,
+                reason="The request also names the district office parking lot.",
+            )
+
+        self.assertEqual(send_raw.call_count, 2)
+        body = BytesParser(policy=policy.default).parsebytes(
+            send_raw.call_args.args[0]
+        ).get_body().get_content()
+        self.assertIn("ALL cameras district-wide", body)
+        latest = request.events.order_by("-occurred_at", "-pk").first().note
+        self.assertNotIn("duplicate alert suppressed", latest)
 
     @mock.patch("apps.records.notifications.gmail_client.send_raw")
     def test_unapplied_delivery_effect_is_one_immediate_urgent_staff_alert(

@@ -595,9 +595,18 @@ def notify_footage_manual_hold(
             f"{preservation.pk}:{preservation.window_start.isoformat()}:"
             f"{preservation.window_end.isoformat()}"
             + (f":{condition}" if condition else "")
+            + f":{_manual_hold_instructions_hash(site_codes, cameras)}"
         ),
         immediate=True,
     )
+
+
+def _manual_hold_instructions_hash(site_codes, cameras) -> str:
+    """Short digest of what the notice tells facilities to bookmark, so new
+    instructions (a widen, other cameras) are never deduplicated away."""
+    scope = ",".join(sorted(str(code) for code in site_codes or ())) or "district-wide"
+    lines = "\n".join(sorted(cameras))
+    return hashlib.sha256(f"{scope}\n{lines}".encode()).hexdigest()[:12]
 
 
 def notify_footage_scope_narrowed(
