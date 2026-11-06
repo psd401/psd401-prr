@@ -112,16 +112,31 @@ expiry (`apps/integrations/avigilon/client.py`), starting at the later of the
 requested window's start and that camera's oldest retained footage. Requested
 dates are whole Pacific calendar days. Retention is per camera, read from
 Aware. `CAMERA_RETENTION_DAYS` only sizes the window when the request has no
-parseable date and, when Aware is unreachable, sends a window older than the
-setting to adequate-search review instead of a manual hold.
-A camera whose bookmark covers less than 95% of the window is recorded as a
-footage gap, and the preservation is then PARTIAL, never HELD.
+parseable date. When Aware is unreachable the hold is an URGENT manual hold
+whatever the window's age, because only Aware knows which cameras keep footage
+past the setting.
+A camera whose bookmark covers less than 95% of the window, or whose coverage
+Aware did not report, is recorded as a footage gap, and the preservation is
+then PARTIAL, never HELD. PARTIAL sends an URGENT notice naming each failed,
+gap, or unverified camera.
+
+A request whose dates span more than `CAMERA_HOLD_MAX_SPAN_DAYS` (default 31)
+is held for the most recent days of that span only. A hold narrowed this way,
+or narrowed to the sites the request names, writes a StatusEvent and sends one
+URGENT scope notice to facilities, the PRA supervisor, and the Records
+Officers. A Records Officer widens a site-narrowed hold to every camera
+district-wide through `triage.widen_preservation()` (`POST
+/api/staff/preservations/{id}/widen/`) with a substantive reason. Widening
+bookmarks only cameras with no hold yet, so a camera already tried keeps its
+outcome. It only preserves more, so it is a direct action rather than a
+human-only handoff. A widen that stops partway sends an URGENT manual notice.
 
 Zero cameras at a named site goes to human adequate-search review
-(`NO_CAMERAS`), never "held": footage may sit on another recorder. Where no
-in-scope camera retains the window: queue only a human-review +
-adequate-search checklist (Neighborhood Alliance standard) — no requester
-response is drafted or queued automatically. A human must complete the search,
+(`NO_CAMERAS`) and an URGENT manual notice, never "held": footage may sit on
+another recorder. Where no in-scope camera retains the window, and for each
+camera that no longer retains it inside a partly held preservation: queue only
+a human-review + adequate-search checklist (Neighborhood Alliance standard) —
+no requester response is drafted or queued automatically. A human must complete the search,
 choose the legally supported response, draft, approve, and send; there is no
 auto-denial code path and none may be added. The preservation confirmation
 text (HELD/PARTIAL only) is shown to staff for correspondence they write; it is
@@ -133,9 +148,13 @@ through `triage.release_preservation()`, which requires a closed request (and,
 for a merged duplicate, a closed case of record), current Records Officer
 authority, a substantive reason, and an attestation that no litigation hold,
 pending lawsuit, or reasonably anticipated litigation covers the footage. Both
-are AST-guarded like `revise_estimate`. If the Aware API is down or
-unconfigured, holds degrade to URGENT manual instructions to facilities —
-never to silence.
+are AST-guarded like `revise_estimate`. A bookmark Aware refuses to delete
+during release is marked `RELEASE_FAILED` (the bookmark may still exist) and
+logged; posting the release again retries only those cameras. If the Aware API
+is down or unconfigured, or a hold task crashes, holds degrade to URGENT manual
+instructions to facilities — never to silence. A beat sweeper runs every 5
+minutes and moves any hold still PENDING 15 minutes after intake to URGENT
+manual.
 
 ## Rule 8 — The system registry routes collection
 

@@ -50,15 +50,24 @@ and cited from code, tests, and ADRs; never renumber them.
    (`apps/records/footage_sites.py`), or every camera district-wide when no site
    is identified, with a no-expiry Aware bookmark per camera
    (`apps/integrations/avigilon/client.py`). Retention is per camera, from
-   Aware's oldest retained footage. Zero cameras at a named site goes to human
-   adequate-search review (`NO_CAMERAS`), never "held". Where no camera retains
-   the window, a human completes the search and chooses the response. There is
-   no auto-denial code path and none may be added. Release and exclusion are
-   human-only with a reason: `triage.exclude_camera()` and
+   Aware's oldest retained footage. A hold narrower than the request (named
+   sites only, or a date span clipped to `CAMERA_HOLD_MAX_SPAN_DAYS`) sends an
+   URGENT scope notice; a Records Officer widens it district-wide with a reason
+   through `triage.widen_preservation()`, which bookmarks only cameras not yet
+   tried. Widening only preserves more, so it is a direct action, not a
+   human-only handoff. Zero cameras at a named site goes to human
+   adequate-search review plus an URGENT notice (`NO_CAMERAS`), never "held";
+   PARTIAL sends an URGENT notice naming each short camera. Where no camera
+   retains the window, a human completes the search and chooses the response.
+   There is no auto-denial code path and none may be added. Release and
+   exclusion are human-only with a reason: `triage.exclude_camera()` and
    `triage.release_preservation()` (closed request, Records Officer, attestation
    that no litigation hold applies), both AST-guarded against background
-   callers. If Aware is down or unconfigured, holds degrade to URGENT manual
-   instructions to facilities — never to silence.
+   callers. A bookmark Aware will not delete becomes `RELEASE_FAILED`, and
+   posting the release again retries it. If Aware is down or unconfigured, or a
+   hold task crashes or sits PENDING (the 5-minute sweeper), holds degrade to
+   URGENT manual instructions to facilities — never to silence, and never to
+   EXPIRED.
 8. **The system registry routes collection** — `RecordSystem`, seeded by
    `manage.py seed_systems`; `triage.route_to_systems` opens a CollectionTask per
    match and urgent_hold systems (bus video!) fire a preservation email.

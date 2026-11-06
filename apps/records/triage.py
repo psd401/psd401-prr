@@ -11,15 +11,27 @@ none. Retention is per camera: Aware's oldest retained footage (pruned_to).
                              expiry, from the later of window   cameras (reason req'd);
                              start and oldest footage; GAP      release only after the
                              when coverage is under 95%         request closes
+  Named site(s)          →   Hold those sites only; URGENT      Widen to district-wide
+                             scope notice says so               if any place is missed
+  Span > the cap         →   Hold the most recent               Refine the window, hold
+                             CAMERA_HOLD_MAX_SPAN_DAYS; URGENT  the rest by hand
+                             scope notice
   Named site, 0 cameras  →   NO_CAMERAS: nothing bookmarked,    Adequate search: other
-                             review queued, never "held"        recorders, SRO/office
+                             review + URGENT notice, never      recorders, SRO/office
+                             "held"
+  Gap/failed/unverified  →   PARTIAL: URGENT notice naming      Bookmark the named
+                             each short camera                  cameras by hand
   No camera retains it   →   EXPIRED: review + adequate-search  Work checklist, decide,
                              checklist. NEVER auto-send.        draft, approve, send
   API down / all failed  →   MANUAL: urgent email to            Bookmark by hand in
-                             facilities (EXPIRED instead when   Aware ("Manually
-                             the window predates the setting)   deleted")
+                             facilities, whatever the window's  Aware ("Manually
+                             age                                deleted")
+  Task crashed / stalled →   MANUAL: finally-block, then the    Same as MANUAL
+                             5-minute sweeper (PENDING > 15m)
   No parseable date      →   Hold the FULL current retention    Refine the window
                              window (preservation-first)
+  Release delete fails   →   Camera RELEASE_FAILED, logged      Post release again to
+                                                                retry those bookmarks
 
 Rationale: a late hold destroys evidence (RCW 42.56.100 — records responsive
 to a pending request must be preserved); an auto-denial performs no search
