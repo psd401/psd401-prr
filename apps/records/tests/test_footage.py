@@ -621,11 +621,16 @@ class HoldPathTests(TestCase):
             window_start=now - dt.timedelta(days=1), window_end=now,
         )
         FootagePreservation.objects.filter(pk=stale.pk).update(
-            created_at=now - dt.timedelta(minutes=16),
+            hold_heartbeat_at=now - dt.timedelta(minutes=16),
         )
-        fresh = FootagePreservation.objects.create(
+        # Old, but its run is still heartbeating: a long district-wide hold.
+        busy = FootagePreservation.objects.create(
             request=make_request("camera footage"),
             window_start=now - dt.timedelta(days=1), window_end=now,
+            hold_run_started_at=now - dt.timedelta(hours=2),
+        )
+        FootagePreservation.objects.filter(pk=busy.pk).update(
+            created_at=now - dt.timedelta(hours=2),
         )
         with mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold",
                         return_value=True) as manual:
@@ -633,11 +638,83 @@ class HoldPathTests(TestCase):
             tasks.sweep_stalled_footage_holds()
 
         stale.refresh_from_db()
-        fresh.refresh_from_db()
+        busy.refresh_from_db()
         self.assertEqual(stale.state, FootagePreservation.State.MANUAL)
-        self.assertEqual(fresh.state, FootagePreservation.State.PENDING)
+        self.assertEqual(busy.state, FootagePreservation.State.PENDING)
         manual.assert_called_once()
         self.assertEqual(manual.call_args.args[0].pk, stale.pk)
+
+    def test_the_sweeper_reports_a_stalled_widen_without_downgrading_the_hold(self):
+        now = timezone.now()
+        fp = FootagePreservation.objects.create(
+            request=make_request("camera footage"),
+            window_start=now - dt.timedelta(days=1), window_end=now,
+            state=FootagePreservation.State.PARTIAL,
+            hold_run_started_at=now - dt.timedelta(minutes=30),
+        )
+        FootagePreservation.objects.filter(pk=fp.pk).update(
+            hold_heartbeat_at=now - dt.timedelta(minutes=16),
+        )
+        with mock.patch("apps.records.tasks.notifications.notify_footage_manual_hold",
+                        return_value=True) as manual:
+            tasks.sweep_stalled_footage_holds()
+            tasks.sweep_stalled_footage_holds()
+
+        fp.refresh_from_db()
+        self.assertEqual(fp.state, FootagePreservation.State.PARTIAL)
+        self.assertIsNone(fp.hold_run_started_at)
+        manual.assert_called_once()
+        self.assertIn("widen", manual.call_args.kwargs["error"].lower())
+
+    def test_intake_marks_a_run_in_progress(self):
+        prr = make_request(f"video at Peninsula High School on {days_ago(3)}")
+        fp = preserve_uncommitted(prr)  # queued, not yet run
+        self.assertIsNotNone(fp.hold_run_started_at)
+        self.assertIsNotNone(fp.hold_heartbeat_at)
+
+    def test_a_run_heartbeats_on_every_camera_and_clears_its_marker(self):
+        seen = []
+        real = tasks._hold_one_camera
+
+        def spy(fp, cam, ch, *, now):
+            row = FootagePreservation.objects.get(pk=fp.pk)
+            seen.append((row.hold_run_started_at, row.hold_heartbeat_at))
+            real(fp, cam, ch, now=now)
+
+        prr = make_request(f"camera footage of the gym on {days_ago(2)}")
+        started = timezone.now()
+        with aware(), mock.patch("apps.records.tasks._hold_one_camera", side_effect=spy):
+            fp = preserve(prr)
+
+        self.assertEqual(len(seen), 3)
+        for run_marker, heartbeat in seen:
+            self.assertIsNotNone(run_marker)
+            self.assertGreaterEqual(heartbeat, started)
+        self.assertEqual(sorted(h for _, h in seen), [h for _, h in seen])
+        self.assertIsNone(fp.hold_run_started_at)
+        self.assertEqual(fp.state, FootagePreservation.State.HELD)
+
+    def test_a_run_the_sweeper_took_over_never_overwrites_its_manual(self):
+        real = tasks._hold_one_camera
+
+        def swept_midway(fp, cam, ch, *, now):
+            if cam.id == "cam-1":  # the sweeper fires while cam-1 is bookmarking
+                FootagePreservation.objects.filter(pk=fp.pk).update(
+                    state=FootagePreservation.State.MANUAL, hold_run_started_at=None,
+                )
+            real(fp, cam, ch, now=now)
+
+        prr = make_request(f"camera footage of the gym on {days_ago(2)}")
+        with aware(), \
+             mock.patch("apps.records.tasks._hold_one_camera", side_effect=swept_midway), \
+             mock.patch("apps.records.tasks.notifications.notify_footage_hold_complete") as done:
+            fp = preserve(prr)
+
+        self.assertEqual(fp.state, FootagePreservation.State.MANUAL)
+        done.assert_not_called()
+        self.assertTrue(AuditLog.objects.filter(
+            action="footage.hold_result_superseded", target=prr.number,
+        ).exists())
 
     def test_the_sweeper_runs_on_the_beat_schedule(self):
         from config.celery import app
@@ -1176,6 +1253,16 @@ class WidenTests(TestCase):
         self.assertEqual(
             sorted(c.args[0].id for c in m.hold.call_args_list), ["cam-1", "cam-2"],
         )
+
+    def test_a_widen_marks_its_run_in_progress_for_the_sweeper(self):
+        fp = self._phs_hold()
+        self.assertIsNone(fp.hold_run_started_at)
+        with mock.patch("apps.records.tasks.execute_footage_hold.delay"):
+            self._widen(fp)
+
+        fp.refresh_from_db()
+        self.assertIsNotNone(fp.hold_run_started_at)
+        self.assertIsNotNone(fp.hold_heartbeat_at)
 
     def test_a_run_records_its_claim_on_each_camera_it_bookmarks(self):
         fp = self._phs_hold()

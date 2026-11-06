@@ -222,10 +222,9 @@ def record_scope_narrowed(fp: FootagePreservation, *, reasons) -> None:
 
 def record_outside_retention_review(fp: FootagePreservation, *, reason: str) -> FootagePreservation:
     """EXPIRED: nothing is held for the window. Queue the human review and the
-    adequate-search checklist. NEVER auto-deny; no requester response. Triage
-    and the hold task both come through here so the checklist never drifts."""
-    fp.state = FootagePreservation.State.EXPIRED
-    fp.save(update_fields=["state"])
+    adequate-search checklist. NEVER auto-deny; no requester response. Every
+    path comes through here so the checklist never drifts. The hold task sets
+    the EXPIRED state itself, conditionally, before calling this."""
     StatusEvent.objects.create(
         request=fp.request,
         note=f"TRIAGE: {reason} {OUTSIDE_RETENTION_CHECKLIST}",
@@ -355,6 +354,8 @@ def triage_footage(prr: PublicRecordsRequest) -> FootagePreservation | None:
         detected_dates_note=note[:500],
         site_codes=[site.code for site in sites],
         site_resolution=resolution[:500],
+        # The run is in progress from now: a task that never starts goes stale.
+        hold_run_started_at=now, hold_heartbeat_at=now,
     )
     audit("footage.hold_initiated", target=prr.number,
           sites=fp.site_codes, window=_local_dates(fp))
@@ -495,7 +496,10 @@ def widen_preservation(
         f"Widened district-wide from {describe_sites(previous)} by "
         f"{actor.get_username()}: {reason}"
     )[:500]
-    fp.save(update_fields=["site_codes", "site_resolution"])
+    fp.hold_run_started_at = fp.hold_heartbeat_at = timezone.now()
+    fp.save(update_fields=[
+        "site_codes", "site_resolution", "hold_run_started_at", "hold_heartbeat_at",
+    ])
     audit("footage.hold_widened", target=fp.request.number, actor=actor,
           previous_sites=previous, reason=reason)
     StatusEvent.objects.create(

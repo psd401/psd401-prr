@@ -2806,6 +2806,12 @@ class FootagePreservation(models.Model):
     )
     release_reason = models.CharField(max_length=500, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    # A hold run (the first one or a widen) is in progress while this is set;
+    # the run clears it when it finishes. It also names the run, so a run the
+    # sweeper took over cannot write its result.
+    hold_run_started_at = models.DateTimeField(null=True, blank=True)
+    # Refreshed per camera. The sweeper acts when it goes stale.
+    hold_heartbeat_at = models.DateTimeField(default=timezone.now)
 
     if TYPE_CHECKING:  # pragma: no cover - declared for the type checker only
         id: int
