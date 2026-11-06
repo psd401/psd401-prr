@@ -132,5 +132,13 @@ scoped service tokens, and the old plaintext self-service route is removed
   revalidation. `test_personal_api_tokens_concurrency` covers the active limit under races.
   Run the concurrency lane only when you change the locking or the count. Use
   `test_agent_capabilities` when you change the capability rows.
+- **Screen confirmations.** `frontend/src/pages/CredentialConfirmations.test.tsx` holds the
+  regression checks for destructive credential actions. It asserts that rotating or revoking
+  a personal token asks for confirmation before any `DELETE` or rotate request, in the Agent
+  access screen (`frontend/src/pages/AgentAccess.tsx`). It also asserts that a one-time
+  integration token shown after issue in `frontend/src/pages/IdentitySettings.tsx` is not
+  dismissed by a backdrop click or Escape. The screen does not enforce the rule, so a change
+  that drops the confirmation is a UI regression only, and the API still authorizes the call.
+  Run `cd frontend && bun run test -- src/pages/CredentialConfirmations.test.tsx`.
 - **Minimal validation.** `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_personal_api_tokens --settings=config.test_settings`.
   The concurrency label is `apps.api.tests.test_personal_api_tokens_concurrency`.
