@@ -226,8 +226,6 @@ Each has a source anchor and the reason it is deferred.
 
 
 
-rectly when a UX or sourcing question arises, and confirm proposals against source before relying on them.
-
 
 
 
