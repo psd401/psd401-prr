@@ -447,7 +447,7 @@ describe('CaseWorkspace', () => {
       preservation: {
         id: 9, state: 'released', confirmation_text: null, has_release_failures: true,
       },
-      label: 'Release failed — bookmark may still exist; retry the release',
+      label: 'Not yet confirmed deleted — bookmark may still exist; retry the release',
       tone: 'nx-badge--danger',
     },
     {

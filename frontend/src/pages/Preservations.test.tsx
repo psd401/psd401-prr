@@ -150,7 +150,7 @@ describe('Preservations — states that need a human', () => {
       'Partly held — gaps or failures need review',
       'Footage gap — adequate-search review required',
       'No retained footage — adequate-search review required',
-      'Release failed — bookmark may still exist; retry the release',
+      'Not yet confirmed deleted — bookmark may still exist; retry the release',
     ]) {
       const badge = await screen.findByText(label)
       expect(badge).toHaveClass('nx-badge')
