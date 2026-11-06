@@ -24,6 +24,7 @@ from apps.correspondence.models import (
 )
 from apps.records.models import (
     AdvisoryRun,
+    CameraHold,
     CollectionTask,
     EstimateRevision,
     FootagePreservation,
@@ -722,6 +723,53 @@ class RequestsDetailTests(StaffApiTestCase):
             window_start=timezone.now() - dt.timedelta(days=1),
             window_end=timezone.now(),
         )
+
+    def _footage(self):
+        r = self.client.get(f"/api/staff/requests/{self.prr.number}/")
+        self.assertEqual(r.status_code, 200)
+        return r.json()["footage_preservations"][0]
+
+    def test_has_release_failures_is_false_without_a_failed_delete(self):
+        fp = FootagePreservation.objects.get(request=self.prr)
+        CameraHold.objects.create(
+            preservation=fp, camera_id="cam-1", state=CameraHold.State.RELEASED,
+        )
+        self.assertIs(self._footage()["has_release_failures"], False)
+
+    def test_has_release_failures_is_true_when_a_bookmark_delete_failed(self):
+        fp = FootagePreservation.objects.get(request=self.prr)
+        FootagePreservation.objects.filter(pk=fp.pk).update(
+            state=FootagePreservation.State.RELEASED,
+        )
+        CameraHold.objects.create(
+            preservation=fp, camera_id="cam-1", state=CameraHold.State.RELEASED,
+        )
+        CameraHold.objects.create(
+            preservation=fp, camera_id="cam-2",
+            state=CameraHold.State.RELEASE_FAILED,
+        )
+        self.assertIs(self._footage()["has_release_failures"], True)
+
+    def test_footage_holds_are_read_in_one_query(self):
+        fp = FootagePreservation.objects.get(request=self.prr)
+        FootagePreservation.objects.filter(pk=fp.pk).update(
+            state=FootagePreservation.State.HELD,
+        )
+        for index in range(3):
+            CameraHold.objects.create(
+                preservation=fp, camera_id=f"cam-{index}",
+                state=CameraHold.State.HELD, clip_id=f"bm-{index}",
+            )
+
+        with CaptureQueriesContext(connection) as captured:
+            footage = self._footage()
+
+        self.assertIsNotNone(footage["confirmation_text"])
+        hold_reads = [
+            query for query in captured.captured_queries
+            if "records_camerahold" in query["sql"]
+        ]
+        self.assertEqual(len(hold_reads), 1)
 
     def test_retrieve_by_number_shape(self):
         r = self.client.get(f"/api/staff/requests/{self.prr.number}/")

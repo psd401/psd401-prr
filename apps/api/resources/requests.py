@@ -88,6 +88,7 @@ from apps.records.models import (
     CASE_NOTE_MAX_LENGTH,
     AdvisoryFeedback,
     AdvisoryRun,
+    CameraHold,
     CaseNote,
     Channel,
     CollectionTask,
@@ -194,15 +195,24 @@ class RequestsCollectionTaskSerializer(serializers.ModelSerializer):
 
 class RequestsFootagePreservationSerializer(serializers.ModelSerializer):
     confirmation_text = serializers.SerializerMethodField()
+    has_release_failures = serializers.SerializerMethodField()
 
     class Meta:
         model = FootagePreservation
-        fields = ["id", "state", "confirmation_text"]
+        fields = ["id", "state", "confirmation_text", "has_release_failures"]
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_confirmation_text(self, obj):
         # Read-only: staff copy it into correspondence by hand, never sent.
         return triage.preservation_confirmation_text(obj)
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_has_release_failures(self, obj):
+        # Iterate .all() so the request queryset's prefetch serves it.
+        return any(
+            hold.state == CameraHold.State.RELEASE_FAILED
+            for hold in obj.camera_holds.all()
+        )
 
 
 #: How much of the description stands in for a subject when no advisory short
@@ -1633,7 +1643,7 @@ class RequestsViewSet(
         }:
             qs = qs.prefetch_related(
                 "events__actor", "estimate_revisions__revised_by",
-                "collection_tasks__system", "footage_preservation",
+                "collection_tasks__system", "footage_preservation__camera_holds",
                 Prefetch(
                     "intake_attachments",
                     queryset=IntakeAttachment.objects.select_related(
