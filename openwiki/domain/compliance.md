@@ -210,6 +210,16 @@ The no-records closure wording is versioned in `correspondence` templates
   `audit_auditlog` that rejects `UPDATE` and `DELETE`. SQLite gets only an update trigger, used by
   tests. `manage.py export_audit_log` streams the whole ledger as canonical JSON Lines, and the
   [application backup](../operations/backups.md) writes that export as its independent audit copy.
+- **Staff read path.** `AuditLogViewSet` in `apps/api/resources/audit.py` is a read-only viewset
+  at `/api/staff/audit-log/`. Its `allowed_roles` are Records Officer and Admin, which is the
+  same set as the Audit log item in `OVERSIGHT_NAV` (`frontend/src/nav.ts`). The Oversight
+  screen (`frontend/src/pages/Audit.tsx`, route `/oversight/audit`) reads this endpoint and
+  never writes to it. Results are newest first, with counted keyset pagination. Callers follow
+  `next` as an opaque link, and a legacy `page` parameter is refused with 404. The filters are
+  `action` and `target` (case-insensitive contains) and `since` (a date). Write verbs are
+  refused with 405, as `test_write_methods_rejected` checks for POST and PUT. Focused tests are
+  in `apps/api/tests/test_audit.py`: `test_list_orders_newest_first`, `test_pagination_is_stable_when_new_rows_arrive_and_timestamps_tie`,
+  `test_filter_by_action_icontains`, and `test_write_methods_rejected`.
 - **IP and actor tracking**: actions are logged with actor and target.
 - **Corrections** are new append-only rows, not edits. This also applies to
   `CaseNote`, `InitialResponseAttestation`, and `FerpaIdentityVerification`.
