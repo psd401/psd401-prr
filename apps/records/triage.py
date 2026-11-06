@@ -8,9 +8,12 @@ none. Retention is per camera: Aware's oldest retained footage (pruned_to).
   Situation                  Machine does                       Human does
   ─────────────────────      ────────────────────────────────   ──────────────────────
   Footage retained       →   Aware bookmark per camera, no      Exclude irrelevant
-                             expiry, from the later of window   cameras (reason req'd);
-                             start and oldest footage; GAP      release only after the
-                             when coverage is under 95%         request closes
+                             expiry, from the later of window   cameras (reason req'd)
+                             start and oldest footage; GAP
+                             when coverage is under 95%
+  Request closed         →   Release (delete the bookmarks):    Nothing; reopening
+                             at closing, or a year after a      before release keeps
+                             denial / no-records / abandoned    the hold
   Named site(s)          →   Hold those sites only; URGENT      Widen to district-wide
                              scope notice says so               if any place is missed
   Span > the cap         →   Hold CAMERA_HOLD_MAX_SPAN_DAYS:    Refine the window, hold
@@ -31,8 +34,8 @@ none. Retention is per camera: Aware's oldest retained footage (pruned_to).
                              5-minute sweeper (PENDING > 15m)
   No parseable date      →   Hold the FULL current retention    Refine the window
                              window (preservation-first)
-  Release delete fails   →   Camera RELEASE_FAILED, logged      Post release again to
-                                                                retry those bookmarks
+  Release delete fails   →   Camera RELEASE_FAILED, logged,     Nothing
+                             retried every release run
 
 Rationale: a late hold destroys evidence (RCW 42.56.100 — records responsive
 to a pending request must be preserved); an auto-denial performs no search
@@ -42,6 +45,7 @@ and denials never are.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import re
 from typing import cast
 
@@ -54,8 +58,15 @@ from apps.audit.models import audit
 from apps.configuration import runtime
 
 from . import footage_sites, notifications
-from .models import FootagePreservation, PublicRecordsRequest, StatusEvent
+from .models import (
+    FootagePreservation,
+    PublicRecordsRequest,
+    RequestStatus,
+    StatusEvent,
+)
 from .services import _require_current_records_officer
+
+logger = logging.getLogger(__name__)
 
 
 class PreservationRefused(ValueError):
@@ -565,113 +576,142 @@ RELEASABLE_PRESERVATION_STATES = (
 )
 
 
-def is_releasable(fp: FootagePreservation) -> bool:
-    """Whether release_preservation would accept this preservation now, the
-    actor and reason aside: the request and any case it was merged into are
-    closed, and it holds footage or has bookmarks left to retry."""
-    from .models import CameraHold
+#: Closures with nothing left to contest: the hold is released at closing.
+RELEASE_AT_CLOSING_STATUSES = frozenset({
+    RequestStatus.FULFILLED,
+    RequestStatus.CLOSED_WITHDRAWN,
+    RequestStatus.CLOSED_DUPLICATE,
+    RequestStatus.CLOSED_NON_REQUEST,
+})
+#: Closures a requester is most likely to sue over: the hold waits
+#: PRA_SUIT_WINDOW after closing. Any closed status not in either set waits
+#: too, so a new one fails safe.
+RELEASE_AFTER_SUIT_WINDOW_STATUSES = frozenset({
+    RequestStatus.DENIED,
+    RequestStatus.CLOSED_NO_RECORDS,
+    RequestStatus.CLOSED_ABANDONED,
+})
+PRA_SUIT_WINDOW = dt.timedelta(days=365)
+"""RCW 42.56.550(6): a requester has one year from the agency's claim of
+exemption or last production to sue. Footage on a denial, a no-records
+closure, or an abandonment stays held that long after closing."""
+
+
+def _closure_release_at(prr: PublicRecordsRequest) -> dt.datetime | None:
+    """When one closed case stops needing the footage, or None while it is
+    open or its closing time is unknown (never released on a guess)."""
     from .services import CLOSED_STATUSES
 
-    if fp.hold_run_started_at is not None:
-        return False
-    prr = fp.request
     if prr.status not in CLOSED_STATUSES:
-        return False
-    target = prr.merged_into
-    if target is not None and target.status not in CLOSED_STATUSES:
-        return False
-    if fp.state in RELEASABLE_PRESERVATION_STATES:
-        return True
+        return None
+    if prr.closed_at is None:
+        logger.warning(
+            "%s is closed (%s) with no closing time; its footage hold is kept.",
+            prr.number, prr.status,
+        )
+        return None
+    if prr.status in RELEASE_AT_CLOSING_STATUSES:
+        return prr.closed_at
+    return prr.closed_at + PRA_SUIT_WINDOW
+
+
+def _deciding_case(
+    fp: FootagePreservation,
+) -> tuple[PublicRecordsRequest, dt.datetime] | tuple[None, None]:
+    """The case whose closure sets the release time, and that time: the
+    request, or its case of record when that releases later. A duplicate's
+    hold still holds footage for its case of record. (None, None) while
+    either is open or has no closing time."""
+    case, due_at = fp.request, _closure_release_at(fp.request)
+    if due_at is None:
+        return None, None
+    target = fp.request.merged_into
+    if target is not None:
+        target_at = _closure_release_at(target)
+        if target_at is None:
+            return None, None
+        if target_at > due_at:
+            case, due_at = target, target_at
+    return case, due_at
+
+
+def release_eligible_at(fp: FootagePreservation) -> dt.datetime | None:
+    """When the automatic release deletes this preservation's bookmarks, or
+    None when it will not (yet): the request or its case of record is open,
+    a hold run is still bookmarking, or there is nothing left to delete.
+    A released preservation with a delete Aware never confirmed is eligible
+    again, so the next run retries it."""
+    from .models import CameraHold
+
+    if fp.hold_run_started_at is not None:
+        return None
     # all() so a prefetched list is read, not queried again.
-    return fp.state == FootagePreservation.State.RELEASED and any(
-        hold.state == CameraHold.State.RELEASE_FAILED for hold in fp.camera_holds.all()
+    if fp.state not in RELEASABLE_PRESERVATION_STATES and not (
+        fp.state == FootagePreservation.State.RELEASED and any(
+            hold.state == CameraHold.State.RELEASE_FAILED
+            for hold in fp.camera_holds.all()
+        )
+    ):
+        return None
+    return _deciding_case(fp)[1]
+
+
+def is_releasable(fp: FootagePreservation) -> bool:
+    """Whether the automatic release would release this preservation now."""
+    at = release_eligible_at(fp)
+    return at is not None and at <= timezone.now()
+
+
+def _release_reason(fp: FootagePreservation) -> str:
+    case, _ = _deciding_case(fp)
+    assert case is not None and case.closed_at is not None
+    closed = (
+        f"closed ({case.get_status_display()}) on "
+        f"{timezone.localdate(case.closed_at).isoformat()}"
     )
+    text = (
+        f"Released automatically: {case.number} {closed}"
+        if case.pk == fp.request.pk else
+        f"Released automatically: {fp.request.number} was merged into "
+        f"{case.number}, which {closed}"
+    )
+    if case.status not in RELEASE_AT_CLOSING_STATUSES:
+        text += "; released one year after closing, RCW 42.56.550(6)"
+    return text + "."
 
 
 @transaction.atomic
-def release_preservation(
-    preservation: FootagePreservation,
-    *,
-    actor,
-    reason: object,
-    attest_no_litigation_hold: object,
-) -> FootagePreservation:
-    """End a preservation hold for good: Aware deletes every bookmark and the
-    footage then ages out. Human only, like exclude_camera: a current Records
-    Officer, a substantive reason, an attestation that no litigation hold
-    covers the footage, and a closed request. A duplicate's hold still holds
-    footage for its case of record, so that case must be closed too."""
+def release_preservation(preservation: FootagePreservation) -> FootagePreservation | None:
+    """End a preservation hold for good once it is due (release_eligible_at):
+    Aware deletes every bookmark and the footage then ages out. Automatic,
+    called only by tasks.release_due_footage_preservations. Returns None,
+    changing nothing, when the hold is not due, a hold run is still
+    bookmarking, or another run has the row locked; the next run retries.
+    A released preservation whose deletes Aware never confirmed is retried:
+    only those bookmarks are deleted again."""
     from apps.integrations.avigilon import client as alta
 
     from .models import CameraHold
-    from .services import CLOSED_STATUSES
 
-    actor = _require_current_records_officer(
-        actor=actor,
-        message=(
-            "Current Records Officer authority is required to release a "
-            "preservation hold."
-        ),
-    )
-    reason = _reason_text(reason)
-    if len(reason) < 10:
-        raise PreservationRefused(
-            "Releasing a preservation hold requires a substantive reason (e.g. "
-            "'request fulfilled; installment produced and the requester "
-            "confirmed receipt'). The release record is part of the retention "
-            "documentation."
-        )
-    reason_max_length = FootagePreservation._meta.get_field(
-        "release_reason",
-    ).max_length
-    if reason_max_length is not None and len(reason) > reason_max_length:
-        raise PreservationRefused(
-            "A preservation-release reason must contain at most "
-            f"{reason_max_length} characters."
-        )
-    if attest_no_litigation_hold is not True:
-        raise PreservationRefused(
-            "Releasing a preservation hold requires attesting that no "
-            "litigation hold, pending lawsuit, or reasonably anticipated "
-            "litigation covers this footage."
-        )
-
+    # Lock the request too: transition() locks it, so a reopen cannot commit
+    # between the status check below and the bookmark deletes. Not the
+    # merged case: Postgres refuses FOR UPDATE on an outer join's null side.
     fp = (
-        FootagePreservation.objects.select_for_update()
+        FootagePreservation.objects.select_for_update(
+            skip_locked=True, of=("self", "request"),
+        )
         .select_related("request__merged_into")
-        .get(pk=preservation.pk)
+        .filter(pk=preservation.pk)
+        .first()
     )
-    retry = fp.state == FootagePreservation.State.RELEASED and fp.camera_holds.filter(
-        state=CameraHold.State.RELEASE_FAILED,
-    ).exists()
-    if fp.state not in RELEASABLE_PRESERVATION_STATES and not retry:
-        raise PreservationRefused(
-            "Only a held or partly held preservation can be released; this "
-            f"one is {FootagePreservation.State(fp.state).label.lower()}."
-        )
-    if fp.hold_run_started_at is not None:
-        # A widen keeps the state while it bookmarks more cameras; releasing
-        # now would miss every bookmark it makes after this point.
-        from .tasks import FOOTAGE_HOLD_STALL_MINUTES
-
-        raise PreservationRefused(
-            "A hold run is still running for this preservation, adding Aware "
-            "bookmarks one camera at a time, or has stalled; a stalled run is "
-            f"cleared within about {FOOTAGE_HOLD_STALL_MINUTES} minutes. "
-            "Release it once the run finishes or is cleared."
-        )
+    if fp is None:
+        return None
+    due_at = release_eligible_at(fp)
+    if due_at is None or due_at > timezone.now():
+        return None
+    retry = fp.state == FootagePreservation.State.RELEASED
     prr = fp.request
-    if prr.status not in CLOSED_STATUSES:
-        raise PreservationRefused(
-            f"{prr.number} is still open ({prr.get_status_display()}). A "
-            "preservation hold is released only after the request closes."
-        )
-    target = prr.merged_into
-    if target is not None and target.status not in CLOSED_STATUSES:
-        raise PreservationRefused(
-            f"{prr.number} was merged into {target.number}, which is still "
-            "open. This hold preserves the footage that case answers for."
-        )
+    reason = fp.release_reason if retry else _release_reason(fp)
 
     rows = fp.camera_holds.select_for_update()
     # Bookmarks whose delete Aware has not confirmed, from an earlier release
@@ -708,15 +748,13 @@ def release_preservation(
         "footage.preservation_release_retried" if retry
         else "footage.preservation_released",
         target=prr.number,
-        actor=actor,
         reason=reason,
-        attest_no_litigation_hold=True,
         bookmarks=len(bookmarks),
     )
     if not retry:
         fp.state = FootagePreservation.State.RELEASED
         fp.released_at = timezone.now()
-        fp.released_by = actor
+        fp.released_by = None
         fp.release_reason = reason
         fp.save(update_fields=["state", "released_at", "released_by", "release_reason"])
     # A bookmark is RELEASED only once Aware confirms the delete: until then
@@ -728,29 +766,22 @@ def release_preservation(
     CameraHold.objects.filter(pk__in=[hold.pk for hold in holds]).exclude(
         pk__in=[pk for pk, _, _ in bookmarks],
     ).update(state=CameraHold.State.RELEASED)
-    StatusEvent.objects.create(
-        request=prr,
-        actor=actor,
-        note=(
-            (
-                f"Footage preservation release retried: {len(bookmarks)} Aware "
-                "bookmark(s) that could not be deleted are queued for deletion "
-                "again."
-                if retry else
+    # A retry runs on every beat until Aware confirms: the audit log records
+    # each one, the timeline only the release itself.
+    if not retry:
+        StatusEvent.objects.create(
+            request=prr,
+            note=(
                 f"Footage preservation released: {len(bookmarks)} Aware "
-                "bookmark(s) queued for deletion after the request closed."
-            )
-            + " The Records Officer attested that no litigation hold, pending "
-            "lawsuit, or reasonably anticipated litigation covers this "
-            f"footage. Reason: {reason}"
-            + (
-                f" {len(unconfirmed_creates)} camera(s) may still have a PRR "
-                "bookmark from a create Aware never confirmed; find and delete "
-                "it in Aware: " + "; ".join(unconfirmed_creates)[:1000] + "."
-                if unconfirmed_creates else ""
-            )
-        ),
-    )
+                f"bookmark(s) queued for deletion. {reason}"
+                + (
+                    f" {len(unconfirmed_creates)} camera(s) may still have a PRR "
+                    "bookmark from a create Aware never confirmed; find and delete "
+                    "it in Aware: " + "; ".join(unconfirmed_creates)[:1000] + "."
+                    if unconfirmed_creates else ""
+                )
+            ),
+        )
 
     if bookmarks:
         def delete_bookmarks_after_release_commits():
@@ -766,7 +797,6 @@ def release_preservation(
                     audit(
                         "footage.bookmark_release_failed",
                         target=prr.number,
-                        actor=actor,
                         camera=camera,
                         bookmark=bookmark_id,
                         error=_safe_alta_error(exc, action="bookmark delete"),
@@ -775,15 +805,14 @@ def release_preservation(
                     CameraHold.objects.filter(
                         pk=hold_pk, state=CameraHold.State.RELEASE_FAILED,
                     ).update(state=CameraHold.State.RELEASED)
-            if failed:
+            if failed and not retry:
                 StatusEvent.objects.create(
                     request=prr,
-                    actor=actor,
                     note=(
                         f"Footage preservation release: {len(failed)} Aware "
                         "bookmark(s) could not be deleted and may still exist: "
-                        f"{'; '.join(failed)[:1000]}. Post the release again "
-                        "to retry them."
+                        f"{'; '.join(failed)[:1000]}. They are retried "
+                        "automatically until Aware confirms the delete."
                     ),
                 )
 

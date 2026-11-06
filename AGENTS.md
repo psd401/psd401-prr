@@ -61,14 +61,20 @@ and cited from code, tests, and ADRs; never renumber them.
    adequate-search review plus an URGENT notice (`NO_CAMERAS`), never "held";
    PARTIAL sends an URGENT notice naming each short camera. Where no camera
    retains the window, a human completes the search and chooses the response.
-   There is no auto-denial code path and none may be added. Release and
-   exclusion are human-only with a reason: `triage.exclude_camera()` and
-   `triage.release_preservation()` (closed request, Records Officer, attestation
-   that no litigation hold applies), both AST-guarded against background
-   callers. Release and exclusion keep each bookmark `RELEASE_FAILED` (not yet
-   confirmed deleted) until Aware confirms its delete, so a refusal or crash
-   stays retryable; posting the release again retries it. Release is refused
-   while a hold run is still bookmarking. The hold task is
+   There is no auto-denial code path and none may be added. Camera exclusion
+   is human-only with a reason (`triage.exclude_camera()`, AST-guarded against
+   background callers). Release is automatic, never a click:
+   `tasks.release_due_footage_preservations` (hourly beat, and after every
+   closing transition) is the only caller of `triage.release_preservation()`.
+   A hold is released once the request and any case of record it was merged
+   into are closed: at closing for fulfilled, withdrawn, duplicate, and
+   non-request closures, and `triage.PRA_SUIT_WINDOW` (one year,
+   RCW 42.56.550(6)) after a denial, no-records, or abandoned closure. A
+   request with no closing time, or reopened, is not released. Release and
+   exclusion keep each bookmark `RELEASE_FAILED` (not yet confirmed deleted)
+   until Aware confirms its delete, so a refusal or crash stays retryable; the
+   next run retries it. Release waits while a hold run is still bookmarking.
+   The hold task is
    enqueued only after intake commits, and claims each camera before calling
    Aware, so two runs never bookmark one camera. If Aware is down or
    unconfigured, or a hold task crashes or stops heartbeating for 15 minutes

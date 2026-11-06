@@ -924,27 +924,6 @@ CAPABILITIES = (
         ],
     ),
     _capability(
-        "preservations.release",
-        (
-            "Release a closed request's footage preservation hold, deleting "
-            "its Aware bookmarks, with a reason and a litigation-hold "
-            "attestation."
-        ),
-        "POST",
-        "/api/staff/preservations/{id}/release/",
-        ["/requests/:number/collect"],
-        execution="human_only",
-        risk="high",
-        constraints=[
-            "records_officer_authority",
-            "substantive_reason",
-            "accountable_human_actor",
-            "interactive_staff_session",
-            "destructive",
-            "append_only_audit",
-        ],
-    ),
-    _capability(
         "record_systems.list",
         "Browse and filter the district record-system registry.",
         "GET",

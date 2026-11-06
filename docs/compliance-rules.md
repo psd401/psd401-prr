@@ -151,21 +151,39 @@ auto-denial code path and none may be added. The preservation confirmation
 text (HELD/PARTIAL only) is shown to staff for correspondence they write; it is
 never sent automatically.
 
-Release and exclusion are human-only with a reason. Camera exclusions go
-through `triage.exclude_camera()`. Deleting a preservation's bookmarks goes
-through `triage.release_preservation()`, which requires a closed request (and,
-for a merged duplicate, a closed case of record), current Records Officer
-authority, a substantive reason, and an attestation that no litigation hold,
-pending lawsuit, or reasonably anticipated litigation covers the footage. Both
-are AST-guarded like `revise_estimate`. Release and exclusion mark each
+Camera exclusion is human-only with a reason: it goes through
+`triage.exclude_camera()`, AST-guarded like `revise_estimate`. Release is
+automatic. There is no release button, API action, or capability, and no
+reason or attestation is collected. `tasks.release_due_footage_preservations`
+runs hourly (beat, at :20) and after every transition into a closed status,
+and it is the only caller of `triage.release_preservation()` (AST-guarded). It
+releases each due preservation in its own transaction, so one failure never
+stops the rest. `triage.release_eligible_at()` sets the time:
+
+| Closure | Released |
+| --- | --- |
+| Fulfilled, withdrawn, duplicate, non-request | At closing (`closed_at`) |
+| Denied, no records, abandoned | One year after closing (`PRA_SUIT_WINDOW`) |
+
+The one-year wait matches the RCW 42.56.550(6) limit on suits over a claim of
+exemption or a last production; those closures are the ones a requester is
+most likely to contest. A merged duplicate waits for its case of record too,
+and the later of the two dates wins. A closed request with no `closed_at` is
+logged and never released on a guess; a reopened request clears `closed_at`
+and keeps its hold. The release reason is a system sentence naming the
+closure, with the RCW 42.56.550(6) clause when the release waited, and
+`released_by` stays empty.
+
+Release and exclusion mark each
 bookmark `RELEASE_FAILED` (not yet confirmed deleted) inside their
 transaction, and flip it to `RELEASED` only after Aware confirms the delete (or
 reports the bookmark already gone). A refused delete, or a crash partway
-through, therefore leaves the camera retryable and logged; posting the release
-again retries only those cameras, excluded ones included. Release is refused
+through, therefore leaves the camera retryable and logged; every run retries
+only those cameras, excluded ones included, and records each retry in the
+audit log. Release waits
 while a hold run (a widen included) is still bookmarking; if the sweeper
 cleared a stalled run that then makes one more bookmark after a release, that
-bookmark is marked `RELEASE_FAILED` so the retry deletes it. A camera whose
+bookmark is marked `RELEASE_FAILED` so the next run deletes it. A camera whose
 create Aware never confirmed has no bookmark id to delete by, so the release's
 timeline entry (or, for a create made after the release, its own timeline
 entry) names the bookmark for a human to find and delete in Aware.

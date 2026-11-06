@@ -35,7 +35,7 @@ export const PRESERVATION_STATE_LABELS: Record<string, string> = {
   gap: `Footage gap — ${ADEQUATE_SEARCH}`,
   not_retained: `No retained footage — ${ADEQUATE_SEARCH}`,
   failed: 'Failed',
-  release_failed: 'Not yet confirmed deleted — bookmark may still exist; retry the release',
+  release_failed: 'Not yet confirmed deleted — bookmark may still exist; the release retries automatically',
 }
 
 export function preservationStateLabel(state: string): string {
