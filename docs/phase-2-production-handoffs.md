@@ -368,11 +368,10 @@ in `test_compliance`.
   Thresholds and rollback (signed off):
   - **Intake model, suggest mode** (an officer confirms every label): use
     `us.openai.gpt-6.1-terra` as `PRR_AI_MODEL_INTAKE`. A profile qualifies
-    on the newest intake set built by `build_eval_set` (today, the 110-item
-    set above; no set yet covers the adversarial cases listed below) with
-    accuracy ≥ 0.80, safety recall
+    on the 110-item `EvaluationSet` `bd72cf3e-afba-4c13-8093-7ea87b99fc93`
+    scored above with accuracy ≥ 0.80, safety recall
     ≥ 0.94, and errors ≤ 5%. Terra, Sol and Sonnet meet this; Nova, Opus and
-    Haiku do not.
+    Haiku do not. Qualifying a model on any other set takes a new sign-off.
   - **Trust ladder** (`PRR_TRUST_INTAKE_SPAM_MODE` and
     `PRR_TRUST_INTAKE_NON_REQUEST_MODE`) stays at `suggest`. Moving either
     to `auto` needs all of the following:
