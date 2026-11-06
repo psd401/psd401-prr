@@ -24,7 +24,9 @@ _CONDITIONAL = re.compile(r"<!--\[if[^\]]*\]>.*?<!\[endif\]-->", re.DOTALL | re.
 _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _BLOCK = re.compile(r"<(style|script|head)\b.*?</\1\s*>", re.DOTALL | re.IGNORECASE)
 _BREAK = re.compile(r"<\s*(br|/p|/div|/tr|/li|/h[1-6]|/table)\b[^>]*>", re.IGNORECASE)
-_TAG = re.compile(r"<[^>]+>")
+#: Only tag-shaped spans: a name right after "<" (or "</", "<!"), then
+#: whitespace, "/" or ">". "<jane@example.org>" and "a < b" are text and stay.
+_TAG = re.compile(r"<(?:/?[A-Za-z][A-Za-z0-9:-]*(?:[\s/][^<>]*)?|![A-Za-z][^<>]*)>")
 _IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _LINK = re.compile(r"\[([^\]]+)\]\((?:https?|mailto):[^)]*\)")
 _HEADING = re.compile(r"^#{1,6}\s+", re.MULTILINE)

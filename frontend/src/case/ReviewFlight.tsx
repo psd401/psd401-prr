@@ -36,6 +36,11 @@ function sentLabel(value?: string | null) {
   return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+function copyKey(row: FlightRecord) {
+  if (!row.email_body_sha256) return row.id
+  return [row.email_body_sha256, row.original_filename, row.email_sender_domain ?? ''].join('\u0000')
+}
+
 function textUrl(id: string) {
   return `/api/staff/record-items/${id}/text/`
 }
@@ -168,22 +173,24 @@ export function ReviewFlight({ number }: { number: string }) {
     placeholderData: (previous) => previous,
   })
   const loaded = useMemo(() => (list.data ? unwrap(list.data) : []), [list.data])
-  // Identical copies (the same body text, such as one newsletter in every
-  // custodian's mailbox) fold under their first copy and are decided together.
+  // Identical copies on this page -- the same body text, subject, and sending
+  // domain, such as one newsletter sent to every custodian -- fold under their
+  // first copy and are decided together. Anything less than all three stays
+  // its own row, so no record is decided without being shown.
   const copiesOf = useMemo(() => {
     const groups = new Map<string, string[]>()
     for (const row of loaded) {
-      const key = row.email_body_sha256 || row.id
+      const key = copyKey(row)
       groups.set(key, [...(groups.get(key) ?? []), row.id])
     }
     return groups
   }, [loaded])
   const rows = useMemo(
-    () => loaded.filter((row) => (copiesOf.get(row.email_body_sha256 || row.id) ?? [])[0] === row.id),
+    () => loaded.filter((row) => (copiesOf.get(copyKey(row)) ?? [])[0] === row.id),
     [loaded, copiesOf],
   )
   const groupOf = useCallback(
-    (row: FlightRecord) => copiesOf.get(row.email_body_sha256 || row.id) ?? [row.id],
+    (row: FlightRecord) => copiesOf.get(copyKey(row)) ?? [row.id],
     [copiesOf],
   )
   // Progress across the whole case, not just this page.
@@ -257,12 +264,9 @@ export function ReviewFlight({ number }: { number: string }) {
   useEffect(() => {
     const next = rows[index + 1]
     if (!next) return
+    // The text is not prefetched: reading it is audited as viewed, and a
+    // record nobody opened must not read as viewed.
     if (next.reviewable) new Image().src = previewUrl(next.id)
-    qc.prefetchQuery({
-      queryKey: ['record-text', next.id],
-      queryFn: () => api<ReadingText>(textUrl(next.id)),
-      staleTime: 5 * 60 * 1000,
-    })
     qc.prefetchQuery({
       queryKey: ['record-responsiveness-advisory', next.id],
       queryFn: () => api<AdvisoryLatest>(`/api/staff/record-items/${next.id}/advisory-responsiveness/`),
@@ -493,7 +497,7 @@ export function ReviewFlight({ number }: { number: string }) {
             <p className="-mt-2 mb-3 text-sm text-ink-muted">
               {[current.email_from || current.email_sender_domain, sentLabel(current.email_sent_at)]
                 .filter(Boolean).join(' · ')}
-              {copies > 1 && ` · ${copies} identical copies, decided together`}
+              {copies > 1 && ` · ${copies} identical copies on this page, decided together`}
             </p>
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <Badge tone={current.review_state === 'unreviewed' ? 'neutral' : 'green'}>

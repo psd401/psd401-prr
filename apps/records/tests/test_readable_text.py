@@ -38,8 +38,21 @@ class ReadableTextTests(SimpleTestCase):
 
     def test_collapses_runs_of_blank_lines_and_trailing_space(self):
         self.assertEqual(
-            readable_text("One   \n\n\n\n\nTwo​\n"),
+            readable_text("One   \n\n\n\n\nTwo\u200b\n"),
             "One\n\nTwo",
+        )
+
+    def test_keeps_addresses_and_comparisons_in_angle_brackets(self):
+        raw = (
+            "From: Jane Doe <jane.doe@example.org>\n"
+            "To: <board@example.org>\n"
+            "<!DOCTYPE html><div class=\"x\">If a < b and c > d</div><br/>Done"
+        )
+        self.assertEqual(
+            readable_text(raw),
+            "From: Jane Doe <jane.doe@example.org>\n"
+            "To: <board@example.org>\n"
+            "If a < b and c > d\n\nDone",
         )
 
     def test_plain_text_is_unchanged(self):

@@ -99,7 +99,7 @@ class RecordReviewApiTests(TestCase):
 
         response = self.client.get(f"/api/staff/record-items/{self.item.pk}/text/")
 
-        self.assertIn(response.status_code, {403, 404})
+        self.assertEqual(response.status_code, 403)
 
     def test_review_action_records_human_withholding_decision(self):
         response = self.client.post(

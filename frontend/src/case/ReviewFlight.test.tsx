@@ -275,7 +275,9 @@ it('preloads the next record so the next key shows it at once', async () => {
 describe('fast review (UX plan step 3)', () => {
   const COPIES = [
     { ...ROWS[0], id: 'n1', original_filename: 'The Tides Table.pdf', email_body_sha256: 'same', email_sender_domain: 'example.org', email_sent_at: '2026-09-01T20:17:59Z' },
-    { ...ROWS[1], id: 'n2', original_filename: 'The Tides Table.pdf', email_body_sha256: 'same' },
+    { ...ROWS[1], id: 'n2', original_filename: 'The Tides Table.pdf', email_body_sha256: 'same', email_sender_domain: 'example.org' },
+    // Same body text under another subject: a different record, never folded.
+    { ...ROWS[1], id: 'n3', original_filename: 'Fwd: The Tides Table.pdf', email_body_sha256: 'same', email_sender_domain: 'example.org' },
     { ...ROWS[2], id: 'solo', original_filename: 'Re: Bus route.eml', email_body_sha256: 'other' },
   ]
 
@@ -300,7 +302,7 @@ describe('fast review (UX plan step 3)', () => {
 
     expect(await screen.findByLabelText('Record text')).toHaveTextContent('Hey Tides Welcome back.')
     expect(screen.getByRole('heading', { name: 'The Tides Table' })).toBeInTheDocument()
-    expect(screen.getByText(/2 identical copies, decided together/)).toBeInTheDocument()
+    expect(screen.getByText(/2 identical copies on this page, decided together/)).toBeInTheDocument()
     await user.keyboard('t')
     expect(screen.getByRole('img', { name: /Page 1 of The Tides Table\.pdf/ })).toBeInTheDocument()
     await user.keyboard('t')
@@ -311,7 +313,7 @@ describe('fast review (UX plan step 3)', () => {
     const { posts, user } = fastReview()
     await screen.findByLabelText('Record text')
 
-    expect(screen.getAllByRole('option')).toHaveLength(2)
+    expect(screen.getAllByRole('option')).toHaveLength(3)
     expect(screen.getByRole('option', { name: /The Tides Table ×2/ })).toBeInTheDocument()
     await user.keyboard('d')
     expect(screen.getByText(/Identical copies are decided together/)).toBeInTheDocument()
@@ -320,14 +322,22 @@ describe('fast review (UX plan step 3)', () => {
     await waitFor(() => expect(posts).toEqual(['/api/staff/record-items/bulk-review/']))
   })
 
+  it('never reads the next record\'s text before it is opened', async () => {
+    fastReview()
+    await screen.findByLabelText('Record text')
+
+    const textReads = vi.mocked(fetch).mock.calls.map(([input]) => String(input)).filter((url) => url.endsWith('/text/'))
+    expect(textReads).toEqual(['/api/staff/record-items/n1/text/'])
+  })
+
   it('shows progress across the whole case', async () => {
     fastReview()
 
     const bar = await screen.findByRole('progressbar')
-    expect(bar).toHaveAttribute('aria-valuenow', '7')
+    expect(bar).toHaveAttribute('aria-valuenow', '6')
     expect(bar).toHaveAttribute('aria-valuemax', '10')
-    expect(screen.getByText('7 of 10 decided')).toBeInTheDocument()
-    expect(screen.getByText('3 left')).toBeInTheDocument()
+    expect(screen.getByText('6 of 10 decided')).toBeInTheDocument()
+    expect(screen.getByText('4 left')).toBeInTheDocument()
   })
 
   it('says All done when every record has a decision', async () => {
