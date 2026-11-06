@@ -262,8 +262,8 @@ describe('record review workspace', () => {
       toJSON: () => ({}),
     })
     fireEvent.pointerDown(drawingSurface, { clientX: 100, clientY: 200, pointerId: 1 })
-    fireEvent.pointerMove(drawingSurface, { clientX: 800, clientY: 700, pointerId: 1 })
-    fireEvent.pointerUp(drawingSurface, { clientX: 800, clientY: 700, pointerId: 1 })
+    fireEvent.pointerMove(drawingSurface, { clientX: 800, clientY: 700, pointerId: 1, buttons: 1 })
+    fireEvent.pointerUp(drawingSurface, { clientX: 800, clientY: 700, pointerId: 1, buttons: 1 })
     await user.selectOptions(screen.getByLabelText('Redaction exemption'), '9')
     await user.click(screen.getByRole('button', { name: 'Add redaction' }))
 

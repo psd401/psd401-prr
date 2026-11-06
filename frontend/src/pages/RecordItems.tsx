@@ -876,6 +876,7 @@ export function RecordItems({
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!canReview || selected?.review_state !== 'responsive') return
+    event.currentTarget.setPointerCapture?.(event.pointerId)
     const start = pointerPosition(event)
     setDragStart(start)
     setDraftBox(normalizedBox(start, start))
@@ -883,6 +884,10 @@ export function RecordItems({
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     if (!dragStart) return
+    if (event.buttons === 0) {
+      setDragStart(null)
+      return
+    }
     setDraftBox(normalizedBox(dragStart, pointerPosition(event)))
   }
 

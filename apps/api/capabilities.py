@@ -1383,7 +1383,7 @@ CAPABILITIES = (
         "Render one non-PDF record into the reviewable PDF the preview and redaction burn-in require, leaving the original record untouched.",
         "POST",
         "/api/staff/record-items/{id}/build-derivative/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         risk="moderate",
         constraints=[
             "append_only_audit",
@@ -1394,7 +1394,7 @@ CAPABILITIES = (
         "Burn every marked interval into a released copy of an audio or video record by re-encoding, retaining the original and a manifest of exactly what was applied.",
         "POST",
         "/api/staff/record-items/{id}/render-media-redactions/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1409,7 +1409,7 @@ CAPABILITIES = (
         "Record a named human decision, with stated basis and reasoning, for a record no available renderer can open.",
         "POST",
         "/api/staff/record-items/{id}/opaque-disposition/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1424,7 +1424,7 @@ CAPABILITIES = (
         "Stream one audio or video record to the staff reviewer under the same role check and no-store headers as a page raster.",
         "GET",
         "/api/staff/record-items/{id}/stream/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         risk="read",
     ),
     _capability(
@@ -1432,7 +1432,7 @@ CAPABILITIES = (
         "List the timed withholdings marked on audio and video records.",
         "GET",
         "/api/staff/media-redactions/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         risk="read",
     ),
     _capability(
@@ -1440,7 +1440,7 @@ CAPABILITIES = (
         "Mark one interval of an audio or video record for withholding, with the exemption citation the log is built from.",
         "POST",
         "/api/staff/media-redactions/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[

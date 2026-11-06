@@ -246,7 +246,10 @@ export function RedactWorkspace({ number }: { number: string }) {
     onError: (error) => toast('error', error.message),
   })
 
-  const canAdd = Boolean(draftBox && basis) && !add.isPending && !accept.isPending
+  // A remembered basis that is no longer active shows as unchosen, so it must
+  // not count as chosen either.
+  const basisChosen = activeExemptions.some((row) => String(row.id) === basis)
+  const canAdd = Boolean(draftBox) && basisChosen && !add.isPending && !accept.isPending
 
   const submit = useCallback(() => {
     if (!canAdd) return
@@ -289,13 +292,22 @@ export function RedactWorkspace({ number }: { number: string }) {
   }, [canAdd, index, pageCount, pageNumber, records.length, select, submit])
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    // Captured so a release outside the page still ends the drag here.
+    event.currentTarget.setPointerCapture?.(event.pointerId)
     const start = pointerPosition(event)
+    setProposalId(null)
+    setRejectReason('')
     setDragStart(start)
     setDraftBox(normalizedBox(start, start))
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     if (!dragStart) return
+    if (event.buttons === 0) {
+      // The button came up somewhere the page never heard about.
+      setDragStart(null)
+      return
+    }
     setDraftBox(normalizedBox(dragStart, pointerPosition(event)))
   }
 

@@ -123,7 +123,7 @@ async function drawBox(pageNumber = 1) {
     toJSON: () => ({}),
   })
   fireEvent.pointerDown(surface, { clientX: 100, clientY: 200, pointerId: 1 })
-  fireEvent.pointerMove(surface, { clientX: 800, clientY: 700, pointerId: 1 })
+  fireEvent.pointerMove(surface, { clientX: 800, clientY: 700, pointerId: 1, buttons: 1 })
   fireEvent.pointerUp(surface, { clientX: 800, clientY: 700, pointerId: 1 })
 }
 
@@ -227,7 +227,7 @@ it('dismisses a suggestion only with a reason', async () => {
   }))
 })
 
-it('approves a second review, then builds the redacted PDF', async () => {
+it('holds Build back until a required second review is approved', async () => {
   const saved = {
     id: 7, record_item: 'rec-a', page_number: 1, x0: 0.1, y0: 0.1, x1: 0.2, y1: 0.2,
     exemption: 9, citation: 'RCW 42.56.230(1)', exemption_name: 'Student information',
@@ -276,4 +276,38 @@ it('moves between records and pages by click, and Esc clears a draft', async () 
   await user.click(screen.getByRole('button', { name: 'Zoom in' }))
   await user.click(screen.getByRole('button', { name: 'Zoom out' }))
   expect(screen.getByText('100%')).toBeInTheDocument()
+})
+
+it('stops resizing when the button came up off the page', async () => {
+  const { user } = setup()
+  const surface = await screen.findByLabelText('Draw redactions on page 1')
+  vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 1000, width: 1000, height: 1000,
+    toJSON: () => ({}),
+  })
+  fireEvent.pointerDown(surface, { clientX: 100, clientY: 200, pointerId: 1 })
+  fireEvent.pointerMove(surface, { clientX: 500, clientY: 500, pointerId: 1, buttons: 1 })
+  // Released outside: the next hover arrives with no button held.
+  fireEvent.pointerMove(surface, { clientX: 900, clientY: 900, pointerId: 1, buttons: 0 })
+  fireEvent.pointerMove(surface, { clientX: 950, clientY: 950, pointerId: 1, buttons: 0 })
+  await user.selectOptions(await screen.findByLabelText('Legal basis'), '9')
+  const draft = surface.querySelector('.border-warning') as HTMLElement
+  expect(draft.style.width).toBe('40%')
+  expect(draft.style.height).toBe('30%')
+})
+
+it('treats a box drawn over a suggestion as your own redaction', async () => {
+  const { posts, user } = setup({ proposals: [PROPOSAL] })
+  await user.click(await screen.findByRole('button', { name: 'Use suggestion' }))
+  expect(screen.getByRole('button', { name: 'Accept suggestion' })).toBeInTheDocument()
+  await drawBox()
+  await user.click(screen.getByRole('button', { name: 'Add redaction' }))
+  await waitFor(() => expect(posts.at(-1)?.url).toBe('/api/staff/redactions/'))
+})
+
+it('does not count a remembered basis that is no longer active', async () => {
+  window.localStorage.setItem('prr.redact.basis', '99')
+  setup()
+  await drawBox()
+  expect(await screen.findByRole('button', { name: 'Add redaction' })).toBeDisabled()
 })
