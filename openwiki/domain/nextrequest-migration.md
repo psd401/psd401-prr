@@ -162,3 +162,4 @@ Minimal validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records
 - [Compliance](compliance.md): the deadline math used to compute a statutory due date at import.
 - [Record review and handling](record-review-and-handling.md): what happens to attachments after they are quarantined.
 - [Background jobs](../architecture/background-jobs.md): the watchdogs that act on imported open cases after activation.
+- [Operator management commands](../operations/operator-commands.md): the dry-run, commit, and activation commands that drive each step on this page.
