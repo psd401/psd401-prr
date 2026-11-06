@@ -2016,6 +2016,28 @@ class AutomaticReleaseTests(TestCase):
             self.assertIsNone(self._release(fp))
         self.assertNothingReleased(fp, delete_bookmark)
 
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_release_locks_the_request_a_reopen_would_change(self, delete_bookmark):
+        # transition() locks the request row. Locking it here too means a
+        # reopen cannot commit between the closed-status check and the
+        # bookmark deletes. SQLite ignores row locks, so assert the lock list.
+        from django.db.models.query import QuerySet
+
+        fp = self._held_preservation()
+        real = QuerySet.select_for_update
+        calls = []
+
+        def spy(qs, *args, **kwargs):
+            if qs.model is FootagePreservation:
+                calls.append(kwargs.get("of", ()))
+            return real(qs, *args, **kwargs)
+
+        with mock.patch.object(QuerySet, "select_for_update", spy):
+            with self.captureOnCommitCallbacks(execute=True):
+                self.assertIsNotNone(self._release(fp))
+        self.assertTrue(calls)
+        self.assertIn("request", calls[0])
+
     # -- what a release does ------------------------------------------------
 
     @mock.patch(f"{CLIENT}.delete_bookmark")

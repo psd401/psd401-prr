@@ -693,8 +693,13 @@ def release_preservation(preservation: FootagePreservation) -> FootagePreservati
 
     from .models import CameraHold
 
+    # Lock the request too: transition() locks it, so a reopen cannot commit
+    # between the status check below and the bookmark deletes. Not the
+    # merged case: Postgres refuses FOR UPDATE on an outer join's null side.
     fp = (
-        FootagePreservation.objects.select_for_update(skip_locked=True, of=("self",))
+        FootagePreservation.objects.select_for_update(
+            skip_locked=True, of=("self", "request"),
+        )
         .select_related("request__merged_into")
         .filter(pk=preservation.pk)
         .first()
