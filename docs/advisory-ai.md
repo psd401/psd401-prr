@@ -705,7 +705,10 @@ https://docs.aws.amazon.com/bedrock/latest/userguide/data-retention.html).
 No CDK resource can hold this account setting, so it is an owned exception to
 "CDK is the only provisioning path": the CIO owns it, the runtime role may
 only read it (`bedrock:GetAccountDataRetention`), and `verify_advisory_ai`
-refuses to verify any model unless the mode reads `none`. A model whose
+refuses to verify any model unless the mode reads `none`. Every live call
+checks it too (`invoke_advisory_model`): if the mode ever reads anything else,
+the call fails closed as `provider_rejected` and no request or record text is
+sent. A model whose
 zero-retention access is not in effect for the account is refused under mode
 `none` and fails closed (`provider_rejected`), so nothing is retained. As of
 2026-11-05 that is Claude Fable 5.1: its public default requires `aws_review`

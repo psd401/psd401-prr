@@ -1818,6 +1818,11 @@ def invoke_advisory_model(
     into it (model evaluation prices runs from them).
     """
     _feature_enabled()
+    # Zero data retention before every call, not only at verification: if the
+    # account's mode ever stops reading `none`, no request or record text is
+    # sent (district decision, 2026-11-05).
+    if account_data_retention_mode() != "none":
+        raise AdvisoryProviderError("provider_rejected")
     system_message = _advisory_system_message(kind)
     try:
         client = boto3.client(

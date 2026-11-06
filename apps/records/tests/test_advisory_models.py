@@ -16,6 +16,7 @@ from django.test import TestCase, override_settings
 from apps.api.identity import apply_staff_roles
 from apps.api.models import StaffRole
 from apps.records.advisory_ai import (
+    AdvisoryProviderError,
     MAX_OUTPUT_TOKENS,
     execute_advisory_run,
     invoke_advisory_model,
@@ -101,6 +102,7 @@ class PerKindModelTests(TestCase):
         with override_settings(PRR_AI_MODEL_INTENT="us.openai.gpt-6.1-sol"), patch(
             "apps.records.advisory_ai.boto3.client",
         ) as client_factory:
+            client_factory.return_value.get_account_data_retention.return_value = {"mode": "none"}
             client_factory.return_value.converse.return_value = _converse_reply(INTENT)
             execute_advisory_run(run.pk)
 
@@ -145,6 +147,7 @@ class PerKindModelTests(TestCase):
         with override_settings(PRR_AI_MAX_OUTPUT_TOKENS_INTENT=2500), patch(
             "apps.records.advisory_ai.boto3.client",
         ) as client_factory:
+            client_factory.return_value.get_account_data_retention.return_value = {"mode": "none"}
             client_factory.return_value.converse.return_value = _converse_reply(INTENT)
             execute_advisory_run(run.pk)
         call = client_factory.return_value.converse.call_args.kwargs
@@ -174,6 +177,7 @@ class PerKindModelTests(TestCase):
 
     def test_an_explicit_model_overrides_the_kind_setting(self):
         with patch("apps.records.advisory_ai.boto3.client") as client_factory:
+            client_factory.return_value.get_account_data_retention.return_value = {"mode": "none"}
             client_factory.return_value.converse.return_value = _converse_reply(INTENT)
             invoke_advisory_model(
                 AdvisoryRun.Kind.REQUEST_INTENT,
@@ -184,6 +188,23 @@ class PerKindModelTests(TestCase):
         self.assertEqual(call["modelId"], "us.openai.gpt-6.1-terra")
         # The wire call itself never carries a temperature for GPT-6.1.
         self.assertNotIn("temperature", call["inferenceConfig"])
+
+    def test_no_request_text_is_sent_unless_bedrock_retains_nothing(self):
+        # Zero data retention is checked before every call, not only at
+        # verification: a mode changed later stops the calls (fails closed).
+        for mode in ("default", "aws_review", "inherit", ""):
+            with self.subTest(mode=mode), patch(
+                "apps.records.advisory_ai.boto3.client",
+            ) as client_factory:
+                client_factory.return_value.get_account_data_retention.return_value = {"mode": mode}
+                with self.assertRaises(AdvisoryProviderError) as raised:
+                    invoke_advisory_model(
+                        AdvisoryRun.Kind.REQUEST_INTENT,
+                        {"request_description": "Synthetic"},
+                        model_identifier="us.amazon.nova-2-lite-v1:0",
+                    )
+                self.assertEqual(raised.exception.code, "provider_rejected")
+                client_factory.return_value.converse.assert_not_called()
 
     def test_the_verify_command_can_name_a_model(self):
         out = StringIO()
