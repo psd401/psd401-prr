@@ -28,6 +28,16 @@ export function grantAdvisoryBedrockInference(
   role: iam.Role,
   account: string,
 ): void {
+  // Read-only: verify_advisory_ai confirms the account's data retention mode
+  // is `none` (zero retention, district decision 2026-11-05) before any model
+  // is verified. The mode itself is an account setting no CDK resource holds;
+  // the runtime role can read it but never change it.
+  role.addToPolicy(
+    new iam.PolicyStatement({
+      actions: ["bedrock:GetAccountDataRetention"],
+      resources: ["*"],
+    }),
+  );
   for (const model of ADVISORY_BEDROCK_MODELS) {
     const profileArn =
       `arn:aws:bedrock:${ADVISORY_BEDROCK_REGION}:${account}:inference-profile/` +
