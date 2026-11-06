@@ -132,6 +132,8 @@ function matches(setting: DistrictSetting, query: string) {
     .some((text) => text.toLowerCase().includes(needle))
 }
 
+const ADVANCED_OPEN_KEY = 'prr.settings.advancedOpen'
+
 const LIST_TYPES = ['domain_list', 'email_list', 'date_list']
 
 /** What one entry of a list setting is, as the hint names it. */
@@ -531,6 +533,22 @@ export function DistrictSettings() {
   const [draft, setDraft] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  // Remembered per browser, so a reload keeps the section as it was left.
+  const [advancedOpen, setAdvancedOpenState] = useState(() => {
+    try {
+      return window.localStorage.getItem(ADVANCED_OPEN_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
+  const setAdvancedOpen = (open: boolean) => {
+    setAdvancedOpenState(open)
+    try {
+      window.localStorage.setItem(ADVANCED_OPEN_KEY, String(open))
+    } catch {
+      // Storage refused (private window): the choice lasts this visit only.
+    }
+  }
 
   const list = useQuery({
     queryKey: ['district-settings'],
@@ -709,7 +727,15 @@ export function DistrictSettings() {
         </Card>
       )}
       {byCategory.length > 0 && (
-        <details open={searching} className="mb-6">
+        <details
+          open={searching || advancedOpen}
+          onToggle={(event) => {
+            // A search opens the section by itself; only a person's click is
+            // remembered, so saving a change does not fold it shut again.
+            if (!searching) setAdvancedOpen(event.currentTarget.open)
+          }}
+          className="mb-6"
+        >
           <summary className="mb-4 cursor-pointer font-heading text-lg font-bold text-ink">
             Advanced settings
           </summary>
