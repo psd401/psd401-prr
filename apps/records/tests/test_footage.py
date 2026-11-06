@@ -568,6 +568,34 @@ class HoldPathTests(TestCase):
         self.assertEqual(fp.state, FootagePreservation.State.HELD)
         self.assertEqual(fp.camera_holds.count(), 3)
 
+    def test_coverage_is_scored_against_when_the_bookmark_was_made(self):
+        """A camera bookmarked late in a long run is scored on the footage
+        that existed when its bookmark was made, not when the run began."""
+        run_start = timezone.now()
+        fp = FootagePreservation.objects.create(
+            request=make_request("camera footage"),
+            window_start=run_start - dt.timedelta(hours=1),
+            window_end=run_start + dt.timedelta(hours=1),
+            site_codes=["PHS"], site_resolution="Named: Peninsula High School",
+        )
+        clock = [run_start]
+
+        def slow_hold(cam, start, end, *, name, description):
+            clock[0] += dt.timedelta(minutes=30)  # earlier cameras took a while
+            # The camera stopped recording when the run began.
+            stored = (run_start - fp.window_start).total_seconds()
+            return alta.BookmarkHold(
+                id=f"bm-{cam.id}", coverage=(alta.HeadCoverage("0", stored, stored),),
+            )
+
+        with aware([camera("cam-1", "Gym", "PHS")], hold=slow_hold), \
+             mock.patch("django.utils.timezone.now", side_effect=lambda: clock[0]):
+            tasks.execute_footage_hold(fp.id)
+
+        hold = fp.camera_holds.get()
+        self.assertEqual(hold.state, CameraHold.State.GAP)
+        self.assertAlmostEqual(hold.coverage_fraction, 2 / 3)
+
     def test_a_crash_after_the_bookmark_is_made_keeps_its_id(self):
         prr = make_request(f"video at Peninsula High School on {days_ago(2)}")
         with aware([camera("cam-1", "Gym", "PHS")]), \
@@ -676,10 +704,10 @@ class HoldPathTests(TestCase):
         seen = []
         real = tasks._hold_one_camera
 
-        def spy(fp, cam, ch, *, now):
+        def spy(fp, cam, ch):
             row = FootagePreservation.objects.get(pk=fp.pk)
             seen.append((row.hold_run_started_at, row.hold_heartbeat_at))
-            real(fp, cam, ch, now=now)
+            real(fp, cam, ch)
 
         prr = make_request(f"camera footage of the gym on {days_ago(2)}")
         started = timezone.now()
@@ -697,12 +725,12 @@ class HoldPathTests(TestCase):
     def test_a_run_the_sweeper_took_over_never_overwrites_its_manual(self):
         real = tasks._hold_one_camera
 
-        def swept_midway(fp, cam, ch, *, now):
+        def swept_midway(fp, cam, ch):
             if cam.id == "cam-1":  # the sweeper fires while cam-1 is bookmarking
                 FootagePreservation.objects.filter(pk=fp.pk).update(
                     state=FootagePreservation.State.MANUAL, hold_run_started_at=None,
                 )
-            real(fp, cam, ch, now=now)
+            real(fp, cam, ch)
 
         prr = make_request(f"camera footage of the gym on {days_ago(2)}")
         with aware(), \

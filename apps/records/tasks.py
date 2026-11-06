@@ -1108,7 +1108,7 @@ def _bookmark_coverage(bookmark, *, sources, start, end, now):
     return min(fractions), notes, verified
 
 
-def _hold_one_camera(fp, cam, ch, *, now) -> None:
+def _hold_one_camera(fp, cam, ch) -> None:
     """Bookmark one camera from the later of the window start and its oldest
     retained footage, then record coverage. Never raises."""
     import datetime as dt
@@ -1123,7 +1123,7 @@ def _hold_one_camera(fp, cam, ch, *, now) -> None:
     notes = []
     if cam.status and cam.status != "CONNECTED":
         notes.append(f"Camera status {cam.status} when the hold ran.")
-    if end > now:
+    if end > timezone.now():
         notes.append("The window ends after the hold ran; later footage did not exist yet.")
 
     pruned_to = cam.pruned_to
@@ -1179,8 +1179,10 @@ def _hold_one_camera(fp, cam, ch, *, now) -> None:
     ch.clip_id = str(bookmark.id)[:100]
     ch.save(update_fields=["clip_id"])
     try:
+        # Score against when this bookmark was made: a camera reached late in
+        # a long run had more footage to store than existed when the run began.
         fraction, head_notes, verified = _bookmark_coverage(
-            bookmark, sources=cam.sources, start=start, end=end, now=now,
+            bookmark, sources=cam.sources, start=start, end=end, now=timezone.now(),
         )
         ch.coverage_fraction = fraction
         # An unverified head is never a clean hold.
@@ -1440,7 +1442,6 @@ def _run_footage_hold(fp, run: _HoldRun, *, only_new: bool, widened_from) -> Non
             _no_cameras_at(fp, empty)
         return
 
-    now = timezone.now()
     skip = {CameraHold.State.RELEASED, *CameraHold.BOOKMARKED_STATES}
     for cam in scoped:  # serial: one Aware bookmark at a time
         ch, created = CameraHold.objects.get_or_create(
@@ -1466,7 +1467,7 @@ def _run_footage_hold(fp, run: _HoldRun, *, only_new: bool, widened_from) -> Non
             continue
         ch.hold_claimed_at = claimed_at
         _heartbeat(fp, run)
-        _hold_one_camera(fp, cam, ch, now=now)
+        _hold_one_camera(fp, cam, ch)
 
     holds = fp.camera_holds.filter(excluded_at__isnull=True).exclude(
         state=CameraHold.State.RELEASED,
