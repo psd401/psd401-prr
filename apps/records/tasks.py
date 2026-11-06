@@ -1443,6 +1443,7 @@ def _run_footage_hold(fp, run: _HoldRun, *, only_new: bool, widened_from) -> Non
         return
 
     skip = {CameraHold.State.RELEASED, *CameraHold.BOOKMARKED_STATES}
+    added = []
     for cam in scoped:  # serial: one Aware bookmark at a time
         ch, created = CameraHold.objects.get_or_create(
             preservation=fp,
@@ -1453,6 +1454,8 @@ def _run_footage_hold(fp, run: _HoldRun, *, only_new: bool, widened_from) -> Non
                 "device_group_id": (cam.device_group_id or "")[:100],
             },
         )
+        if created:
+            added.append(ch.pk)
         # A recorded bookmark id means the bookmark exists: never make another.
         # A widen touches only cameras never tried before.
         if (only_new and not created) or ch.state in skip or ch.clip_id \
@@ -1523,19 +1526,30 @@ def _run_footage_hold(fp, run: _HoldRun, *, only_new: bool, widened_from) -> Non
     ):
         return
 
-    scope = f" at {triage.describe_sites(named)}" if named else " (district-wide)"
-    StatusEvent.objects.create(
-        request=prr,
-        note=(
-            f"Footage preservation{scope}: {held} camera(s) held, {gap} with "
-            f"footage gaps, {failed} failed, {not_retained} with no retained "
-            "footage for the window. Review the hold and exclude irrelevant "
-            "cameras (reason required)."
-        ),
-    )
-    notifications.notify_footage_hold_complete(
-        fp, held=held, gap=gap, failed=failed, not_retained=not_retained,
-    )
+    reported = holds
+    if only_new:
+        # A widen reports only the cameras it added: the earlier run already
+        # sent the completion and not-retained reviews for the rest.
+        reported = holds.filter(pk__in=added)
+        counts = Counter(reported.values_list("state", flat=True))
+        held = counts[CameraHold.State.HELD]
+        gap = counts[CameraHold.State.GAP]
+        not_retained = counts[CameraHold.State.NOT_RETAINED]
+        failed = counts[CameraHold.State.FAILED] + counts[CameraHold.State.PENDING]
+    if reported.exists():
+        scope = f" at {triage.describe_sites(named)}" if named else " (district-wide)"
+        StatusEvent.objects.create(
+            request=prr,
+            note=(
+                f"Footage preservation{scope}: {held} camera(s) held, {gap} with "
+                f"footage gaps, {failed} failed, {not_retained} with no retained "
+                "footage for the window. Review the hold and exclude irrelevant "
+                "cameras (reason required)."
+            ),
+        )
+        notifications.notify_footage_hold_complete(
+            fp, held=held, gap=gap, failed=failed, not_retained=not_retained,
+        )
     short = list(holds.filter(state__in=(
         CameraHold.State.FAILED, CameraHold.State.GAP, CameraHold.State.PENDING,
     )).order_by("pk"))
@@ -1556,7 +1570,7 @@ def _run_footage_hold(fp, run: _HoldRun, *, only_new: bool, widened_from) -> Non
             fp,
             cameras=[
                 _camera_line(ch)
-                for ch in holds.filter(state=CameraHold.State.NOT_RETAINED).order_by("pk")
+                for ch in reported.filter(state=CameraHold.State.NOT_RETAINED).order_by("pk")
             ],
         )
     if missing:

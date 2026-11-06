@@ -1207,6 +1207,45 @@ class WidenTests(TestCase):
                                     target=fp.request.number).exists()
         )
 
+    def test_a_widen_reports_only_the_cameras_it_added(self):
+        cams = [
+            camera("cam-1", "Gym Entrance", "PHS"),
+            camera("cam-2", "Staff Parking", "PHS", pruned_to=timezone.now()),
+            camera("cam-3", "Main Office", "KMS"),
+        ]
+        prr = make_request(f"video at Peninsula High School on {days_ago(3)}")
+        with aware(cams), mock.patch(NARROWED):
+            fp = preserve(prr)
+        self.assertEqual(fp.state, FootagePreservation.State.PARTIAL)
+
+        with aware(cams), \
+             mock.patch("apps.records.tasks.notifications.notify_footage_hold_complete") as done, \
+             mock.patch("apps.records.triage.record_not_retained_review") as not_retained:
+            self._widen(fp)
+
+        # cam-2's not-retained review already went out with the first run.
+        not_retained.assert_not_called()
+        done.assert_called_once()
+        self.assertEqual(
+            done.call_args.kwargs, {"held": 1, "gap": 0, "failed": 0, "not_retained": 0},
+        )
+        self.assertTrue(fp.request.events.filter(
+            note__contains="1 camera(s) held, 0 with footage gaps",
+        ).exists())
+
+    def test_a_widen_that_adds_no_camera_sends_no_completion_notice(self):
+        fp = self._phs_hold()
+        phs_only = [cam for cam in FAKE_CAMERAS if cam.site == "PHS"]
+        FootagePreservation.objects.filter(pk=fp.pk).update(
+            state=FootagePreservation.State.PARTIAL,
+        )
+        fp.refresh_from_db()
+        with aware(phs_only), \
+             mock.patch("apps.records.tasks.notifications.notify_footage_hold_complete") as done:
+            self._widen(fp)
+
+        done.assert_not_called()
+
     def test_widen_never_retries_a_camera_that_already_has_a_row(self):
         # A failed create may have landed; a widen must not make a second one.
         def fail_cam_2(cam, start, end, *, name, description):
