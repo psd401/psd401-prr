@@ -13,9 +13,10 @@ none. Retention is per camera: Aware's oldest retained footage (pruned_to).
                              when coverage is under 95%         request closes
   Named site(s)          →   Hold those sites only; URGENT      Widen to district-wide
                              scope notice says so               if any place is missed
-  Span > the cap         →   Hold the most recent               Refine the window, hold
-                             CAMERA_HOLD_MAX_SPAN_DAYS; URGENT  the rest by hand
-                             scope notice
+  Span > the cap         →   Hold CAMERA_HOLD_MAX_SPAN_DAYS:    Refine the window, hold
+                             the oldest retained days, or the   the rest by hand
+                             most recent when every retained
+                             day fits; URGENT scope notice
   Named site, 0 cameras  →   NO_CAMERAS: nothing bookmarked,    Adequate search: other
                              review + URGENT notice, never      recorders, SRO/office
                              "held"
@@ -332,16 +333,25 @@ def triage_footage(prr: PublicRecordsRequest) -> FootagePreservation | None:
         first, last = dates[0], dates[-1]
         if (last - first).days + 1 > cap:
             requested = _date_range(window_start, window_end)
-            window_start, window_end = calendar_day_window(
-                [last - dt.timedelta(days=cap - 1), last],
-            )
+            # The oldest retained days are pruned first, so hold them when the
+            # retained part alone exceeds the cap. Otherwise every retained
+            # day fits, and the rest of the cap reaches back past the flat
+            # retention setting, where some cameras still keep footage.
+            oldest_retained = max(first, timezone.localtime(retention_floor).date())
+            if (last - oldest_retained).days + 1 >= cap:
+                kept = [oldest_retained, oldest_retained + dt.timedelta(days=cap - 1)]
+                which = "oldest retained"
+            else:
+                kept = [last - dt.timedelta(days=cap - 1), last]
+                which = "most recent"
+            window_start, window_end = calendar_day_window(kept)
             held = _date_range(window_start, window_end)
-            note = f"{note}. Span clipped to the most recent {cap} days: {held}."
+            note = f"{note}. Span clipped to the {which} {cap} days: {held}."
             narrowed.append(
                 f"The request's dates span {requested}, longer than the "
-                f"{cap}-day automatic hold limit, so only {held} is held. "
-                "A human must refine the window and hold any earlier footage "
-                "the request covers."
+                f"{cap}-day automatic hold limit, so only {held} is held "
+                f"(the {which} days). A human must refine the window and hold "
+                "any other footage the request covers."
             )
     else:
         # Preservation-first: no parseable date -> hold everything that exists.

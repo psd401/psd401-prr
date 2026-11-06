@@ -1097,6 +1097,28 @@ class HoldSpanCapTests(TestCase):
         self.assertIn("2026-02-20..2026-03-23", reasons)
         self.assertIn("only 2026-02-21..2026-03-23 is held", reasons)
 
+    @override_settings(CAMERA_RETENTION_DAYS=90)
+    def test_a_long_retained_span_holds_its_oldest_days_first(self):
+        # 80 retained days, cap 31: the oldest days are pruned first, so they
+        # are held and a human holds the newer rest.
+        prr = make_request(f"Gym video from {days_ago(80)} through {days_ago(1)}.")
+        with aware(), mock.patch(NARROWED) as narrowed:
+            fp = preserve(prr)
+
+        held = triage._local_dates(fp)
+        self.assertEqual(held, f"{days_ago(80)}..{days_ago(50)}")
+        reasons = " ".join(narrowed.call_args.kwargs["reasons"])
+        self.assertIn(f"only {days_ago(80)}..{days_ago(50)} is held", reasons)
+        self.assertIn("oldest", reasons)
+
+    @override_settings(CAMERA_RETENTION_DAYS=90)
+    def test_a_span_starting_before_retention_holds_from_the_oldest_retained_day(self):
+        prr = make_request(f"Gym video from {days_ago(200)} through {days_ago(1)}.")
+        with aware(), mock.patch(NARROWED):
+            fp = preserve(prr)
+
+        self.assertEqual(triage._local_dates(fp), f"{days_ago(90)}..{days_ago(60)}")
+
     def test_the_no_date_window_is_unchanged(self):
         prr = make_request("I want the surveillance video of the incident at the gym")
         with aware(), mock.patch(NARROWED) as narrowed:

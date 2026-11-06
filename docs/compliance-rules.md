@@ -121,7 +121,11 @@ then PARTIAL, never HELD. PARTIAL sends an URGENT notice naming each failed,
 gap, or unverified camera.
 
 A request whose dates span more than `CAMERA_HOLD_MAX_SPAN_DAYS` (default 31)
-is held for the most recent days of that span only. A hold narrowed this way,
+is held for that many days only. When the days inside `CAMERA_RETENTION_DAYS`
+alone exceed the cap, the oldest of them are held, because they are pruned
+first. Otherwise the hold keeps every retained day and reaches back from the
+last requested date, since some cameras keep footage longer than the setting.
+A hold narrowed this way,
 or narrowed to the sites the request names, writes a StatusEvent and sends one
 URGENT scope notice to facilities, the PRA supervisor, and the Records
 Officers. A Records Officer widens a site-narrowed hold to every camera
