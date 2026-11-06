@@ -649,7 +649,8 @@ class StaffNotificationSignalTests(TestCase):
         old = (timezone.localdate() - dt.timedelta(days=30)).isoformat()
         request = make_request(description=f"camera footage on {old}")
 
-        triage.triage_footage(request)
+        with self.captureOnCommitCallbacks(execute=True):
+            triage.triage_footage(request)
 
         enqueue.assert_called_once()
         self.assertEqual(

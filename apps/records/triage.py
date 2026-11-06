@@ -360,7 +360,11 @@ def triage_footage(prr: PublicRecordsRequest) -> FootagePreservation | None:
           sites=fp.site_codes, window=_local_dates(fp))
     if narrowed:
         record_scope_narrowed(fp, reasons=narrowed)
-    cast(Task, execute_footage_hold).delay(fp.id)
+    # A worker must not read a preservation row the caller has not committed.
+    preservation_id = fp.id
+    transaction.on_commit(
+        lambda: cast(Task, execute_footage_hold).delay(preservation_id)
+    )
     fp.refresh_from_db()
     return fp
 

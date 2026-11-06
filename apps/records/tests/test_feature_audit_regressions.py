@@ -103,8 +103,9 @@ class FeatureAuditRegressionTests(TestCase):
         with patch(
             "apps.integrations.avigilon.client.list_device_cameras",
             return_value=[pruned],
-        ):
+        ), self.captureOnCommitCallbacks(execute=True):
             preservation = triage_footage(request)
+        preservation.refresh_from_db()
 
         self.assertEqual(preservation.state, FootagePreservation.State.EXPIRED)
         self.assertNotIn(

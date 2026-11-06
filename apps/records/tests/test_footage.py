@@ -91,10 +91,18 @@ def make_request(description: str):
     return PublicRecordsRequest.objects.create(requester=r, description=description)
 
 
-def preserve(prr) -> FootagePreservation:
+def preserve_uncommitted(prr) -> FootagePreservation:
     """triage_footage for a request the test knows is a footage request."""
     fp = triage.triage_footage(prr)
     assert fp is not None, "expected a footage request"
+    return fp
+
+
+def preserve(prr) -> FootagePreservation:
+    """Triage as intake does, then commit, so the hold task runs."""
+    with TestCase.captureOnCommitCallbacks(execute=True):
+        fp = preserve_uncommitted(prr)
+    fp.refresh_from_db()
     return fp
 
 
@@ -906,6 +914,21 @@ NARROWED = "apps.records.triage.notifications.notify_footage_scope_narrowed"
 
 
 @override_settings(CELERY_TASK_ALWAYS_EAGER=True, CAMERA_RETENTION_DAYS=10)
+class EnqueueAfterCommitTests(TestCase):
+    def test_the_hold_task_is_not_enqueued_until_intake_commits(self):
+        # A worker must never read a preservation row that has not committed.
+        prr = make_request(f"video at Peninsula High School on {days_ago(1)}")
+        with mock.patch("apps.records.tasks.execute_footage_hold.delay") as delay, \
+             mock.patch(NARROWED):
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                fp = preserve_uncommitted(prr)
+            delay.assert_not_called()
+            for callback in callbacks:
+                callback()
+
+        delay.assert_called_once_with(fp.id)
+
+
 class HoldSpanCapTests(TestCase):
     """A birth date beside the incident date must not become an 11-year
     bookmark on every camera: hold the most recent days, and tell a human."""
