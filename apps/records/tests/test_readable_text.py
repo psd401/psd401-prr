@@ -55,6 +55,16 @@ class ReadableTextTests(SimpleTestCase):
             "If a < b and c > d\n\nDone",
         )
 
+    def test_keeps_autolinks_in_angle_brackets(self):
+        raw = (
+            "See <https://example.org/permit-12>\n"
+            "Contact <mailto:jane@example.org> or <v:background fill=\"t\"/>"
+        )
+        self.assertEqual(
+            readable_text(raw),
+            "See <https://example.org/permit-12>\nContact <mailto:jane@example.org> or",
+        )
+
     def test_plain_text_is_unchanged(self):
         text = "Date: Fri, 28 Aug 2026\nFrom: someone@example.org\n\nThank you."
         self.assertEqual(readable_text(text), text)
