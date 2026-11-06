@@ -470,7 +470,9 @@ export function RecordItems({
   const [selected, setSelected] = useState<RecordItem | null>(null)
   // Distinct from `listPage`: this is the page *inside* the selected PDF.
   const [pageNumber, setPageNumber] = useState(1)
-  const [reviewDraft, setReviewDraft] = useState('responsive')
+  // Empty until a person (or a completed AI suggestion) picks one: a blind
+  // default would let one click confirm a judgment nobody made.
+  const [reviewDraft, setReviewDraft] = useState('')
   const [reviewDraftTouched, setReviewDraftTouched] = useState(false)
   const [withholdingExemption, setWithholdingExemption] = useState('')
   const [redactionExemption, setRedactionExemption] = useState('')
@@ -557,7 +559,7 @@ export function RecordItems({
     setSelected(item)
     setPageNumber(1)
     setReviewDraft(
-      item.review_state === 'unreviewed' ? 'responsive' : item.review_state,
+      item.review_state === 'unreviewed' ? '' : item.review_state,
     )
     setReviewDraftTouched(false)
     setWithholdingExemption('')
@@ -912,7 +914,7 @@ export function RecordItems({
     hydratedTarget.current = `${request}:${item.id}`
     setSelected(item)
     setPageNumber(1)
-    setReviewDraft(item.review_state === 'unreviewed' ? 'responsive' : item.review_state)
+    setReviewDraft(item.review_state === 'unreviewed' ? '' : item.review_state)
     setReviewDraftTouched(false)
     setWithholdingExemption('')
     setRedactionExemption('')
@@ -1678,7 +1680,7 @@ export function RecordItems({
                   {responsivenessAdvisory.data?.enabled
                     && responsivenessAdvisory.data.latest === null && (
                     <p className="text-sm text-ink-muted">
-                      Automatic analysis is queued as soon as this record becomes review-ready.
+                      No AI suggestion for this record yet.
                     </p>
                   )}
                   {['pending', 'running'].includes(
@@ -1729,6 +1731,7 @@ export function RecordItems({
                         setReviewDraftTouched(true)
                       }}
                     >
+                      <option value="" disabled>Choose an outcome</option>
                       {HUMAN_REVIEW_STATES.map((state) => (
                         <option key={state.value} value={state.value}>{state.label}</option>
                       ))}
@@ -1754,6 +1757,7 @@ export function RecordItems({
                     onClick={() => reviewMutation.mutate()}
                     disabled={
                       reviewMutation.isPending
+                      || reviewDraft === ''
                       || (reviewDraft === 'withheld' && !withholdingExemption)
                     }
                   >

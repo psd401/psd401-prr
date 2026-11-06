@@ -171,7 +171,16 @@ lines; **Show full request** shows all of it. The text is never edited.
   human action and footage is never auto-denied.
 - **Review**: **Review one by one** (the keyboard flight) or the **Record
   list** with filters, clusters, redaction, exemption citations, and second
-  review. Admins see the record list read-only.
+  review. Admins see the record list read-only. Review one by one shows each
+  record as readable text under its subject (email markup removed; **t**
+  switches to the page image), the AI suggestion when there is one, and a
+  progress bar for the whole case. **r** or **n** decides and moves to the
+  next record; identical copies on the page (same text, subject, and sending
+  domain) are folded into one row and
+  decided together. **f** opens a full-screen focus mode (**Esc** leaves it).
+  When every record has a decision the stage says *All done*. In the record
+  dialog nothing is chosen until you pick an outcome, unless the AI has a
+  completed suggestion.
 - **Redact**: the case's AI redaction proposals grouped by exemption and
   pattern.
 - **Release**: installments, fees, packages, exemption-log readiness, and
