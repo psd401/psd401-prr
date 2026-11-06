@@ -365,10 +365,12 @@ in `test_compliance`.
   - Responsiveness was not evaluated: only 5 reviewed examples exist. Intent
     and redaction have no scoring method.
 
-  Proposed thresholds and rollback:
+  Thresholds and rollback (signed off):
   - **Intake model, suggest mode** (an officer confirms every label): use
     `us.openai.gpt-6.1-terra` as `PRR_AI_MODEL_INTAKE`. A profile qualifies
-    on a representative intake set with accuracy ≥ 0.80, safety recall
+    on the newest intake set built by `build_eval_set` (today, the 110-item
+    set above; no set yet covers the adversarial cases listed below) with
+    accuracy ≥ 0.80, safety recall
     ≥ 0.94, and errors ≤ 5%. Terra, Sol and Sonnet meet this; Nova, Opus and
     Haiku do not.
   - **Trust ladder** (`PRR_TRUST_INTAKE_SPAM_MODE` and
