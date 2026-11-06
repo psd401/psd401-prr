@@ -325,6 +325,20 @@ def max_output_tokens(kind: str) -> int:
     return MAX_OUTPUT_TOKENS.get(kind, 1000)
 
 
+def inference_config(kind: str, model_identifier: str) -> dict[str, Any]:
+    """The Converse inference settings for one call.
+
+    Only Amazon Nova is sent ``temperature`` 0. The Claude 5.x and GPT-6.1
+    models reject the field outright (production, 2026-11-05), so asking them
+    for it would fail every run; they are already steered by the instruction
+    and every reply is still validated against its schema.
+    """
+    config: dict[str, Any] = {"maxTokens": max_output_tokens(kind)}
+    if ".nova-" in f".{model_identifier}":
+        config["temperature"] = 0
+    return config
+
+
 def model_for_kind(kind: str) -> str:
     """The Bedrock model a new run of ``kind`` is asked of and recorded with."""
     setting = _MODEL_SETTING_FOR_KIND.get(kind)
@@ -1813,10 +1827,7 @@ def invoke_advisory_model(
                     ],
                 },
             ],
-            inferenceConfig={
-                "maxTokens": max_output_tokens(kind),
-                "temperature": 0,
-            },
+            inferenceConfig=inference_config(kind, model_identifier),
             requestMetadata={
                 "application": "psd401-prr",
                 "feature": "advisory",

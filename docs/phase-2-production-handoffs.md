@@ -318,6 +318,14 @@ in `test_compliance`.
   owner (issue #32). Until #32 records that evidence, every per-kind
   `PRR_AI_MODEL_*` setting stays blank and falls back to `PRR_AI_MODEL`;
   choose each kind's model from the evaluation, not before it.
+- **2026-11-05, zero data retention.** The CIO set the account's Bedrock data
+  retention mode to `none` (zero retention) in `us-west-2`, `us-east-1`, and
+  `us-east-2`. The Marketplace agreements for all six Anthropic and OpenAI
+  profiles were accepted the same day. Under mode `none`, Opus 5.5, Sonnet
+  5.5, Haiku 5.5, GPT-6.1 Sol and GPT-6.1 Terra answer from production; Claude
+  Fable 5.1 is still refused ("data retention mode 'none' is not available")
+  although the district reports zero-retention access for all models, so it
+  is not used until AWS applies that access and its verification passes.
 - Evaluate representative request text and OCR, including prompt-injection,
   student, personnel, health, legal, multilingual, empty, and adversarial
   examples. Record accuracy and harm thresholds plus rollback ownership.

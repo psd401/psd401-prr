@@ -696,6 +696,28 @@ in `us-east-1`, `us-east-2`, and `us-west-2` only:
 - `us.openai.gpt-6.1-sol`
 - `us.openai.gpt-6.1-terra`
 
+**Zero data retention (district decision, 2026-11-05).** The district AWS
+account's Bedrock data retention mode is `none` in `us-west-2`, `us-east-1`,
+and `us-east-2` (`PutAccountDataRetention`): no prompt or completion is written
+to durable storage by AWS or shared with a model provider. A model whose
+zero-retention access is not in effect for the account is refused under mode
+`none` and fails closed (`provider_rejected`), so nothing is retained. As of
+2026-11-05 that is Claude Fable 5.1: its public default requires `aws_review`
+(AWS retention for human review), and Bedrock still answers "data retention
+mode 'none' is not available for this model" although the district reports
+zero-retention access for all models. It stays in the grant but must not be
+set until `verify_advisory_ai --model us.anthropic.claude-fable-5-1` passes.
+
+Only Amazon Nova is sent `temperature` 0
+(`advisory_ai.inference_config`). The Claude 5.x and GPT-6.1 models reject the
+field outright, so every call to them would fail if it were sent.
+
+Each new Anthropic or OpenAI model also needs a one-time AWS Marketplace
+subscription for the account. It is completed by accepting the model's
+agreement and making one call from a role with
+`aws-marketplace:ViewSubscriptions` and `aws-marketplace:Subscribe`; the
+application's runtime role deliberately has neither.
+
 Before pointing a setting at a model for the first time, run
 `python manage.py verify_advisory_ai --model <profile id>` in production. It
 sends synthetic data only and confirms the model answers through the Converse

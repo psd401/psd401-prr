@@ -150,6 +150,28 @@ class PerKindModelTests(TestCase):
         call = client_factory.return_value.converse.call_args.kwargs
         self.assertEqual(call["inferenceConfig"]["maxTokens"], 2500)
 
+    def test_only_nova_is_sent_a_temperature(self):
+        # Production, 2026-11-05: the Claude 5.x and GPT-6.1 models reject
+        # the field outright ("temperature is deprecated for this model" /
+        # "doesn't support the temperature field"); Nova keeps temperature 0.
+        from apps.records.advisory_ai import inference_config
+
+        self.assertEqual(
+            inference_config(AdvisoryRun.Kind.REQUEST_INTENT, "us.amazon.nova-2-lite-v1:0"),
+            {"maxTokens": 2000, "temperature": 0},
+        )
+        for model in (
+            "us.anthropic.claude-opus-5-5",
+            "us.anthropic.claude-haiku-5-5",
+            "us.openai.gpt-6.1-sol",
+            "us.openai.gpt-6.1-terra",
+        ):
+            with self.subTest(model=model):
+                self.assertEqual(
+                    inference_config(AdvisoryRun.Kind.REQUEST_INTENT, model),
+                    {"maxTokens": 2000},
+                )
+
     def test_an_explicit_model_overrides_the_kind_setting(self):
         with patch("apps.records.advisory_ai.boto3.client") as client_factory:
             client_factory.return_value.converse.return_value = _converse_reply(INTENT)
