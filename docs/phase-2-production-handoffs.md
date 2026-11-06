@@ -326,6 +326,72 @@ in `test_compliance`.
   Fable 5.1 is still refused ("data retention mode 'none' is not available")
   although the district reports zero-retention access for all models, so it
   is not used until AWS applies that access and its verification passes.
+- **2026-11-06, intake model evaluation (#32). Status: proposed, awaiting
+  the CIO's sign-off.** `evaluate_models` scored six profiles on one intake
+  `EvaluationSet` of 110 past production decisions (78 `new`, 14 `existing`,
+  18 `not_request`). The runs are `f17a4264-46ec-4017-9c72-ca07c8bca4d9` (Nova,
+  Sonnet) and `df96e815-f8bf-4d45-8d20-38d7736a22d8` (the rest), stored as
+  `EvaluationRun` rows under **Oversight → AI evaluation**, with zero data
+  retention in force. Fable 5.1 was not run (see the entry above).
+
+  | Profile | Correct /110 | Safety recall | Real requests called not-a-request | Not-a-request precision / recall | Right target /14 | Errors | p50 / p95 ms |
+  |---|---|---|---|---|---|---|---|
+  | `us.openai.gpt-6.1-terra` | 94 (0.855) | 0.946 | 5 | 0.77 / 0.94 | 7 | 0 | 1483 / 3288 |
+  | `us.openai.gpt-6.1-sol` | 92 (0.836) | 0.946 | 5 | 0.76 / 0.89 | 7 | 0 | 3335 / 6401 |
+  | `us.anthropic.claude-sonnet-5-5` | 90 (0.818) | 0.946 | 2 | 0.88 / 0.78 | 7 | 4 | 2439 / 6041 |
+  | `us.anthropic.claude-opus-5-5` | 86 (0.782) | 0.891 | 2 | 0.89 / 0.89 | 7 | 8 | 6090 / 9817 |
+  | `us.amazon.nova-2-lite-v1:0` | 85 (0.773) | 0.946 | 4 | 0.78 / 0.78 | 5 | 1 | 1336 / 2384 |
+  | `us.anthropic.claude-haiku-5-5` | 84 (0.764) | 0.837 | 7 | 0.70 / 0.89 | 5 | 8 | 3828 / 5062 |
+
+  Safety recall counts a failed call as a miss, so the Claude errors lower it.
+  Precision and recall on not-a-request are computed from each run's
+  confusion matrix, the same way `latest_not_request_metrics` computes them.
+
+  Limits of this evidence:
+  - With 110 items, a difference of a few items is within noise. Terra and
+    Sol differ by two.
+  - Only 14 `existing` and 18 `not_request` examples are in the set.
+  - Evaluation runs do not record per-item confidence, so the 95% automatic
+    closure floor cannot be judged from them.
+  - Error reasons are not kept. The Claude errors are unexplained;
+    reasoning output running into the 1000-token intake budget is a
+    hypothesis, not a finding.
+  - Bedrock reports a mean of 36 input tokens for both OpenAI profiles
+    against roughly 10,000 for the Claude profiles on the same inputs, so the
+    OpenAI token counts are not credible. No prices were given, so no cost
+    was computed.
+  - The set is past decisions only. It does not cover the prompt-injection,
+    multilingual, empty, and adversarial examples listed below.
+  - Responsiveness was not evaluated: only 5 reviewed examples exist. Intent
+    and redaction have no scoring method.
+
+  Proposed thresholds and rollback:
+  - **Intake model, suggest mode** (an officer confirms every label): use
+    `us.openai.gpt-6.1-terra` as `PRR_AI_MODEL_INTAKE`. A profile qualifies
+    on a representative intake set with accuracy ≥ 0.80, safety recall
+    ≥ 0.94, and errors ≤ 5%. Terra, Sol and Sonnet meet this; Nova, Opus and
+    Haiku do not.
+  - **Trust ladder** (`PRR_TRUST_INTAKE_SPAM_MODE` and
+    `PRR_TRUST_INTAKE_NON_REQUEST_MODE`) stays at `suggest`. Moving either
+    to `auto` needs all of the following:
+    - not-a-request precision ≥ 0.98, measured at the confidence floor in
+      force;
+    - at least 50 `not_request` examples;
+    - no real request in the set called not-a-request at or above that
+      floor.
+
+    No profile is close: the best precision is 0.89, and every profile
+    called at least two real requests not-a-request.
+  - **Rollback:** clear `PRR_AI_MODEL_INTAKE`, which falls back to
+    `PRR_AI_MODEL`, or set a trust mode back to `suggest`. Both are in-app
+    settings changes with a reason, and neither needs a deploy. Trigger a
+    rollback when either of these happens:
+    - officers answer "Not correct" on more than 1 in 4 of the last 20
+      intake suggestions they answered (`AdvisoryFeedback`; there is no
+      report screen for intake agreement yet);
+    - a real request is closed as not a request without a person.
+
+    Owner: the CIO / Public Records Officer.
 - Evaluate representative request text and OCR, including prompt-injection,
   student, personnel, health, legal, multilingual, empty, and adversarial
   examples. Record accuracy and harm thresholds plus rollback ownership.
