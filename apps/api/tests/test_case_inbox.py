@@ -76,6 +76,28 @@ class CaseInboxViewTests(StaffApiTestCase):
             make_request(description=f"Another open case {index}", status=RequestStatus.ACKNOWLEDGED)
         self.assertEqual(queries_for_list(), few)
 
+    def test_today_can_ask_for_every_open_case_in_one_page(self):
+        for index in range(55):
+            make_request(description=f"Open case {index}", status=RequestStatus.ACKNOWLEDGED)
+
+        default = self.client.get("/api/staff/requests/", {"status": "open"}).json()
+        self.assertEqual(len(default["results"]), 50)
+        self.assertIsNotNone(default["next"])
+
+        whole = self.client.get(
+            "/api/staff/requests/", {"status": "open", "page_size": 200},
+        ).json()
+        self.assertEqual(len(whole["results"]), whole["count"])
+        self.assertIsNone(whole["next"])
+
+        # A page is never larger than 200, whatever is asked for.
+        for index in range(150):
+            make_request(description=f"More {index}", status=RequestStatus.ACKNOWLEDGED)
+        capped = self.client.get(
+            "/api/staff/requests/", {"status": "open", "page_size": 5000},
+        ).json()
+        self.assertEqual(len(capped["results"]), 200)
+
     def test_open_cases_view_lists_each_open_case_once_flagged_first(self):
         response = self.client.get("/api/staff/requests/", {"queue": "inbox"})
 

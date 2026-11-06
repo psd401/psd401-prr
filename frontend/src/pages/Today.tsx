@@ -51,8 +51,8 @@ export function Today() {
   const [draft, setDraft] = useState('')
   const [search, setSearch] = useState('')
   const query = search
-    ? `search=${encodeURIComponent(search)}&ordering=due`
-    : 'status=open&ordering=due'
+    ? `search=${encodeURIComponent(search)}&ordering=due&page_size=200`
+    : 'status=open&ordering=due&page_size=200'
   const cases = useQuery({
     queryKey: ['today', search],
     queryFn: () => api<Page<TodayCase> | TodayCase[]>(`/api/staff/requests/?${query}`),
