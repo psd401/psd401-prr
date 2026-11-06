@@ -181,11 +181,20 @@ lines; **Show full request** shows all of it. The text is never edited.
   next record; identical copies on the page (same text, subject, and sending
   domain) are folded into one row and
   decided together. **f** opens a full-screen focus mode (**Esc** leaves it).
-  When every record has a decision the stage says *All done*. In the record
+  When every record has a decision the stage says *All done*, with **Go to
+  Redact** (and **Nothing to redact: go to Release**). In the record
   dialog nothing is chosen until you pick an outcome, unless the AI has a
   completed suggestion.
-- **Redact**: the case's AI redaction proposals grouped by exemption and
-  pattern.
+- **Redact**: the case's AI redaction proposal groups, when there are any,
+  above the redaction workspace: the case's responsive records on the left,
+  the selected record's page in the centre, and the legal basis, note, and
+  **Add redaction** on the right. Drag a box over what to hide, pick the basis
+  (it stays chosen for the next record), and press **Enter**. **j**/**k** move
+  between records, **←**/**→** turn pages, **Esc** clears a draft; zoom goes
+  to 200%. The record's redactions are listed under the form with **Remove**
+  (a reason is required), **Approve second review** when the basis needs one,
+  and **Build redacted PDF**. AI suggestions for the record appear only when
+  there are undecided ones.
 - **Release**: installments, fees, packages, exemption-log readiness, and
   downloads. Opening it does not release records.
 - **Close**: the read-only closure blocker report and the same closing actions

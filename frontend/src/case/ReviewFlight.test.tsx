@@ -344,7 +344,9 @@ describe('fast review (UX plan step 3)', () => {
     fastReview({ unreviewed: [], all: 12 })
 
     expect(await screen.findByText('All done')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Go to Release' }))
+    expect(screen.getByRole('link', { name: 'Go to Redact' }))
+      .toHaveAttribute('href', '/requests/PRR-2026-0001/redact')
+    expect(screen.getByRole('link', { name: 'Nothing to redact: go to Release' }))
       .toHaveAttribute('href', '/requests/PRR-2026-0001/release')
     expect(screen.queryByText('No records to review here.')).not.toBeInTheDocument()
   })

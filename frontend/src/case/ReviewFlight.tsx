@@ -445,12 +445,20 @@ export function ReviewFlight({ number }: { number: string }) {
             <p className="mt-2 font-editorial text-lg text-ink-muted">
               Every record on this case has a decision.
             </p>
-            <Link
-              to={`/requests/${number}/release`}
-              className="nx-btn nx-btn--primary mt-5 inline-flex h-auto min-h-11 px-5 py-2"
-            >
-              Go to Release
-            </Link>
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+              <Link
+                to={`/requests/${number}/redact`}
+                className="nx-btn nx-btn--primary inline-flex h-auto min-h-11 px-5 py-2"
+              >
+                Go to Redact
+              </Link>
+              <Link
+                to={`/requests/${number}/release`}
+                className="nx-btn nx-btn--secondary bg-transparent inline-flex h-auto min-h-11 px-5 py-2"
+              >
+                Nothing to redact: go to Release
+              </Link>
+            </div>
           </div>
         </Card>
       )}

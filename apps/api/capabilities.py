@@ -1011,6 +1011,7 @@ CAPABILITIES = (
         [
             "/configuration/exemptions",
             "/requests/:number/messages",
+            "/requests/:number/redact",
             "/requests/:number/review",
         ],
         mcp_tool="psd_prr_exemptions_list",
@@ -1078,7 +1079,7 @@ CAPABILITIES = (
         "Browse and filter the processed-record inventory.",
         "GET",
         "/api/staff/record-items/",
-        ["/requests/:number/review", "/requests/:number/release"],
+        ["/requests/:number/review", "/requests/:number/redact", "/requests/:number/release"],
         mcp_tool="psd_prr_record_items_list",
     ),
     _capability(
@@ -1326,7 +1327,7 @@ CAPABILITIES = (
         "Read the latest coordinate-grounded AI redaction candidates and their named human dispositions.",
         "GET",
         "/api/staff/record-items/{id}/advisory-redactions/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         constraints=["advisory_only", "integrity_verified"],
     ),
     _capability(
@@ -1382,7 +1383,7 @@ CAPABILITIES = (
         "Render one non-PDF record into the reviewable PDF the preview and redaction burn-in require, leaving the original record untouched.",
         "POST",
         "/api/staff/record-items/{id}/build-derivative/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         risk="moderate",
         constraints=[
             "append_only_audit",
@@ -1393,7 +1394,7 @@ CAPABILITIES = (
         "Burn every marked interval into a released copy of an audio or video record by re-encoding, retaining the original and a manifest of exactly what was applied.",
         "POST",
         "/api/staff/record-items/{id}/render-media-redactions/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1408,7 +1409,7 @@ CAPABILITIES = (
         "Record a named human decision, with stated basis and reasoning, for a record no available renderer can open.",
         "POST",
         "/api/staff/record-items/{id}/opaque-disposition/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1423,7 +1424,7 @@ CAPABILITIES = (
         "Stream one audio or video record to the staff reviewer under the same role check and no-store headers as a page raster.",
         "GET",
         "/api/staff/record-items/{id}/stream/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         risk="read",
     ),
     _capability(
@@ -1431,7 +1432,7 @@ CAPABILITIES = (
         "List the timed withholdings marked on audio and video records.",
         "GET",
         "/api/staff/media-redactions/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         risk="read",
     ),
     _capability(
@@ -1439,7 +1440,7 @@ CAPABILITIES = (
         "Mark one interval of an audio or video record for withholding, with the exemption citation the log is built from.",
         "POST",
         "/api/staff/media-redactions/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1454,7 +1455,7 @@ CAPABILITIES = (
         "Inspect verified PDF page-count metadata without exposing an object-store URL.",
         "GET",
         "/api/staff/record-items/{id}/preview-metadata/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         constraints=["integrity_verified", "append_only_audit"],
     ),
     _capability(
@@ -1462,7 +1463,7 @@ CAPABILITIES = (
         "Render one verified candidate-record page as a no-store raster preview.",
         "GET",
         "/api/staff/record-items/{id}/preview-page/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         constraints=["integrity_verified", "append_only_audit"],
     ),
     _capability(
@@ -1493,14 +1494,14 @@ CAPABILITIES = (
         "Read exemption-backed normalized redaction regions for one record.",
         "GET",
         "/api/staff/redactions/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
     ),
     _capability(
         "redactions.create",
         "Add one normalized redaction region after human review.",
         "POST",
         "/api/staff/redactions/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1514,7 +1515,7 @@ CAPABILITIES = (
         "Void a mistaken redaction while retaining its row, reason, and audit evidence.",
         "POST",
         "/api/staff/redactions/{id}/void/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=["substantive_reason", "append_only_audit"],
@@ -1524,7 +1525,7 @@ CAPABILITIES = (
         "Approve a heightened-risk review as a distinct named reviewer.",
         "POST",
         "/api/staff/record-items/{id}/second-review/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1538,7 +1539,7 @@ CAPABILITIES = (
         "Build one immutable image-only PDF from the approved redaction plan.",
         "POST",
         "/api/staff/record-items/{id}/render-redactions/",
-        ["/requests/:number/review"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
