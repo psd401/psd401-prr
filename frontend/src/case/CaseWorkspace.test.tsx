@@ -898,6 +898,7 @@ describe('CaseWorkspace stage rail (#45)', () => {
     await user.click(screen.getByRole('button', { name: 'Supersede' }))
     const submit = screen.getByRole('button', { name: 'Supersede unreviewed records' })
     expect(submit).toBeDisabled()
+    expect(screen.getByText('This takes 37 unreviewed records out of review.')).toBeInTheDocument()
     await user.type(screen.getByLabelText('Reason'), 'The export matched every staff mailbox.')
     await user.click(submit)
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(

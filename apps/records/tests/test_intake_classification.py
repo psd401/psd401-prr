@@ -16,6 +16,7 @@ from rest_framework.test import APIClient
 
 from apps.api.identity import apply_staff_roles
 from apps.api.models import StaffRole
+from apps.correspondence.models import Correspondence, InboundCorrespondenceReceipt
 from apps.records.advisory_ai import (
     AdvisoryOutputInvalid,
     _build_advisory_input,
@@ -98,6 +99,128 @@ class IntakeClassificationInputTests(_Fixture):
         before = _build_advisory_input(run).fingerprint
         self._case(days_ago=-1)
         self.assertEqual(_build_advisory_input(run).fingerprint, before)
+
+
+class IntakeEmailEvidenceTests(_Fixture):
+    """#33: an emailed case's header and thread evidence reaches the model."""
+
+    def _sent(self, case):
+        return Correspondence.objects.create(
+            request=case,
+            direction=Correspondence.Direction.OUTBOUND,
+            kind=Correspondence.Kind.GENERAL,
+            status=Correspondence.Status.SENT,
+            draft_subject="Your request",
+            draft_body="We are working on it.",
+            approved_subject="Your request",
+            approved_body="We are working on it.",
+            created_by=self.officer,
+            approved_by=self.officer,
+            queued_by=self.officer,
+            approved_at=case.received_at,
+            queued_at=case.received_at,
+            sent_at=case.received_at,
+        )
+
+    def _emailed(self, case, *, subject="Re: Your request", in_reply_to="",
+                 references=(), headers=None):
+        now = timezone.now()
+        message_id = f"intake-{case.pk}"
+        case.channel = "email"
+        case.save(update_fields=["channel"])
+        correspondence = Correspondence.objects.create(
+            request=case,
+            direction=Correspondence.Direction.INBOUND,
+            kind=Correspondence.Kind.GENERAL,
+            status=Correspondence.Status.RECEIVED,
+            received_subject=subject,
+            received_body=case.description,
+            received_sender="Pat Example <pat@news.example.org>",
+            received_recipients=["publicrecords@psd401.net"],
+            received_headers=headers or {},
+            received_at=case.received_at,
+            matched_at=now,
+            provider="gmail",
+            provider_account="publicrecords@psd401.net",
+            provider_message_id=message_id,
+        )
+        InboundCorrespondenceReceipt.objects.create(
+            provider="gmail",
+            provider_account="publicrecords@psd401.net",
+            provider_message_id=message_id,
+            in_reply_to=in_reply_to,
+            references=list(references),
+            received_at=case.received_at,
+            envelope_recipients=["publicrecords@psd401.net"],
+            parsing_status=InboundCorrespondenceReceipt.ParsingStatus.PARSED,
+            matching_status=InboundCorrespondenceReceipt.MatchingStatus.MATCHED,
+            match_method=InboundCorrespondenceReceipt.MatchMethod.EMAIL_INTAKE,
+            matched_request=case,
+            matched_correspondence=correspondence,
+            matched_at=now,
+            quarantined=False,
+            raw_message_size=128,
+            raw_message_sha256="a" * 64,
+            payload_sha256="b" * 64,
+            idempotency_key=f"gmail:poll:{message_id}",
+            submitted_by=self.officer,
+            completed_at=now,
+        )
+
+    def _payload(self, case):
+        run = AdvisoryRun(kind=KIND, request=case, model_identifier="m", input_sha256="")
+        return _build_advisory_input(run).payload
+
+    def test_a_reply_to_an_earlier_case_names_that_case(self):
+        # Outside the 180-day lookback, so only the thread evidence finds it.
+        earlier = self._case(email="other@example.org", days_ago=400)
+        sent = self._sent(earlier)
+        new = self._case(email="pat@news.example.org", days_ago=0)
+        self._emailed(new, in_reply_to=sent.rfc_message_id)
+
+        payload = self._payload(new)
+
+        evidence = payload["email_evidence"]
+        self.assertEqual(evidence["replies_to_cases"], [earlier.number])
+        self.assertTrue(evidence["has_reply_headers"])
+        self.assertTrue(evidence["subject_marks_reply"])
+        self.assertFalse(evidence["subject_marks_forward"])
+        # The sender's own domain is never sent: it can identify the requester.
+        self.assertNotIn("sender_domain", evidence)
+        self.assertFalse(evidence["sender_is_district"])
+        # The case it replies to is offered, so the model may name it.
+        self.assertIn(earlier.number, [row["number"] for row in payload["candidate_cases"]])
+
+    def test_list_and_automation_headers_are_named_not_quoted(self):
+        new = self._case(days_ago=0)
+        self._emailed(new, subject="Fwd: newsletter", headers={
+            "List-Id": "<district-news.example.org>", "Precedence": "bulk",
+        })
+        evidence = self._payload(new)["email_evidence"]
+        self.assertEqual(evidence["list_or_bulk_headers"], ["list-id", "precedence"])
+        self.assertTrue(evidence["subject_marks_forward"])
+        self.assertEqual(evidence["replies_to_cases"], [])
+
+    def test_another_matter_kind_is_never_offered_through_the_thread(self):
+        litigation = self._case(days_ago=3, matter_kind=MatterKind.LITIGATION_DISCOVERY)
+        sent = self._sent(litigation)
+        new = self._case(days_ago=0)
+        self._emailed(new, references=[sent.rfc_message_id])
+        payload = self._payload(new)
+        self.assertEqual(payload["email_evidence"]["replies_to_cases"], [])
+        self.assertNotIn(litigation.number, [row["number"] for row in payload["candidate_cases"]])
+
+    @override_settings(PRR_DISTRICT_EMAIL_DOMAINS=["news.example.org"])
+    def test_a_district_sender_is_flagged_without_naming_the_domain(self):
+        new = self._case(days_ago=0)
+        self._emailed(new)
+        evidence = self._payload(new)["email_evidence"]
+        self.assertTrue(evidence["sender_is_district"])
+        self.assertNotIn("news.example.org", str(evidence))
+
+    def test_a_web_form_case_has_no_email_evidence(self):
+        new = self._case(days_ago=0)
+        self.assertIsNone(self._payload(new)["email_evidence"])
 
 
 class IntakeClassificationOutputTests(_Fixture):
@@ -225,6 +348,44 @@ class IntakeClassificationApiTests(_Fixture):
         with patch("apps.records.advisory_ai.invoke_advisory_model", return_value=reply):
             execute_advisory_run(run.pk)
         return run
+
+    def _inbox_row(self, user):
+        self.api.force_authenticate(user)
+        response = self.api.get("/api/staff/requests/?queue=inbox")
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        rows = body["results"] if isinstance(body, dict) else body
+        return next(row for row in rows if row["number"] == self.new.number)
+
+    def test_the_inbox_row_carries_an_unanswered_label(self):
+        # #33: the officer sees the label from the Inbox, not only the case.
+        self._complete_run()
+        row = self._inbox_row(self.officer)
+        self.assertEqual(row["intake_suggestion"], {
+            "label": "duplicate_of",
+            "target_case_number": self.earlier.number,
+            "confidence": 0.9,
+        })
+
+    def test_an_answered_label_leaves_the_inbox_row(self):
+        run = self._complete_run()
+        AdvisoryFeedback.objects.create(
+            advisory_run=run,
+            outcome=AdvisoryFeedback.Outcome.CONFIRMED,
+            final_label="duplicate_of",
+            actor=self.officer,
+        )
+        self.assertIsNone(self._inbox_row(self.officer)["intake_suggestion"])
+
+    def test_only_a_records_officer_sees_the_inbox_label(self):
+        self._complete_run()
+        liaison = _user("intake-liaison", StaffRole.LIAISON)
+        self.new.assigned_officer = None
+        self.new.save(update_fields=["assigned_officer"])
+        self.api.force_authenticate(liaison)
+        body = self.api.get("/api/staff/requests/?queue=inbox").json()
+        rows = body["results"] if isinstance(body, dict) else body
+        self.assertTrue(all(row.get("intake_suggestion") is None for row in rows))
 
     def test_an_officer_requests_and_reads_the_classification(self):
         self.api.force_authenticate(self.officer)

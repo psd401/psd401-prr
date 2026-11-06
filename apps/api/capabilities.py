@@ -529,7 +529,7 @@ CAPABILITIES = (
         "intake label, and what they judged it to be.",
         "POST",
         "/api/staff/requests/{number}/advisory-intake/feedback/",
-        ["/requests/:number/intake"],
+        ["/requests/:number/intake", "/inbox"],
         execution="human_confirmation",
         risk="moderate",
         constraints=["accountable_human_actor", "append_only_audit"],

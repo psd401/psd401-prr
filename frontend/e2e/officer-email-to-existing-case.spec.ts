@@ -15,7 +15,7 @@ test('officer-email-to-existing-case', async ({ page }) => {
   await login(page)
 
   await page.goto(`/requests/${autoCreatedCase}/overview`)
-  await expect(page.getByRole('heading', { name: 'Request' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Request', exact: true })).toBeVisible()
   await page.screenshot({
     path: path.resolve('../.verification/officer-auto-created-email-case.png'),
     fullPage: false,

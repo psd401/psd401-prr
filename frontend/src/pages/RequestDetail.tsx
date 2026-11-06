@@ -1,8 +1,8 @@
 // ABOUTME: Request detail screen — legal record, deadlines, estimate history,
 // ABOUTME: status timeline, collection tasks, and any footage preservation hold.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState, type FormEvent } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { api, unwrap, type Page } from '../api/client'
 import type { StaffRole } from '../api/auth'
 import { isTerminalStatus } from '../caseStatus'
@@ -725,7 +725,7 @@ export function RequestDetail({
     const reason = `Intake classification confirmed: ${INTAKE_LABEL_TEXT[label].toLowerCase()}${
       target ? ` ${target}` : ''
     }.`
-    const action = intakeAction(label, target, Boolean(r?.email_intake_auto_created))
+    const action = intakeAction(label, target, Boolean(detail.data?.email_intake_auto_created))
     if (action === 'add_to_case' && target) {
       setAddToCaseDestination(target)
       setAddingToCase(true)
@@ -735,6 +735,25 @@ export function RequestDetail({
       openNonRequestClosure(reason)
     }
   }
+
+  // Correct on an Inbox row (#33) recorded agreement and sent the officer
+  // here with the label; open the same prefilled action once, then drop the
+  // parameters so a reload does not reopen it.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const inboxAction = searchParams.get('intake_action') as IntakeLabel | null
+  const inboxTarget = searchParams.get('intake_target')
+  const inboxActionApplied = useRef(false)
+  useEffect(() => {
+    if (!inboxAction || !detail.data || !showOverview || inboxActionApplied.current) return
+    inboxActionApplied.current = true
+    if (canManageRequest && inboxAction in INTAKE_LABEL_TEXT) {
+      applyIntakeLabel(inboxAction, inboxTarget)
+    }
+    const next = new URLSearchParams(searchParams)
+    next.delete('intake_action')
+    next.delete('intake_target')
+    setSearchParams(next, { replace: true })
+  })
 
   function openFerpaVerification() {
     setFerpaMethod('in_person_photo_id')

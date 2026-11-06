@@ -88,6 +88,7 @@ function fakeResponse(body: unknown, status = 200): Response {
 function renderPage(
   roles: StaffRole[] = ['records_officer'],
   mode: 'overview' | 'scope' | 'collection' | 'close' = 'overview',
+  entry = '/requests/PRR-2026-0001',
 ) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -95,7 +96,7 @@ function renderPage(
   const rendered = render(
     <QueryClientProvider client={qc}>
       <ToastProvider>
-        <MemoryRouter initialEntries={['/requests/PRR-2026-0001']}>
+        <MemoryRouter initialEntries={[entry]}>
           <Routes>
             <Route
               path="/requests/:number"
@@ -1581,5 +1582,32 @@ describe('a first response sent outside this system', () => {
     expect(
       (within(dialog).getByLabelText(/^Reason/) as HTMLTextAreaElement).value,
     ).toContain('duplicate of PRR-2026-0048')
+  })
+
+  it('opens the prefilled action when Correct was pressed on the Inbox row', async () => {
+    // #33: Inbox Correct already recorded agreement; the case opens the same
+    // prefilled dialog, and the officer still reads and submits it.
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/advisory-intake/')) {
+        return fakeResponse({ enabled: true, latest: null, feedback: null, auto_applied: null })
+      }
+      return fakeResponse(DETAIL)
+    }))
+    renderPage(
+      ['records_officer'],
+      'overview',
+      '/requests/PRR-2026-0001?intake_action=duplicate_of&intake_target=PRR-2026-0048',
+    )
+
+    const heading = await screen.findByRole('heading', { name: 'Merge into case' })
+    const dialog = heading.closest('dialog') as HTMLElement
+    expect(within(dialog).getByLabelText(/^Merge into case number/)).toHaveValue('PRR-2026-0048')
+  })
+
+  it('ignores an Inbox action for someone who is not a Records Officer', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse({ ...DETAIL, requester: null })))
+    renderPage(['liaison'], 'overview', '/requests/PRR-2026-0001?intake_action=duplicate_of&intake_target=PRR-2026-0048')
+    await screen.findByText('Running log')
+    expect(screen.queryByRole('heading', { name: 'Merge into case' })).not.toBeInTheDocument()
   })
 })

@@ -121,6 +121,35 @@ class PerKindModelTests(TestCase):
 
         self.assertEqual(set(MAX_OUTPUT_TOKENS), set(AdvisoryRun.Kind.values) | {SCOPE_REFINEMENT})
 
+    def test_each_kind_output_budget_is_an_in_app_setting(self):
+        # #31: intake, intent, responsiveness and redaction each have their
+        # own administrator-set output budget, defaulting to the code budget.
+        from apps.configuration.registry import SETTINGS_BY_KEY
+        from apps.records.advisory_ai import max_output_tokens
+
+        for kind, key in (
+            (AdvisoryRun.Kind.INTAKE_CLASSIFICATION, "PRR_AI_MAX_OUTPUT_TOKENS_INTAKE"),
+            (AdvisoryRun.Kind.REQUEST_INTENT, "PRR_AI_MAX_OUTPUT_TOKENS_INTENT"),
+            (AdvisoryRun.Kind.RECORD_RESPONSIVENESS, "PRR_AI_MAX_OUTPUT_TOKENS_RESPONSIVENESS"),
+            (AdvisoryRun.Kind.RECORD_REDACTIONS, "PRR_AI_MAX_OUTPUT_TOKENS_REDACTION"),
+        ):
+            with self.subTest(kind=kind):
+                self.assertEqual(SETTINGS_BY_KEY[key].default, MAX_OUTPUT_TOKENS[kind])
+                self.assertEqual(max_output_tokens(kind), MAX_OUTPUT_TOKENS[kind])
+                with override_settings(**{key: 3000}):
+                    self.assertEqual(max_output_tokens(kind), 3000)
+
+    def test_the_call_uses_the_configured_output_budget(self):
+        with override_settings(PRR_AI_MODEL_INTENT="us.anthropic.claude-opus-5-5"):
+            run = request_request_intent_advisory(self.prr.pk, actor=self.officer)
+        with override_settings(PRR_AI_MAX_OUTPUT_TOKENS_INTENT=2500), patch(
+            "apps.records.advisory_ai.boto3.client",
+        ) as client_factory:
+            client_factory.return_value.converse.return_value = _converse_reply(INTENT)
+            execute_advisory_run(run.pk)
+        call = client_factory.return_value.converse.call_args.kwargs
+        self.assertEqual(call["inferenceConfig"]["maxTokens"], 2500)
+
     def test_an_explicit_model_overrides_the_kind_setting(self):
         with patch("apps.records.advisory_ai.boto3.client") as client_factory:
             client_factory.return_value.converse.return_value = _converse_reply(INTENT)

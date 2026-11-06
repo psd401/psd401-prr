@@ -28,6 +28,11 @@ const STATE_TONES: Record<string, 'neutral' | 'blue' | 'green' | 'red'> = {
 // The service refuses a shorter reason; the button stays disabled until then.
 const MIN_SUPERSEDE_REASON = 20
 
+/** The exact effect, stated before the officer confirms (#28). */
+function supersedeCountText(count: number) {
+  return `This takes ${count} unreviewed ${count === 1 ? 'record' : 'records'} out of review.`
+}
+
 function CollectionCard({
   number,
   task,
@@ -109,6 +114,9 @@ function CollectionCard({
       </div>
       {canSupersede && reason !== null && (
         <div className="mt-3 space-y-3 rounded-md border border-line p-3">
+          <p className="text-sm font-semibold text-ink">
+            {supersedeCountText(task.records_unreviewed)}
+          </p>
           <p className="text-sm text-ink-muted">
             Takes every unreviewed record from this export out of review. Nothing is
             deleted, and records already decided are not changed. The reason is kept in
