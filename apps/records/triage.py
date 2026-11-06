@@ -642,9 +642,13 @@ def release_preservation(
     if fp.hold_run_started_at is not None:
         # A widen keeps the state while it bookmarks more cameras; releasing
         # now would miss every bookmark it makes after this point.
+        from .tasks import FOOTAGE_HOLD_STALL_MINUTES
+
         raise PreservationRefused(
             "A hold run is still running for this preservation, adding Aware "
-            "bookmarks one camera at a time. Release it once the run finishes."
+            "bookmarks one camera at a time, or has stalled; a stalled run is "
+            f"cleared within about {FOOTAGE_HOLD_STALL_MINUTES} minutes. "
+            "Release it once the run finishes or is cleared."
         )
     prr = fp.request
     if prr.status not in CLOSED_STATUSES:

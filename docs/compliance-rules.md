@@ -163,7 +163,8 @@ while a hold run (a widen included) is still bookmarking; if the sweeper
 cleared a stalled run that then makes one more bookmark after a release, that
 bookmark is marked `RELEASE_FAILED` so the retry deletes it. A camera whose
 create Aware never confirmed has no bookmark id to delete by, so the release's
-timeline entry names the bookmark for a human to find and delete in Aware.
+timeline entry (or, for a create made after the release, its own timeline
+entry) names the bookmark for a human to find and delete in Aware.
 The confirmation text says when footage recorded after the hold was placed is
 not yet confirmed preserved.
 

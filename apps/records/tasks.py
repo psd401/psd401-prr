@@ -1369,19 +1369,38 @@ def _released_during_run(fp, ch) -> bool:
     is refused while a run holds its marker, but the sweeper clears the
     marker of a stalled run; if a release followed, the bookmark this run
     just made is not in the release's delete list. Mark it not yet confirmed
-    deleted so the release retry deletes it, and stop the run."""
+    deleted so the release retry deletes it, and stop the run. The check runs
+    after each camera, so at most one bookmark is made after a release. A
+    create Aware never confirmed has no id to delete by, so its bookmark name
+    goes on the timeline for a human to find in Aware."""
     from apps.audit.models import audit
 
+    from . import triage
     from .models import CameraHold, FootagePreservation, StatusEvent
 
     if not FootagePreservation.objects.filter(
         pk=fp.pk, state=FootagePreservation.State.RELEASED,
     ).exists():
         return False
-    if CameraHold.objects.filter(pk=ch.pk).exclude(clip_id="").update(
+    camera = ch.camera_name or ch.camera_id
+    if CameraHold.objects.filter(
+        pk=ch.pk, clip_id="", state=CameraHold.State.FAILED,
+        error__contains=BOOKMARK_MAY_EXIST,
+    ).exists():
+        audit("footage.bookmark_may_exist_after_release",
+              target=fp.request.number, camera=camera)
+        StatusEvent.objects.create(
+            request=fp.request,
+            note=(
+                f"Aware never confirmed a bookmark create on {camera} made after "
+                "the hold was released, so a PRR bookmark may exist; find and "
+                "delete it in Aware: "
+                f"{triage.bookmark_name(fp.request, camera)}."
+            ),
+        )
+    elif CameraHold.objects.filter(pk=ch.pk).exclude(clip_id="").update(
         state=CameraHold.State.RELEASE_FAILED,
     ):
-        camera = ch.camera_name or ch.camera_id
         audit("footage.bookmark_made_after_release", target=fp.request.number,
               camera=camera)
         StatusEvent.objects.create(

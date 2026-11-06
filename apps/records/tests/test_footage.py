@@ -2267,8 +2267,11 @@ class ReleaseGateTests(TestCase):
 
         self.assertFalse(triage.is_releasable(fp))
         with self.captureOnCommitCallbacks(execute=True):
-            with self.assertRaisesRegex(triage.PreservationRefused, "still running"):
+            with self.assertRaisesRegex(triage.PreservationRefused, "still running") as refused:
                 self._release(fp)
+        # A crashed run holds the marker until the sweeper clears it.
+        self.assertIn("stalled", refused.exception.message)
+        self.assertIn("15 minutes", refused.exception.message)
         self.assertNothingReleased(fp, delete_bookmark)
 
     @mock.patch(f"{CLIENT}.delete_bookmark")
@@ -2326,6 +2329,44 @@ class HoldRunOwnershipTests(TestCase):
         self.assertTrue(fp.request.events.filter(
             note__contains="made after the hold was released",
         ).exists())
+
+    def _release_then(self, error):
+        prr = make_request(f"gym entrance footage {days_ago(1)}")
+
+        def release_then_fail(cam, start, end, *, name, description):
+            PublicRecordsRequest.objects.filter(pk=prr.pk).update(
+                status=RequestStatus.FULFILLED,
+            )
+            FootagePreservation.objects.filter(request=prr).update(
+                state=FootagePreservation.State.RELEASED, hold_run_started_at=None,
+            )
+            raise error
+
+        with aware(hold=release_then_fail) as m:
+            fp = preserve(prr)
+        self.assertEqual([c.args[0].id for c in m.hold.call_args_list], ["cam-1"])
+        return fp
+
+    def test_a_failed_create_after_release_stops_the_run_with_nothing_to_delete(self):
+        fp = self._release_then(alta.AltaError("Aware refused the bookmark"))
+
+        self.assertEqual(fp.state, FootagePreservation.State.RELEASED)
+        failed = fp.camera_holds.get(camera_id="cam-1")
+        self.assertEqual(failed.state, CameraHold.State.FAILED)
+        self.assertEqual(failed.clip_id, "")
+        self.assertFalse(fp.request.events.filter(
+            note__contains="after the hold was released",
+        ).exists())
+
+    def test_an_uncertain_create_after_release_names_the_bookmark_to_delete(self):
+        fp = self._release_then(alta.AltaWriteUncertain("timed out"))
+
+        self.assertEqual(fp.state, FootagePreservation.State.RELEASED)
+        note = fp.request.events.get(
+            note__contains="after the hold was released",
+        ).note
+        self.assertIn(triage.bookmark_name(fp.request, "Gym Entrance"), note)
+        self.assertIn("find and delete it in Aware", note)
 
 
 class FutureWindowConfirmationTests(TestCase):
