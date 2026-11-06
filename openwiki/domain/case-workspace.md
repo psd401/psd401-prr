@@ -38,7 +38,8 @@ Review, Redact, Release, and Close. Each stage counts its own open work, and the
 staff screen shows which stage the case is in. The rail is a navigation read model.
 It is not a legal state. Status still changes only through `services.transition()`
 ([requests](requests.md)), and closure readiness stays the authority on what blocks
-closing.
+closing. The Redact stage's group decisions and per-record drawing are described in
+[record review](record-review-and-handling.md#the-redact-stage).
 
 `case_stages()` in [`apps/records/stages.py`](../../apps/records/stages.py) builds the
 rail. `RequestsViewSet.workspace_summary` in

@@ -167,7 +167,7 @@ holds the rules that screen displays.
 | `/review` | `Review.tsx` | [record review](../domain/record-review-and-handling.md) |
 | `/decisions` | `Decisions.tsx` | [decision batches](../domain/decision-batches.md) |
 | `/staff-intake` | `StaffIntake.tsx` | [requests](../domain/requests.md#intake-and-triage), [case workspace](../domain/case-workspace.md) |
-| `/requests/:number/:tab` | `case/CaseWorkspace.tsx` (stage tabs mount `Tasks.tsx`, `Installments.tsx`, `RecordItems.tsx`, and others) | [case workspace](../domain/case-workspace.md) |
+| `/requests/:number/:tab` | `case/CaseWorkspace.tsx` (stage tabs mount `Tasks.tsx`, `Installments.tsx`, `RecordItems.tsx`, `case/RedactWorkspace.tsx` for the Redact stage, and others) | [case workspace](../domain/case-workspace.md), [Redact stage](../domain/record-review-and-handling.md#the-redact-stage) |
 | `/oversight/reporting` | `Reporting.tsx` | [JLARC annual reporting](../domain/jlarc-reporting.md) |
 | `/oversight/audit` | `Audit.tsx` | [audit trail](../domain/compliance.md#audit-trail) |
 | `/oversight/ai-evaluation` | `AiEvaluation.tsx` | [advisory model comparison](../domain/advisory-evaluation.md) |
