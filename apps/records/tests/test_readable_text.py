@@ -66,8 +66,18 @@ class ReadableTextTests(SimpleTestCase):
         )
 
     def test_keeps_any_angle_bracket_text_that_is_not_an_html_element(self):
-        raw = "Sender: <REDACTED>\nContact <see attached> or <Jane Doe> at <HTTPS://example.org>"
+        raw = (
+            "Sender: <REDACTED>\nContact <see attached> or <Jane Doe> at <HTTPS://example.org>\n"
+            "Sent to: <Mark Smith>\nProgram: <Head Start>\nSubject <Re:Budget> <Attn:Jane>"
+        )
         self.assertEqual(readable_text(raw), raw)
+
+    def test_removes_tags_with_attributes_and_office_namespaces(self):
+        raw = (
+            '<td style="padding:0" nowrap="nowrap"><p class=MsoNormal>Hi<o:p></o:p></p>'
+            "<br/><v:background fill='t'/></td>"
+        )
+        self.assertEqual(readable_text(raw), "Hi")
 
     def test_plain_text_is_unchanged(self):
         text = "Date: Fri, 28 Aug 2026\nFrom: someone@example.org\n\nThank you."

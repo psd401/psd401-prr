@@ -24,8 +24,9 @@ _CONDITIONAL = re.compile(r"<!--\[if[^\]]*\]>.*?<!\[endif\]-->", re.DOTALL | re.
 _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _BLOCK = re.compile(r"<(style|script|head)\b.*?</\1\s*>", re.DOTALL | re.IGNORECASE)
 _BREAK = re.compile(r"<\s*(br|/p|/div|/tr|/li|/h[1-6]|/table)\b[^>]*>", re.IGNORECASE)
-#: Real HTML element names, and namespaced Outlook ones such as v:background
-#: or o:p. Any other "<...>" is text a person wrote ("<REDACTED>",
+#: Real HTML element names, and Office-namespaced ones such as v:background
+#: or o:p, with nothing after the name but name="value" attributes. Any
+#: other "<...>" is text a person wrote ("<REDACTED>", "<Mark Smith>",
 #: "<jane@example.org>", "<https://...>", "a < b") and stays.
 _ELEMENTS = (
     "a|abbr|address|area|article|aside|b|base|bdi|bdo|blockquote|body|br|button|"
@@ -36,9 +37,10 @@ _ELEMENTS = (
     "span|strike|strong|style|sub|summary|sup|svg|table|tbody|td|template|"
     "textarea|tfoot|th|thead|time|title|tr|track|tt|u|ul|var|video|wbr|xml"
 )
+_ATTRIBUTES = r"""(?:\s+[\w:-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>]+))*"""
 _TAG = re.compile(
-    r"<(?:/?(?:(?:" + _ELEMENTS + r")|(?!(?:https?|mailto|ftp|tel):)[a-z]+:[a-z]+)"
-    r"(?=[\s/>])[^<>]*|!doctype[^<>]*)>",
+    r"<(?:/?(?:" + _ELEMENTS + r"|(?:o|v|w|m|st1):[a-z]+)" + _ATTRIBUTES
+    + r"\s*/?|!doctype[^<>]*)>",
     re.IGNORECASE,
 )
 _IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
