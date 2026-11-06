@@ -20,15 +20,15 @@ from .models import RecordItem
 #: page preview or the original.
 READABLE_TEXT_LIMIT = 200_000
 
-_CONDITIONAL = re.compile(r"<!--\[if[^\]]*\]>.*?<!\[endif\]-->", re.S | re.I)
-_COMMENT = re.compile(r"<!--.*?-->", re.S)
-_BLOCK = re.compile(r"<(style|script|head)\b.*?</\1\s*>", re.S | re.I)
-_BREAK = re.compile(r"<\s*(br|/p|/div|/tr|/li|/h[1-6]|/table)\b[^>]*>", re.I)
+_CONDITIONAL = re.compile(r"<!--\[if[^\]]*\]>.*?<!\[endif\]-->", re.DOTALL | re.IGNORECASE)
+_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+_BLOCK = re.compile(r"<(style|script|head)\b.*?</\1\s*>", re.DOTALL | re.IGNORECASE)
+_BREAK = re.compile(r"<\s*(br|/p|/div|/tr|/li|/h[1-6]|/table)\b[^>]*>", re.IGNORECASE)
 _TAG = re.compile(r"<[^>]+>")
 _IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _LINK = re.compile(r"\[([^\]]+)\]\((?:https?|mailto):[^)]*\)")
-_HEADING = re.compile(r"^#{1,6}\s+", re.M)
-_INVISIBLE = re.compile("[​‌‍﻿­]")
+_HEADING = re.compile(r"^#{1,6}\s+", re.MULTILINE)
+_INVISIBLE = re.compile("[\\u200b\\u200c\\u200d\\ufeff\\u00ad]")
 
 
 def readable_text(raw: str) -> str:
@@ -41,7 +41,7 @@ def readable_text(raw: str) -> str:
     text = _IMAGE.sub("", text)
     text = _LINK.sub(r"\1", text)
     text = _HEADING.sub("", text)
-    text = html.unescape(text).replace(" ", " ")
+    text = html.unescape(text).replace("\u00a0", " ")
     text = _INVISIBLE.sub("", text)
     lines = []
     for line in text.split("\n"):

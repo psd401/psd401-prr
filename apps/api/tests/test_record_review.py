@@ -9,8 +9,8 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from apps.api.identity import apply_staff_roles
-from apps.audit.models import AuditLog
 from apps.api.models import StaffRole
+from apps.audit.models import AuditLog
 from apps.records.models import (
     ExemptionCitation,
     PublicRecordsRequest,
@@ -91,8 +91,8 @@ class RecordReviewApiTests(TestCase):
         self.assertEqual(listed["email_body_sha256"], "b" * 64)
 
     def test_a_role_that_cannot_preview_cannot_read_record_text(self):
-        liaison = get_user_model().objects.create_user(
-            "review-api-liaison", "liaison@example.org", "pw", is_staff=True,
+        liaison = get_user_model().objects.create(
+            username="review-api-liaison", email="liaison@example.org", is_staff=True,
         )
         apply_staff_roles(liaison, [StaffRole.LIAISON])
         self.client.force_login(liaison)
