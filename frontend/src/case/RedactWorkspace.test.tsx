@@ -214,3 +214,66 @@ it('removes a redaction only with a reason', async () => {
     url: '/api/staff/redactions/7/void/', body: { reason: 'Drawn on the wrong line.' },
   }))
 })
+
+it('dismisses a suggestion only with a reason', async () => {
+  const { posts, user } = setup({ proposals: [PROPOSAL] })
+  await user.click(await screen.findByRole('button', { name: 'Use suggestion' }))
+  const dismiss = screen.getByRole('button', { name: 'Dismiss suggestion' })
+  expect(dismiss).toBeDisabled()
+  await user.type(screen.getByLabelText(/Why dismiss it/), 'That is a staff name.')
+  await user.click(dismiss)
+  await waitFor(() => expect(posts.at(-1)).toEqual({
+    url: '/api/staff/redaction-proposals/prop-1/reject/', body: { reason: 'That is a staff name.' },
+  }))
+})
+
+it('approves a second review, then builds the redacted PDF', async () => {
+  const saved = {
+    id: 7, record_item: 'rec-a', page_number: 1, x0: 0.1, y0: 0.1, x1: 0.2, y1: 0.2,
+    exemption: 9, citation: 'RCW 42.56.230(1)', exemption_name: 'Student information',
+    requires_second_review: true, explanation: 'Names a student.', created_by_username: 'hagelk',
+    created_at: '2026-11-01T12:00:00Z', voided_at: null, void_reason: '',
+  }
+  const { posts, user } = setup({
+    records: [{ ...RECORD, redaction_count: 1, second_review_required: true }],
+    redactions: [saved],
+  })
+  expect(await screen.findByText('Names a student.')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Build redacted PDF' })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Approve second review' }))
+  await waitFor(() => expect(posts.at(-1)?.url).toBe('/api/staff/record-items/rec-a/second-review/'))
+})
+
+it('builds the redacted PDF when no second review is needed', async () => {
+  const saved = {
+    id: 7, record_item: 'rec-a', page_number: 2, x0: 0.1, y0: 0.1, x1: 0.2, y1: 0.2,
+    exemption: 9, citation: 'RCW 42.56.230(1)', exemption_name: 'Student information',
+    requires_second_review: false, explanation: '', created_by_username: 'hagelk',
+    created_at: '2026-11-01T12:00:00Z', voided_at: null, void_reason: '',
+  }
+  const { posts, user } = setup({ redactions: [saved] })
+  await user.click(await screen.findByRole('button', { name: /Page 2 · RCW/ }))
+  expect(await screen.findByLabelText('Draw redactions on page 2')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Build redacted PDF' }))
+  await waitFor(() => expect(posts.at(-1)?.url).toBe('/api/staff/record-items/rec-a/render-redactions/'))
+})
+
+it('moves between records and pages by click, and Esc clears a draft', async () => {
+  const { user } = setup()
+  await screen.findByLabelText('Draw redactions on page 1')
+  await user.click(screen.getByRole('button', { name: 'Next page' }))
+  expect(await screen.findByLabelText('Draw redactions on page 2')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Previous page' }))
+  await drawBox()
+  expect(screen.getByRole('button', { name: 'Clear' })).toBeInTheDocument()
+  await user.keyboard('{Escape}')
+  expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument()
+
+  await user.click(screen.getByRole('option', { name: /Staff email/ }))
+  expect(screen.getByRole('option', { name: /Staff email/ })).toHaveAttribute('aria-selected', 'true')
+  await user.keyboard('k')
+  expect(screen.getByRole('option', { name: /Board memo/ })).toHaveAttribute('aria-selected', 'true')
+  await user.click(screen.getByRole('button', { name: 'Zoom in' }))
+  await user.click(screen.getByRole('button', { name: 'Zoom out' }))
+  expect(screen.getByText('100%')).toBeInTheDocument()
+})
