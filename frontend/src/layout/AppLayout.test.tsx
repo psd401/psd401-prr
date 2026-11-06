@@ -1,7 +1,7 @@
-// ABOUTME: Keyboard, focus, current-page, and count-badge contracts for the shell.
+// ABOUTME: Keyboard, focus, and current-page contracts for the shell.
 // ABOUTME: The compact navigation remains operable without a pointer.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -30,10 +30,10 @@ function renderLayout() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={['/inbox']}>
+      <MemoryRouter initialEntries={['/today']}>
         <Routes>
           <Route element={<AppLayout user={user} />}>
-            <Route path="inbox" element={<h1>Inbox screen</h1>} />
+            <Route path="today" element={<h1>Today screen</h1>} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -79,17 +79,15 @@ it('provides a skip link and keyboard drawer with focus return', async () => {
   expect(trigger).toHaveAttribute('aria-expanded', 'false')
 })
 
-it('marks the current page and gives count badges complete accessible names', async () => {
+it('marks the current page in a three-stop menu with no badges', async () => {
   const event = userEvent.setup()
   renderLayout()
   await event.click(screen.getByRole('button', { name: 'Open navigation' }))
 
-  const inbox = screen.getByRole('link', { name: /Inbox/ })
-  expect(inbox).toHaveAttribute('aria-current', 'page')
-  await waitFor(() => {
-    expect(screen.getByLabelText('2 items in Inbox, needing attention')).toBeInTheDocument()
-    expect(screen.getByLabelText('3 items in Review, awaiting review')).toBeInTheDocument()
-  })
+  const menu = screen.getByRole('navigation', { name: 'Primary navigation' })
+  expect(within(menu).getAllByRole('link').map((link) => link.textContent))
+    .toEqual(['Today', 'New request', 'Settings'])
+  expect(within(menu).getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page')
 })
 
 it('moves focus into the destination when a mobile navigation link closes', async () => {
@@ -97,7 +95,7 @@ it('moves focus into the destination when a mobile navigation link closes', asyn
   renderLayout()
   await event.click(screen.getByRole('button', { name: 'Open navigation' }))
 
-  await event.click(screen.getByRole('link', { name: /Inbox/ }))
+  await event.click(screen.getByRole('link', { name: 'Today' }))
 
   await waitFor(() => expect(screen.getByRole('main')).toHaveFocus())
   expect(screen.getByRole('button', { name: 'Open navigation' }))

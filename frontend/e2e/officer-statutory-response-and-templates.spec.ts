@@ -13,7 +13,7 @@ test('officer-statutory-response-and-templates', async ({ page }) => {
   await login(page)
 
   // Workstream B: grouped chips and the statutory backlog with triage context.
-  await page.getByRole('link', { name: /Inbox/ }).click()
+  await page.goto('/inbox')
   await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
   // Decide-now queues are chips; the taxonomy that used to fill the page is
   // intact inside the menu.

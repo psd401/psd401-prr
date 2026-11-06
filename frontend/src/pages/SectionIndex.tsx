@@ -28,10 +28,17 @@ function SectionLinks({ items }: { items: NavItem[] }) {
 }
 
 export function ConfigurationIndex({ roles }: { roles: StaffRole[] }) {
+  const reports = visibleNav(OVERSIGHT_NAV, roles)
   return (
     <>
-      <PageHeader title="Configuration" subtitle="Personal access and role-scoped application settings." />
+      <PageHeader title="Settings" />
       <SectionLinks items={visibleNav(CONFIGURATION_NAV, roles)} />
+      {reports.length > 0 && (
+        <section aria-labelledby="settings-reports" className="mt-10">
+          <h2 id="settings-reports" className="mb-4 font-heading text-xl font-bold text-ink">Reports</h2>
+          <SectionLinks items={reports} />
+        </section>
+      )}
     </>
   )
 }

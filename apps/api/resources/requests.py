@@ -124,7 +124,7 @@ from apps.records.response_due import (
     annotate_next_response_due,
     next_response_due,
 )
-from apps.records.stages import STAGE_IDS, case_stages
+from apps.records.stages import STAGE_IDS, case_stages, current_stages
 from apps.records.upload_handlers import (
     IntakeAttachmentLimitUploadHandler,
     RecordUploadLimitUploadHandler,
@@ -297,6 +297,15 @@ def _unanswered_intake_labels(cases) -> dict:
     return suggestions
 
 
+class CaseStageSerializer(serializers.Serializer):
+    id = serializers.ChoiceField(choices=list(STAGE_IDS))
+    label = serializers.CharField()  # pyright: ignore[reportAssignmentType]
+    state = serializers.ChoiceField(choices=["done", "current", "blocked", "upcoming"])
+    open_count = serializers.IntegerField(min_value=0)
+    summary = serializers.CharField(allow_blank=True)
+    reason = serializers.CharField(allow_blank=True)
+
+
 class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
     requester_email = serializers.EmailField(source="requester.email", read_only=True)
     requester_name = serializers.CharField(source="requester.name", read_only=True)
@@ -314,6 +323,7 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
     next_due_basis = serializers.SerializerMethodField()
     latest_note = serializers.SerializerMethodField()
     intake_suggestion = serializers.SerializerMethodField()
+    stage = serializers.SerializerMethodField()
 
     class Meta:
         model = PublicRecordsRequest
@@ -328,7 +338,7 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
                   "next_due", "next_due_basis",
                   "latest_note",
                   "inbox_needs_attention", "latest_inbound_at",
-                  "subject", "subject_source", "intake_suggestion"]
+                  "subject", "subject_source", "intake_suggestion", "stage"]
         read_only_fields = ["id", "number", "status", "matter_kind",
                             "received_at",
                             "statutory_response_due", "ferpa_access_due",
@@ -342,6 +352,15 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
         """The case's unanswered intake label, on a Records Officer's Inbox
         rows only (#33); null everywhere else. Precomputed for the page."""
         return (self.context.get("intake_suggestions") or {}).get(obj.pk)
+
+    @extend_schema_field(CaseStageSerializer(allow_null=True))
+    def get_stage(self, obj):
+        """The stage the case is in now, as its rail reads it (#45).
+
+        Precomputed for the whole page by ``stages.current_stages``; null on
+        any response that did not compute it, such as a single case.
+        """
+        return (self.context.get("stages") or {}).get(obj.pk)
 
     @extend_schema_field(serializers.IntegerField())
     def get_inbox_needs_attention(self, obj):
@@ -1205,15 +1224,6 @@ class CaseWorkspaceNextActionSerializer(serializers.Serializer):
     work_item_id = serializers.UUIDField()
 
 
-class CaseStageSerializer(serializers.Serializer):
-    id = serializers.ChoiceField(choices=list(STAGE_IDS))
-    label = serializers.CharField()  # pyright: ignore[reportAssignmentType]
-    state = serializers.ChoiceField(choices=["done", "current", "blocked", "upcoming"])
-    open_count = serializers.IntegerField(min_value=0)
-    summary = serializers.CharField(allow_blank=True)
-    reason = serializers.CharField(allow_blank=True)
-
-
 class CaseWorkspaceSummarySerializer(serializers.Serializer):
     number = serializers.CharField()
     legal_status = serializers.CharField()
@@ -1776,6 +1786,7 @@ class RequestsViewSet(
         page = self.paginate_queryset(queryset)
         rows = page if page is not None else list(queryset)
         context = dict(self.get_serializer_context())
+        context["stages"] = current_stages(rows)
         if request.query_params.get("queue") == "inbox" and has_staff_role(
             request.user, StaffRole.RECORDS_OFFICER,
         ):

@@ -10,9 +10,10 @@ const evidencePath = (name: string) => path.resolve(
 
 test('role-aware-work-inbox', async ({ page }) => {
   await login(page)
-  // One work surface: the officer lands on the Inbox, and the queues that
-  // used to live on My Work are a chip group on it.
-  await expect(page).toHaveURL(/\/inbox$/)
+  // The officer lands on Today; the Inbox's queues stay one link away.
+  await expect(page).toHaveURL(/\/today$/)
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
+  await page.goto('/inbox')
   await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Needs attention' })).toBeVisible()
   // "Assigned to you" is a command-bar chip; the rest of the retired My Work
@@ -66,7 +67,8 @@ test('role-aware-work-inbox', async ({ page }) => {
   await signOut(page)
 
   await login(page, 'e2e-liaison', 'e2e-liaison-local-only')
-  await expect(page).toHaveURL(/\/inbox$/)
+  await expect(page).toHaveURL(/\/today$/)
+  await page.goto('/inbox')
   await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
   // A liaison gets the assignment queues and no cross-case message triage.
   await expect(page.getByRole('button', { name: /Assigned to you/ }))
@@ -89,7 +91,8 @@ test('role-aware-work-inbox', async ({ page }) => {
   await signOut(page)
 
   await login(page, 'e2e-reviewer', 'e2e-reviewer-local-only')
-  await expect(page).toHaveURL(/\/review$/)
+  await expect(page).toHaveURL(/\/today$/)
+  await page.goto('/review')
   await expect(page.getByRole('heading', { name: 'Review' })).toBeVisible()
   await expect(page.getByText('Review record')).toBeVisible()
   await page.screenshot({ path: evidencePath('reviewer-shell.png'), fullPage: false })
@@ -116,9 +119,9 @@ test('role-aware-work-inbox', async ({ page }) => {
 
   await login(page, 'e2e-admin', 'e2e-admin-local-only')
   await expect(page).toHaveURL(/\/configuration$/)
-  await expect(page.getByRole('heading', { name: 'Configuration' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
   await page.screenshot({ path: evidencePath('admin-shell.png'), fullPage: false })
-  await page.getByRole('link', { name: /Inbox/ }).click()
+  await page.goto('/inbox')
   await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Delivery exceptions' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Needs attention' })).toHaveCount(0)

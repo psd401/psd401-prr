@@ -384,10 +384,12 @@ CAPABILITIES = (
     ),
     _capability(
         "requests.list",
-        "Browse, filter, search, and prioritize the request queue.",
+        "Browse, filter, search, and prioritize the request queue. Each row "
+        "carries the stage the case is in now, which Today turns into its "
+        "one next step.",
         "GET",
         "/api/staff/requests/",
-        ["/cases"],
+        ["/today", "/cases"],
         mcp_tool="psd_prr_requests_list",
     ),
     _capability(

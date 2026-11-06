@@ -33,6 +33,9 @@ test('accessible-live-updates', async ({ page }) => {
     })
   })
   await login(page)
+  // Login lands on Today; these queues live on the Inbox.
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
+  await page.goto('/inbox')
 
   // Focus the chip whose own count is about to change: a live update must not
   // move focus or scroll even when it rewrites the focused control's badge.
