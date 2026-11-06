@@ -64,6 +64,9 @@ def _whole_words(phrase: str) -> str:
     return rf"(?<![A-Za-z0-9]){body}(?![A-Za-z0-9])"
 
 
+_ESC_NAMES = ("Educational Service Center", "Education Service Center", "District Office")
+_DISTRICT_AWARE_GROUPS = "District Aware device groups, confirmed on PR #105 (2026-11-06)"
+
 SITES: tuple[Site, ...] = (
     # Elementary schools. Source for each code: the school's subdomain on the
     # district schools page (SCHOOLS_PAGE), which matches its Aware group name.
@@ -129,11 +132,7 @@ SITES: tuple[Site, ...] = (
     # footer of SCHOOLS_PAGE; the ESC code is the district's network site code
     # for it. CTP is the district's own name for the Community Transition
     # Program (Special Education), https://www.psd401.net/ctp.
-    Site(
-        "ESC",
-        "Educational Service Center",
-        ("Educational Service Center", "Education Service Center", "District Office"),
-    ),
+    Site("ESC", "Educational Service Center", _ESC_NAMES),
     Site(
         "CTP",
         "Community Transition Program",
@@ -141,9 +140,24 @@ SITES: tuple[Site, ...] = (
         ("CTP",),
         source="https://www.psd401.net/ctp",
     ),
-    # Unconfirmed Aware groups, deliberately absent: DCR and TSD. No cited
-    # source names the building either code covers, so their cameras are held
-    # only by a district-wide hold until the district confirms them.
+    # Two Aware groups that are not schools, confirmed by the district's Aware
+    # device list and its CTO on PR #105. Aware spells the District Resource
+    # Center's group DCR; the building and its cameras say DRC. The TSD
+    # (Technology Services) group's camera is inside the ESC building, so a
+    # request naming the ESC holds both groups.
+    Site(
+        "DCR",
+        "District Resource Center",
+        ("District Resource Center",),
+        ("DRC",),
+        source=_DISTRICT_AWARE_GROUPS,
+    ),
+    Site(
+        "TSD",
+        "Technology Services (Educational Service Center)",
+        _ESC_NAMES,
+        source=_DISTRICT_AWARE_GROUPS,
+    ),
 )
 
 _BY_CODE = {site.code: site for site in SITES}

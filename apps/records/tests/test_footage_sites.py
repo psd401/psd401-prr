@@ -67,9 +67,6 @@ class ResolveSitesTests(SimpleTestCase):
         self.assertEqual(codes("video of the mes de septiembre"), [])
         self.assertEqual(codes("video at MES"), ["MES"])
 
-    def test_district_office_is_the_esc(self):
-        self.assertEqual(codes("video outside the District Office"), ["ESC"])
-
     def test_purdy_alone_is_not_a_building(self):
         # Purdy is a community with several district buildings in it.
         self.assertEqual(codes("camera footage from Purdy on 2026-09-22"), [])
@@ -80,12 +77,16 @@ class ResolveSitesTests(SimpleTestCase):
             ["PHS"],
         )
 
-    def test_unconfirmed_codes_are_not_in_the_alias_table(self):
-        # DCR and TSD exist as Aware groups but no cited source names their
-        # building; they are held only by a district-wide hold.
-        table_codes = {site.code for site in footage_sites.SITES}
-        self.assertNotIn("DCR", table_codes)
-        self.assertNotIn("TSD", table_codes)
+    def test_the_district_resource_center_is_the_dcr_group(self):
+        # Aware spells the group DCR; the building and its cameras say DRC.
+        self.assertEqual(codes("video at the District Resource Center"), ["DCR"])
+        self.assertEqual(codes("DRC back door camera"), ["DCR"])
+        self.assertEqual(codes("the drc lot"), [])
+
+    def test_the_education_service_center_holds_its_tsd_group_too(self):
+        # The TSD group's camera is inside the ESC building.
+        self.assertEqual(codes("video outside the District Office"), ["ESC", "TSD"])
+        self.assertEqual(codes("Education Service Center lobby"), ["ESC", "TSD"])
 
     def test_every_table_code_is_unique(self):
         table_codes = [site.code for site in footage_sites.SITES]
@@ -95,4 +96,5 @@ class ResolveSitesTests(SimpleTestCase):
         self.assertEqual(
             footage_sites.site_name("HHE"), "Harbor Heights Elementary School"
         )
-        self.assertEqual(footage_sites.site_name("DCR"), "DCR")
+        self.assertEqual(footage_sites.site_name("DCR"), "District Resource Center")
+        self.assertEqual(footage_sites.site_name("XYZ"), "XYZ")
