@@ -154,7 +154,7 @@ function CaseHeader({
   const here = step?.path === `/requests/${summary.number}/${tab}`
   const stepClass = `nx-btn ${step?.waiting ? 'nx-btn--secondary' : 'nx-btn--primary'} mt-5 h-auto min-h-12 px-6 py-3 text-base focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus`
   return (
-    <header className="mb-6 border-b border-line pb-6" aria-label="Case summary">
+    <section className="mb-6 border-b border-line pb-6" aria-label="Case summary">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         {due && (
           <span className={`rounded-full px-3 py-1 font-semibold ${DUE_TONE[due.tone]}`}>
@@ -187,7 +187,7 @@ function CaseHeader({
       {step && (here
         ? <a href="#stage-evidence" className={stepClass}>{step.label}</a>
         : <Link to={step.path} className={stepClass}>{step.label}</Link>)}
-    </header>
+    </section>
   )
 }
 

@@ -169,7 +169,7 @@ describe('CaseWorkspace', () => {
     // The case opens on what it is, what was asked, and the one next step.
     expect(await screen.findByRole('heading', { name: 'Board minutes for the spring term', level: 1 }))
       .toBeInTheDocument()
-    const header = screen.getByRole('banner', { name: 'Case summary' })
+    const header = screen.getByRole('region', { name: 'Case summary' })
     expect(header).toHaveTextContent('PRR-2026-0001')
     expect(header).toHaveTextContent('Jane Q. Public')
     expect(header).toHaveTextContent('Case Officer')
