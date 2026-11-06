@@ -129,7 +129,12 @@ district-wide through `triage.widen_preservation()` (`POST
 /api/staff/preservations/{id}/widen/`) with a substantive reason. Widening
 bookmarks only cameras with no hold yet, so a camera already tried keeps its
 outcome. It only preserves more, so it is a direct action rather than a
-human-only handoff. A widen that stops partway sends an URGENT manual notice.
+human-only handoff. A widen is refused while the first run is still PENDING.
+A widen that cannot list Aware's cameras, or finds none, sends an URGENT
+manual notice and leaves the hold's state, held counts, scope and confirmation
+text as they were. A widen's completion notice and not-retained review cover
+only the cameras it added. A widen that stops partway sends an URGENT manual
+notice.
 
 Zero cameras at a named site goes to human adequate-search review
 (`NO_CAMERAS`) and an URGENT manual notice, never "held": footage may sit on
@@ -148,13 +153,24 @@ through `triage.release_preservation()`, which requires a closed request (and,
 for a merged duplicate, a closed case of record), current Records Officer
 authority, a substantive reason, and an attestation that no litigation hold,
 pending lawsuit, or reasonably anticipated litigation covers the footage. Both
-are AST-guarded like `revise_estimate`. A bookmark Aware refuses to delete
-during release is marked `RELEASE_FAILED` (the bookmark may still exist) and
-logged; posting the release again retries only those cameras. If the Aware API
-is down or unconfigured, or a hold task crashes, holds degrade to URGENT manual
-instructions to facilities — never to silence. A beat sweeper runs every 5
-minutes and moves any hold still PENDING 15 minutes after intake to URGENT
-manual.
+are AST-guarded like `revise_estimate`. Release and exclusion mark each
+bookmark `RELEASE_FAILED` (not yet confirmed deleted) inside their
+transaction, and flip it to `RELEASED` only after Aware confirms the delete (or
+reports the bookmark already gone). A refused delete, or a crash partway
+through, therefore leaves the camera retryable and logged; posting the release
+again retries only those cameras, excluded ones included.
+
+Intake enqueues the hold task only after its transaction commits. Each run
+claims a camera's row before calling Aware, so two runs never bookmark the
+same camera; the claim is cleared only when Aware definitely made no bookmark.
+Coverage is scored against the time each camera's bookmark was made. If the
+Aware API is down or unconfigured, or a hold task crashes, holds degrade to
+URGENT manual instructions to facilities — never to silence. Every run (intake
+and widen) marks itself in progress and heartbeats per camera. A beat sweeper
+runs every 5 minutes: a PENDING hold whose heartbeat is 15 minutes old moves
+to URGENT manual, and a stalled widen sends the URGENT notice but keeps the
+hold's state. A run's final state save is conditional on the state it started
+from, so it never overwrites what the sweeper set; a lost save is audited.
 
 ## Rule 8 — The system registry routes collection
 

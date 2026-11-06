@@ -54,8 +54,10 @@ and cited from code, tests, and ADRs; never renumber them.
    sites only, or a date span clipped to `CAMERA_HOLD_MAX_SPAN_DAYS`) sends an
    URGENT scope notice; a Records Officer widens it district-wide with a reason
    through `triage.widen_preservation()`, which bookmarks only cameras not yet
-   tried. Widening only preserves more, so it is a direct action, not a
-   human-only handoff. Zero cameras at a named site goes to human
+   tried. Widening is refused while the first run is PENDING; a widen that
+   cannot list Aware cameras keeps the hold's state and scope; its notices count
+   only the cameras it added. Widening only preserves more, so it is a direct
+   action, not a human-only handoff. Zero cameras at a named site goes to human
    adequate-search review plus an URGENT notice (`NO_CAMERAS`), never "held";
    PARTIAL sends an URGENT notice naming each short camera. Where no camera
    retains the window, a human completes the search and chooses the response.
@@ -63,11 +65,16 @@ and cited from code, tests, and ADRs; never renumber them.
    exclusion are human-only with a reason: `triage.exclude_camera()` and
    `triage.release_preservation()` (closed request, Records Officer, attestation
    that no litigation hold applies), both AST-guarded against background
-   callers. A bookmark Aware will not delete becomes `RELEASE_FAILED`, and
-   posting the release again retries it. If Aware is down or unconfigured, or a
-   hold task crashes or sits PENDING (the 5-minute sweeper), holds degrade to
-   URGENT manual instructions to facilities — never to silence, and never to
-   EXPIRED.
+   callers. Release and exclusion keep each bookmark `RELEASE_FAILED` (not yet
+   confirmed deleted) until Aware confirms its delete, so a refusal or crash
+   stays retryable; posting the release again retries it. The hold task is
+   enqueued only after intake commits, and claims each camera before calling
+   Aware, so two runs never bookmark one camera. If Aware is down or
+   unconfigured, or a hold task crashes or stops heartbeating for 15 minutes
+   (the 5-minute sweeper), holds degrade to URGENT manual instructions to
+   facilities — never to silence, and never to EXPIRED. A stalled widen sends
+   the notice and keeps the hold's state; a run's final save never overwrites
+   what the sweeper set.
 8. **The system registry routes collection** — `RecordSystem`, seeded by
    `manage.py seed_systems`; `triage.route_to_systems` opens a CollectionTask per
    match and urgent_hold systems (bus video!) fire a preservation email.
