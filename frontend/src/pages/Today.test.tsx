@@ -88,7 +88,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it('lists open cases by due date, each with one next step', async () => {
+it('lists open cases in the order the server sorts by due date, each with one next step', async () => {
   const fetchMock = stubApi([late, reviewing])
   renderPage()
 
@@ -103,6 +103,23 @@ it('lists open cases by due date, each with one next step', async () => {
     .toHaveAttribute('href', '/requests/PRR-2026-0002/review')
   expect(screen.getByText('2 open cases · 1 late')).toBeInTheDocument()
   expect(fetchMock.mock.calls.map(([url]) => String(url)).some((url) => url.includes('status=open&ordering=due'))).toBe(true)
+})
+
+it('lists every open case, past the first page', async () => {
+  const second = row('PRR-2026-0051', { next_due: '2027-01-06', stage: stage('close') })
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/decision-batches/')) return response(page([]))
+    if (url.includes('/work-items/counts/')) return response({})
+    if (url.includes('page=2')) return response({ count: 3, next: null, previous: 'p1', results: [second] })
+    return response({ count: 3, next: '/api/staff/requests/?status=open&ordering=due&page=2', previous: null, results: [late, reviewing] })
+  }))
+  renderPage()
+
+  expect(await screen.findByRole('link', { name: 'Close the case' }))
+    .toHaveAttribute('href', '/requests/PRR-2026-0051/close')
+  expect(screen.getAllByRole('listitem')).toHaveLength(3)
+  expect(screen.getByText('3 open cases · 1 late')).toBeInTheDocument()
 })
 
 it('searches every case, open or closed, from one box', async () => {

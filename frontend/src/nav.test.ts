@@ -50,6 +50,24 @@ const ROLE_CASES: RoleCase[] = [
     landing: '/configuration',
   },
   {
+    name: 'Officer and admin',
+    roles: ['records_officer', 'admin'],
+    labels: ['Today', 'New request', 'Settings'],
+    landing: '/today',
+  },
+  {
+    name: 'Liaison and reviewer',
+    roles: ['liaison', 'reviewer'],
+    labels: ['Today', 'Settings'],
+    landing: '/today',
+  },
+  {
+    name: 'Reviewer and admin',
+    roles: ['reviewer', 'admin'],
+    labels: ['Today', 'Settings'],
+    landing: '/today',
+  },
+  {
     name: 'Intake and admin',
     roles: ['intake_clerk', 'admin'],
     labels: ['Today', 'New request', 'Settings'],

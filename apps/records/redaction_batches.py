@@ -49,17 +49,18 @@ MAX_GROUP_PROPOSALS = 2000
 _random = random.SystemRandom()
 
 
-def _pending(request: PublicRecordsRequest):
-    return (
-        RedactionProposal.objects.filter(
-            record_item__request=request,
-            record_item__review_state=RecordItem.ReviewState.RESPONSIVE,
-        )
-        .exclude(
-            Exists(RedactionProposalDecision.objects.filter(proposal=OuterRef("pk")))
-        )
-        .select_related("exemption")
+def pending_proposals():
+    """Proposals on responsive records that no person has decided yet, on
+    any case. The stage rail counts these per case from the same rule."""
+    return RedactionProposal.objects.filter(
+        record_item__review_state=RecordItem.ReviewState.RESPONSIVE,
+    ).exclude(
+        Exists(RedactionProposalDecision.objects.filter(proposal=OuterRef("pk")))
     )
+
+
+def _pending(request: PublicRecordsRequest):
+    return pending_proposals().filter(record_item__request=request).select_related("exemption")
 
 
 def pending_proposal_count(request: PublicRecordsRequest) -> int:

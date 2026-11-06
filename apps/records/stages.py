@@ -39,10 +39,9 @@ from .models import (
     MatterKind,
     PublicRecordsRequest,
     RecordItem,
-    RedactionProposal,
-    RedactionProposalDecision,
     RequestStatus,
 )
+from .redaction_batches import pending_proposals
 
 STAGES = (
     ("intake", "Intake"),
@@ -73,15 +72,10 @@ def _open_deposit_gates(ids: list[int]) -> Counter:
 
 
 def _pending_proposals(ids: list[int]) -> Counter:
-    """Redaction proposals still waiting for a person's decision, per case.
-    The same rule as ``redaction_batches.pending_proposal_count``."""
+    """Redaction proposals still waiting for a person's decision, per case."""
     return _by_request(
-        RedactionProposal.objects.filter(
-            record_item__request_id__in=ids,
-            record_item__review_state=RecordItem.ReviewState.RESPONSIVE,
-        ).exclude(
-            Exists(RedactionProposalDecision.objects.filter(proposal=OuterRef("pk")))
-        ).values("record_item__request_id").annotate(n=Count("pk")),
+        pending_proposals().filter(record_item__request_id__in=ids)
+        .values("record_item__request_id").annotate(n=Count("pk")),
         key="record_item__request_id",
     )
 
