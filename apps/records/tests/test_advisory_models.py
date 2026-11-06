@@ -180,15 +180,16 @@ class PerKindModelTests(TestCase):
                 {"request_description": "Synthetic"},
                 model_identifier="us.openai.gpt-6.1-terra",
             )
-        self.assertEqual(
-            client_factory.return_value.converse.call_args.kwargs["modelId"],
-            "us.openai.gpt-6.1-terra",
-        )
+        call = client_factory.return_value.converse.call_args.kwargs
+        self.assertEqual(call["modelId"], "us.openai.gpt-6.1-terra")
+        # The wire call itself never carries a temperature for GPT-6.1.
+        self.assertNotIn("temperature", call["inferenceConfig"])
 
     def test_the_verify_command_can_name_a_model(self):
         out = StringIO()
         with patch("apps.records.advisory_ai.boto3.client") as client_factory:
             client_factory.return_value.converse.return_value = _converse_reply(INTENT)
+            client_factory.return_value.get_account_data_retention.return_value = {"mode": "none"}
             call_command(
                 "verify_advisory_ai", "--model", "us.anthropic.claude-haiku-5-5",
                 stdout=out,

@@ -325,6 +325,20 @@ def max_output_tokens(kind: str) -> int:
     return MAX_OUTPUT_TOKENS.get(kind, 1000)
 
 
+def account_data_retention_mode() -> str:
+    """The account's Bedrock data retention mode in the advisory Region.
+
+    Zero retention (``none``, district decision 2026-11-05) is an account
+    setting no CDK resource holds, so ``verify_advisory_ai`` reads it back.
+    Raises ``AdvisoryProviderError`` when it cannot be read.
+    """
+    try:
+        client = boto3.client("bedrock", region_name=runtime.get("PRR_AI_AWS_REGION"))
+        return str(client.get_account_data_retention().get("mode", ""))
+    except (ClientError, BotoCoreError) as exc:
+        raise AdvisoryProviderError("provider_unavailable") from exc
+
+
 def inference_config(kind: str, model_identifier: str) -> dict[str, Any]:
     """The Converse inference settings for one call.
 

@@ -698,8 +698,14 @@ in `us-east-1`, `us-east-2`, and `us-west-2` only:
 
 **Zero data retention (district decision, 2026-11-05).** The district AWS
 account's Bedrock data retention mode is `none` in `us-west-2`, `us-east-1`,
-and `us-east-2` (`PutAccountDataRetention`): no prompt or completion is written
-to durable storage by AWS or shared with a model provider. A model whose
+and `us-east-2` (`PutAccountDataRetention`). Under that mode, per AWS, "No
+request or response data is written to durable storage by AWS or shared with
+the model provider" (Amazon Bedrock User Guide, *Data retention*,
+https://docs.aws.amazon.com/bedrock/latest/userguide/data-retention.html).
+No CDK resource can hold this account setting, so it is an owned exception to
+"CDK is the only provisioning path": the CIO owns it, the runtime role may
+only read it (`bedrock:GetAccountDataRetention`), and `verify_advisory_ai`
+refuses to verify any model unless the mode reads `none`. A model whose
 zero-retention access is not in effect for the account is refused under mode
 `none` and fails closed (`provider_rejected`), so nothing is retained. As of
 2026-11-05 that is Claude Fable 5.1: its public default requires `aws_review`
