@@ -6,7 +6,7 @@ tags: [architecture, authentication, api-tokens, agent, security]
 openwiki:
   roles: [architecture, integration]
   change_kinds: [authentication, token-lifecycle, public-api]
-  source_paths: [apps/api/access_tokens.py, apps/api/authentication.py, apps/api/models.py, apps/api/throttles.py, apps/api/urls.py, apps/configuration/registry.py]
+  source_paths: [apps/api/access_tokens.py, apps/api/authentication.py, apps/api/models.py, apps/api/throttles.py, apps/api/urls.py, apps/configuration/registry.py, frontend/src/pages/AgentAccess.tsx]
   symbols: [PersonalAccessTokenAuthentication, PersonalAccessTokenCollectionView, PersonalAccessTokenRotateView, PersonalAccessTokenDetailView, PersonalAccessTokenPermission, _create_token, _ensure_active_capacity, PersonalAccessToken, PersonalAccessTokenCreateThrottle]
   test_paths: [apps/api/tests/test_personal_api_tokens.py, apps/api/tests/test_personal_api_tokens_concurrency.py, apps/api/tests/test_agent_capabilities.py]
   invariants:
@@ -44,6 +44,14 @@ a prefix collides.
 
 The routes are in [`apps/api/urls.py`](../../apps/api/urls.py) under `/api/staff/auth/api-tokens/`.
 [`apps/api/access_tokens.py`](../../apps/api/access_tokens.py) implements them.
+
+Staff manage their own tokens on the Agent access screen at `/configuration/agent-access`
+(`frontend/src/pages/AgentAccess.tsx`, reachable by every staff role). It lists metadata,
+creates, rotates, and revokes through the routes above, and shows the presented secret
+once. The same screen reads the capability catalog from `/api/staff/capabilities/` to show
+which operations are direct, need human confirmation, or are human-only
+([agent parity](agent-parity.md#execution-policies)). The screen is a view over these
+rules. The server enforces the limits and the audit rows described below.
 
 | Operation | Route | Capability id | Effect |
 |---|---|---|---|
