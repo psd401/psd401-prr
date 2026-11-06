@@ -101,6 +101,30 @@ describe('record review workspace', () => {
     expect(screen.getByText(/draw a box on the page preview/i)).toBeInTheDocument()
   })
 
+  it('starts with no outcome chosen when there is no AI suggestion', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/record-items/') return response(page([baseItem]))
+      if (url.endsWith('/preview-metadata/')) return response({ page_count: 1 })
+      if (url.startsWith('/api/staff/redactions/')) return response(page([]))
+      if (url.startsWith('/api/staff/exemptions/')) return response(page([]))
+      if (url.endsWith('/advisory-responsiveness/')) return response({ enabled: true, latest: null })
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    const user = userEvent.setup()
+
+    renderReview()
+    await user.click(await screen.findByText('student-record.pdf'))
+
+    // One click must not confirm a judgment nobody made.
+    expect(await screen.findByLabelText('Review outcome')).toHaveValue('')
+    // Nothing is queued unless automatic proposals are on, so say only what is true.
+    expect(screen.getByText('No AI suggestion for this record yet.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirm review outcome' })).toBeDisabled()
+    await user.selectOptions(screen.getByLabelText('Review outcome'), 'responsive')
+    expect(screen.getByRole('button', { name: 'Confirm review outcome' })).toBeEnabled()
+  })
+
   it('preselects the AI responsiveness recommendation for explicit human approval', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)

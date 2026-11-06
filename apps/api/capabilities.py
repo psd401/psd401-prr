@@ -1466,6 +1466,15 @@ CAPABILITIES = (
         constraints=["integrity_verified", "append_only_audit"],
     ),
     _capability(
+        "record_items.read_text",
+        "Read one candidate record's extracted text with email markup removed, "
+        "for review. Audited like a page preview; the stored text is unchanged.",
+        "GET",
+        "/api/staff/record-items/{id}/text/",
+        ["/requests/:number/review"],
+        constraints=["append_only_audit"],
+    ),
+    _capability(
         "record_items.review",
         "Record a named human responsiveness or full-withholding decision.",
         "POST",

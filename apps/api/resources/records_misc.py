@@ -80,6 +80,7 @@ from apps.records.production import (
     prepare_installment,
     release_installment_with_notice,
 )
+from apps.records.readable import record_reading_text
 from apps.records.record_tags import (
     PRIVILEGE_TAGS,
     TAG_LABELS,
@@ -136,6 +137,11 @@ class RequesterViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
     allow_readonly_agent = False
 
 
+class RecordReadingTextSerializer(serializers.Serializer):
+    text = serializers.CharField(allow_blank=True)
+    truncated = serializers.BooleanField()
+
+
 class RecordItemSerializer(serializers.ModelSerializer):
     request_number = serializers.CharField(source="request.number", read_only=True)
     reviewed_by_username = serializers.CharField(
@@ -174,7 +180,7 @@ class RecordItemSerializer(serializers.ModelSerializer):
             "email_from", "email_to", "email_cc", "email_sent_at",
             "email_message_id", "email_in_reply_to", "email_sender_domain",
             "email_auto_submitted", "email_list_id", "email_precedence",
-            "email_has_calendar_part",
+            "email_has_calendar_part", "email_body_sha256",
             "tags", "advisory_suggested_state", "advisory_confidence",
         ]
 
@@ -465,6 +471,7 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         "retrieve": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER, StaffRole.ADMIN},
         "preview_metadata": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
         "preview_page": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
+        "text": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
         "review": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
         "undo_review": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
         # Any review role may bulk-review; the cap and the per-item audit row
@@ -893,6 +900,17 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         response["X-Image-Width"] = str(preview.width)
         response["X-Image-Height"] = str(preview.height)
         return response
+
+    @extend_schema(responses={200: RecordReadingTextSerializer})
+    @action(detail=True, methods=["get"], url_path="text")
+    def text(self, request, pk=None):
+        """The record's text for reading in review, without email markup.
+
+        The same audience and audit as a page preview; the stored text is
+        not changed.
+        """
+        item = self.get_object()
+        return Response(record_reading_text(item, actor=request.user))
 
     @action(detail=True, methods=["post"])
     def review(self, request, pk=None):

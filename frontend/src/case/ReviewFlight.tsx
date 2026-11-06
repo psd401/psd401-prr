@@ -14,6 +14,30 @@ interface FlightRecord {
   reviewable: boolean
   advisory_suggested_state: string | null
   advisory_confidence: number | null
+  email_from?: string
+  email_sender_domain?: string
+  email_sent_at?: string | null
+  /** Same body text, same fingerprint: identical copies fold into one. */
+  email_body_sha256?: string
+}
+
+interface ReadingText {
+  text: string
+  truncated: boolean
+}
+
+/** A record's name without its file extension: usually the email subject. */
+function recordTitle(filename: string) {
+  return filename.replace(/\.(pdf|eml|msg|txt|html?|docx?)$/i, '')
+}
+
+function sentLabel(value?: string | null) {
+  if (!value) return ''
+  return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function textUrl(id: string) {
+  return `/api/staff/record-items/${id}/text/`
 }
 
 interface AdvisoryLatest {
@@ -40,6 +64,8 @@ const PAGE_SIZE = 50
 
 const KEY_HELP = [
   ['j / k', 'Next / previous record'],
+  ['t', 'Switch between text and page image'],
+  ['f', 'Focus mode on or off'],
   ['r', 'Responsive'],
   ['n', 'Non-responsive'],
   ['d', 'Duplicate'],
@@ -71,6 +97,8 @@ export function ReviewFlight({ number }: { number: string }) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [paletteQuery, setPaletteQuery] = useState('')
   const [showClusters, setShowClusters] = useState(false)
+  const [view, setView] = useState<'text' | 'page'>('text')
+  const [focusMode, setFocusMode] = useState(false)
   const listRef = useRef<HTMLUListElement>(null)
 
   const refresh = useCallback(() => {
@@ -99,7 +127,7 @@ export function ReviewFlight({ number }: { number: string }) {
       }),
     onSuccess: (_records, input) => {
       setUndoStack((stack) => [...stack, input.ids])
-      setStatus(`${input.ids.length} selected records: ${STATE_TEXT[input.state]}.`)
+      setStatus(`${input.ids.length} records: ${STATE_TEXT[input.state]}.`)
       setSelection([])
       refresh()
     },
@@ -139,12 +167,39 @@ export function ReviewFlight({ number }: { number: string }) {
       ),
     placeholderData: (previous) => previous,
   })
-  const rows = useMemo(() => (list.data ? unwrap(list.data) : []), [list.data])
+  const loaded = useMemo(() => (list.data ? unwrap(list.data) : []), [list.data])
+  // Identical copies (the same body text, such as one newsletter in every
+  // custodian's mailbox) fold under their first copy and are decided together.
+  const copiesOf = useMemo(() => {
+    const groups = new Map<string, string[]>()
+    for (const row of loaded) {
+      const key = row.email_body_sha256 || row.id
+      groups.set(key, [...(groups.get(key) ?? []), row.id])
+    }
+    return groups
+  }, [loaded])
+  const rows = useMemo(
+    () => loaded.filter((row) => (copiesOf.get(row.email_body_sha256 || row.id) ?? [])[0] === row.id),
+    [loaded, copiesOf],
+  )
+  const groupOf = useCallback(
+    (row: FlightRecord) => copiesOf.get(row.email_body_sha256 || row.id) ?? [row.id],
+    [copiesOf],
+  )
+  // Progress across the whole case, not just this page.
+  const everything = useQuery({
+    queryKey: ['review-flight', number, 'count'],
+    queryFn: () => api<Page<FlightRecord> | FlightRecord[]>(
+      `/api/staff/record-items/?request=${encodeURIComponent(number)}`,
+      { fetchAllPages: false },
+    ),
+  })
+  const allCount = everything.data && !Array.isArray(everything.data) ? everything.data.count : null
   // While the list is loading another page, or refetching after a decision,
   // the rows on screen are the old ones and the highlighted record may be one
   // already decided. No decision is taken until the list has settled.
   const listSettled = list.isSuccess && !list.isFetching && !list.isPlaceholderData
-  const total = list.data && !Array.isArray(list.data) ? list.data.count : rows.length
+  const total = list.data && !Array.isArray(list.data) ? list.data.count : loaded.length
   const hasNext = Boolean(list.data && !Array.isArray(list.data) && list.data.next)
   const pageStart = (page - 1) * PAGE_SIZE
   const switchFilter = (next: 'unreviewed' | 'all') => {
@@ -176,6 +231,13 @@ export function ReviewFlight({ number }: { number: string }) {
     queryFn: () => api<AdvisoryLatest>(`/api/staff/record-items/${current!.id}/advisory-responsiveness/`),
     enabled: current !== null,
   })
+  const reading = useQuery({
+    queryKey: ['record-text', current?.id],
+    queryFn: () => api<ReadingText>(textUrl(current!.id)),
+    enabled: current !== null,
+    staleTime: 5 * 60 * 1000,
+  })
+  const readingText = typeof reading.data?.text === 'string' ? reading.data.text : ''
 
   // In the unreviewed view the list shrinks as records are decided, so a
   // later page can come back empty while earlier ones still hold records.
@@ -196,6 +258,11 @@ export function ReviewFlight({ number }: { number: string }) {
     const next = rows[index + 1]
     if (!next) return
     if (next.reviewable) new Image().src = previewUrl(next.id)
+    qc.prefetchQuery({
+      queryKey: ['record-text', next.id],
+      queryFn: () => api<ReadingText>(textUrl(next.id)),
+      staleTime: 5 * 60 * 1000,
+    })
     qc.prefetchQuery({
       queryKey: ['record-responsiveness-advisory', next.id],
       queryFn: () => api<AdvisoryLatest>(`/api/staff/record-items/${next.id}/advisory-responsiveness/`),
@@ -218,11 +285,23 @@ export function ReviewFlight({ number }: { number: string }) {
         setStatus('A duplicate is decided one record at a time.')
         return
       }
-      bulk.mutate({ ids: selection, state })
+      bulk.mutate({ ids: selection.flatMap((id) => {
+        const row = rows.find((candidate) => candidate.id === id)
+        return row ? groupOf(row) : [id]
+      }), state })
     } else if (current) {
-      single.mutate({ id: current.id, state })
+      const copies = groupOf(current)
+      if (copies.length > 1) {
+        if (state === 'duplicate') {
+          setStatus('Identical copies are decided together; open the record list to mark one a duplicate.')
+          return
+        }
+        bulk.mutate({ ids: copies, state })
+      } else {
+        single.mutate({ id: current.id, state })
+      }
     }
-  }, [busy, listSettled, selection, current, bulk, single])
+  }, [busy, listSettled, selection, current, bulk, single, rows, groupOf])
   const undoLast = useCallback(() => {
     const last = undoStack.at(-1)
     if (!busy && last) undo.mutate(last)
@@ -249,6 +328,8 @@ export function ReviewFlight({ number }: { number: string }) {
     { label: 'Show unreviewed only', run: () => switchFilterRef.current('unreviewed') },
     { label: 'Show all records', run: () => switchFilterRef.current('all') },
     { label: 'Toggle clusters', run: () => setShowClusters((value) => !value) },
+    { label: 'Switch text and page image', run: () => setView((value) => (value === 'text' ? 'page' : 'text')) },
+    { label: 'Focus mode on or off', run: () => setFocusMode((value) => !value) },
   ], [decide, undoLast, toggleSelected])
   const matching = commands.filter((command) =>
     command.label.toLowerCase().includes(paletteQuery.trim().toLowerCase()),
@@ -271,6 +352,9 @@ export function ReviewFlight({ number }: { number: string }) {
         d: () => decide('duplicate'),
         u: undoLast,
         x: toggleSelected,
+        t: () => setView((value) => (value === 'text' ? 'page' : 'text')),
+        f: () => setFocusMode((value) => !value),
+        Escape: () => setFocusMode(false),
       }
       const run = actions[event.key]
       if (run) {
@@ -284,8 +368,34 @@ export function ReviewFlight({ number }: { number: string }) {
 
   const proposal = advisory.data?.latest?.state === 'complete' ? advisory.data.latest.proposal : null
   const error = single.error ?? bulk.error ?? undo.error
+  const decided = allCount !== null && filter === 'unreviewed' && listSettled ? allCount - total : null
+  const allDone = filter === 'unreviewed' && listSettled && loaded.length === 0 && page === 1
+    && (allCount ?? 0) > 0
+  const copies = current ? groupOf(current).length : 1
   return (
-    <div className="space-y-4">
+    <div
+      className={focusMode
+        ? 'fixed inset-0 z-50 space-y-4 overflow-y-auto bg-surface-canvas p-4 sm:p-8'
+        : 'space-y-4'}
+      aria-label={focusMode ? 'Focused review' : undefined}
+    >
+      {decided !== null && allCount !== null && allCount > 0 && (
+        <div aria-label="Review progress">
+          <div className="mb-1 flex justify-between text-sm text-ink-muted">
+            <span>{decided.toLocaleString('en-US')} of {allCount.toLocaleString('en-US')} decided</span>
+            <span>{total.toLocaleString('en-US')} left</span>
+          </div>
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={allCount}
+            aria-valuenow={decided}
+            className="h-2 overflow-hidden rounded-full bg-surface-sunken"
+          >
+            <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(decided / allCount) * 100}%` }} />
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" variant={filter === 'unreviewed' ? 'primary' : 'secondary'}
           onClick={() => switchFilter('unreviewed')}>Unreviewed</Button>
@@ -300,6 +410,9 @@ export function ReviewFlight({ number }: { number: string }) {
         >
           Review all {total} matching in Records
         </Link>
+        <Button type="button" variant="ghost" onClick={() => setFocusMode((value) => !value)}>
+          {focusMode ? 'Exit focus (Esc)' : 'Focus (f)'}
+        </Button>
         <span className="text-sm text-ink-muted">⌘K for commands</span>
       </div>
       {showClusters && (
@@ -321,7 +434,23 @@ export function ReviewFlight({ number }: { number: string }) {
       {error && <ErrorNote error={error} />}
       {list.isPending && <Spinner />}
       {list.isError && <ErrorNote error={list.error} />}
-      {list.isSuccess && rows.length === 0 && (
+      {allDone && (
+        <Card>
+          <div className="py-8 text-center">
+            <p className="font-heading text-2xl font-bold text-ink">All done</p>
+            <p className="mt-2 font-editorial text-lg text-ink-muted">
+              Every record on this case has a decision.
+            </p>
+            <Link
+              to={`/requests/${number}/release`}
+              className="nx-btn nx-btn--primary mt-5 inline-flex h-auto min-h-11 px-5 py-2"
+            >
+              Go to Release
+            </Link>
+          </div>
+        </Card>
+      )}
+      {list.isSuccess && rows.length === 0 && !allDone && (
         <Card><EmptyState>No records to review here.</EmptyState></Card>
       )}
       {rows.length > 0 && !list.isPlaceholderData && (
@@ -345,8 +474,11 @@ export function ReviewFlight({ number }: { number: string }) {
                     onClick={() => setIndex(rowIndex)}
                     className={`cursor-pointer rounded-md px-2 py-1.5 text-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${selected ? 'bg-surface-sunken font-semibold text-ink' : 'text-ink-muted'}`}
                   >
-                    <span className="mr-2">{selection.includes(row.id) ? '☑' : '☐'}</span>
-                    {row.original_filename}
+                    <span className="mr-2">{selection.includes(row.id) ? '☑' : '☐'}</span>{' '}
+                    {recordTitle(row.original_filename)}{' '}
+                    {groupOf(row).length > 1 && (
+                      <span className="ml-1 text-xs">×{groupOf(row).length}</span>
+                    )}
                     <span className="ml-2 text-xs">
                       {STATE_TEXT[row.review_state] ?? row.review_state}
                       {row.advisory_suggested_state &&
@@ -357,7 +489,12 @@ export function ReviewFlight({ number }: { number: string }) {
               })}
             </ul>
           </Card>
-          <Card title={current.original_filename}>
+          <Card title={recordTitle(current.original_filename)}>
+            <p className="-mt-2 mb-3 text-sm text-ink-muted">
+              {[current.email_from || current.email_sender_domain, sentLabel(current.email_sent_at)]
+                .filter(Boolean).join(' · ')}
+              {copies > 1 && ` · ${copies} identical copies, decided together`}
+            </p>
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <Badge tone={current.review_state === 'unreviewed' ? 'neutral' : 'green'}>
                 {STATE_TEXT[current.review_state] ?? current.review_state}
@@ -372,7 +509,14 @@ export function ReviewFlight({ number }: { number: string }) {
             {proposal?.rationale && (
               <p className="mb-3 text-sm text-ink" aria-label="AI rationale">{proposal.rationale}</p>
             )}
-            {current.reviewable ? (
+            {view === 'text' && readingText ? (
+              <div
+                aria-label="Record text"
+                className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap rounded-md border border-line bg-surface-raised p-5 font-editorial text-base leading-relaxed text-ink"
+              >
+                {readingText}
+              </div>
+            ) : current.reviewable ? (
               <img
                 src={previewUrl(current.id)}
                 alt={`Page 1 of ${current.original_filename}`}
@@ -386,6 +530,11 @@ export function ReviewFlight({ number }: { number: string }) {
               <Button type="button" variant="secondary" disabled={busy || !listSettled} onClick={() => decide('non_responsive')}>Non-responsive (n)</Button>
               <Button type="button" variant="secondary" disabled={busy || !listSettled} onClick={() => decide('duplicate')}>Duplicate (d)</Button>
               <Button type="button" variant="ghost" disabled={busy || undoStack.length === 0} onClick={undoLast}>Undo (u)</Button>
+              {readingText && current.reviewable && (
+                <Button type="button" variant="ghost" onClick={() => setView((value) => (value === 'text' ? 'page' : 'text'))}>
+                  {view === 'text' ? 'Page image (t)' : 'Text (t)'}
+                </Button>
+              )}
             </div>
           </Card>
         </div>
