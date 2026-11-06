@@ -25,7 +25,7 @@ _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _BLOCK = re.compile(r"<(style|script|head)\b.*?</\1\s*>", re.DOTALL | re.IGNORECASE)
 _BREAK = re.compile(r"<\s*(br|/p|/div|/tr|/li|/h[1-6]|/table)\b[^>]*>", re.IGNORECASE)
 #: Real HTML element names, and Office-namespaced ones such as v:background
-#: or o:p, with nothing after the name but name="value" attributes. Any
+#: or o:p. Any
 #: other "<...>" is text a person wrote ("<REDACTED>", "<Mark Smith>",
 #: "<jane@example.org>", "<https://...>", "a < b") and stays.
 _ELEMENTS = (
@@ -37,12 +37,16 @@ _ELEMENTS = (
     "span|strike|strong|style|sub|summary|sup|svg|table|tbody|td|template|"
     "textarea|tfoot|th|thead|time|title|tr|track|tt|u|ul|var|video|wbr|xml"
 )
-_ATTRIBUTES = r"""(?:\s+[\w:-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>]+))*"""
-_TAG = re.compile(
-    r"<(?:/?(?:" + _ELEMENTS + r"|(?:o|v|w|m|st1):[a-z]+)" + _ATTRIBUTES
-    + r"\s*/?|!doctype[^<>]*)>",
-    re.IGNORECASE,
+_ATTRIBUTES = r"""(?:\s+[\w:-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>]+))"""
+_NAMES = r"(?:" + _ELEMENTS + r"|(?:o|v|w|m|st1):[a-z]+)"
+#: A tag with name="value" attributes, in any case.
+_TAG_WITH_ATTRIBUTES = re.compile(
+    r"</?" + _NAMES + _ATTRIBUTES + r"+\s*/?>", re.IGNORECASE,
 )
+#: A bare or closing tag, lowercase only, as email markup writes them: a
+#: capitalized "<Header>" or "<Time>" is a word a person wrote and stays.
+_BARE_TAG = re.compile(r"</?" + _NAMES + r"\s*/?>")
+_DOCTYPE = re.compile(r"<!doctype[^<>]*>", re.IGNORECASE)
 _IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _LINK = re.compile(r"\[([^\]]+)\]\((?:https?|mailto):[^)]*\)")
 _HEADING = re.compile(r"^#{1,6}\s+", re.MULTILINE)
@@ -55,7 +59,9 @@ def readable_text(raw: str) -> str:
     text = _COMMENT.sub("", text)
     text = _BLOCK.sub("", text)
     text = _BREAK.sub("\n", text)
-    text = _TAG.sub("", text)
+    text = _TAG_WITH_ATTRIBUTES.sub("", text)
+    text = _BARE_TAG.sub("", text)
+    text = _DOCTYPE.sub("", text)
     text = _IMAGE.sub("", text)
     text = _LINK.sub(r"\1", text)
     text = _HEADING.sub("", text)

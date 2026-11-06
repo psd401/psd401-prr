@@ -68,7 +68,8 @@ class ReadableTextTests(SimpleTestCase):
     def test_keeps_any_angle_bracket_text_that_is_not_an_html_element(self):
         raw = (
             "Sender: <REDACTED>\nContact <see attached> or <Jane Doe> at <HTTPS://example.org>\n"
-            "Sent to: <Mark Smith>\nProgram: <Head Start>\nSubject <Re:Budget> <Attn:Jane>"
+            "Sent to: <Mark Smith>\nProgram: <Head Start>\nSubject <Re:Budget> <Attn:Jane>\n"
+            "Send the file to <Header> and <Footer> by <Time>"
         )
         self.assertEqual(readable_text(raw), raw)
 
