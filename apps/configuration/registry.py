@@ -61,7 +61,6 @@ from dataclasses import dataclass
 
 from . import values
 
-
 #: The Bedrock inference profiles the production grant names
 #: (``infra/cdk/lib/advisory-bedrock.ts``), offered on the model settings.
 #: A test keeps this list and the grant identical.
