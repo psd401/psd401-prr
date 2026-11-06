@@ -613,6 +613,8 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
             "resolve",
             "estimate",
             "exclude_camera",
+            "release",
+            "bookmark",
             "attach",
         }
         self.assertFalse(

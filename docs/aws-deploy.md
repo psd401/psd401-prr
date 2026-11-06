@@ -141,13 +141,20 @@ rather than a decision:
 | `DJANGO_DEBUG`, `DJANGO_SECURE_SSL_REDIRECT`, `DJANGO_SECURE_HSTS_SECONDS`, `DJANGO_SESSION_COOKIE_AGE` | read by Django's security and session middleware from process settings; production leaves them unset and takes the secure defaults |
 
 The malware scanner (`CLAMAV_HOST`, `CLAMAV_PORT`,
-`CLAMAV_TIMEOUT_SECONDS`), the Alta camera API (`ALTA_API_BASE` and the
-write-only `ALTA_API_TOKEN`), `PORTAL_BASE_URL`, `PRA_SUPERVISOR_EMAIL`,
+`CLAMAV_TIMEOUT_SECONDS`), the Alta camera API (`ALTA_API_BASE`,
+`ALTA_API_USERNAME`, and the write-only `ALTA_API_PASSWORD`),
+`PORTAL_BASE_URL`, `PRA_SUPERVISOR_EMAIL`,
 `PRA_OFFICER_EMAIL`, `FACILITIES_EMAIL`, `DISTRICT_HOLIDAYS`,
 `DEFAULT_ESTIMATE_BUSINESS_DAYS`, and `STALL_THRESHOLD_DAYS` moved into the
 application in the last part of Phase C, and are imported once like every
 other key. Saving a scanner address pings the scanner and marks the row
-"Unverified" if it does not answer. `DEFAULT_FROM_EMAIL` is no longer read at
+"Unverified" if it does not answer; saving any of the three Alta keys signs
+in and reads the device groups once, and records the verdict under
+`ALTA_API_BASE`. Aware has no API tokens: the client signs in as a service
+account and shares one 24-hour session through the cache, because Aware keeps
+only three sessions per account. `ALTA_API_TOKEN` is retired; nothing reads a
+leftover line or stored row for it, and `verify_settings_secrets` names such
+a row as retired without failing on it. `DEFAULT_FROM_EMAIL` is no longer read at
 all: no application mail uses it, and production refuses every generic Django
 send.
 
@@ -157,7 +164,8 @@ application manages does nothing once the deployment has imported its values.
 **Before the first deploy that carries this move**, check the live `.env.app`
 for values the application would refuse, because a refused value fails the
 import and rolls the deploy back: `PORTAL_BASE_URL` must be a bare HTTPS
-origin with no path or trailing slash, `ALTA_API_BASE` must be HTTPS, and
+origin with no path or trailing slash, `ALTA_API_BASE` must be the tenant's
+HTTPS origin with no path or trailing slash (the client adds `/api/v1`), and
 `DISTRICT_HOLIDAYS` must be comma-separated `YYYY-MM-DD` dates.
 
 The Google sign-in client secret lives only in the application. Production's
@@ -295,7 +303,7 @@ line), keeping each file's mode and owner. After
 configuration held `DJANGO_SECRET_KEY` and `verify_settings_secrets` reported
 1 of 1. Copies in the daily EBS snapshots age out after 14 days. The blank
 `PRR_GOOGLE_OIDC_CLIENT_SECRET` and `ALTA_API_TOKEN` lines held no value and
-were left alone.
+were left alone (`ALTA_API_TOKEN` has since been retired and is ignored).
 
 ### 4. Refuse an inline copy
 

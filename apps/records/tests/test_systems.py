@@ -233,7 +233,7 @@ class RoutingTests(TestCase):
         prr = make_request("Meeting minutes of the board retreat.")
         self.assertEqual(triage.route_to_systems(prr), [])
 
-    @mock.patch("apps.integrations.avigilon.client.list_cameras", return_value=[])
+    @mock.patch("apps.integrations.avigilon.client.list_device_cameras", return_value=[])
     def test_bus_video_also_triggers_building_camera_hold(self, m_list):
         """Preservation-first: 'video' keywords fire the Avigilon hold too;
         over-holding is safe, humans narrow."""

@@ -82,6 +82,7 @@ class BoundedValueTests(_SaveTestCase):
         ("PRR_RECORD_PREVIEW_DPI", 71, 301),
         ("PRR_REDACTION_DPI", 95, 601),
         ("CAMERA_RETENTION_DAYS", 0, 3651),
+        ("CAMERA_HOLD_MAX_SPAN_DAYS", 0, 367),
     )
 
     def test_a_value_outside_its_bounds_is_refused_with_the_limit(self):

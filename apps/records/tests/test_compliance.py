@@ -620,6 +620,77 @@ class EstimateRevisionTests(TestCase):
             [],
         )
 
+    def test_no_management_command_lets_go_of_footage(self):
+        """A cron-run command is as automatic as a task: none may release a
+        hold, exclude a camera, or delete an Aware bookmark through the
+        public entry points (verify_alta removes only its own test mark)."""
+        import ast
+
+        def call_names(source):
+            return {
+                (
+                    node.func.attr
+                    if isinstance(node.func, ast.Attribute)
+                    else getattr(node.func, "id", "")
+                )
+                for node in ast.walk(ast.parse(source))
+                if isinstance(node, ast.Call)
+            }
+
+        guarded = {"exclude_camera", "release_preservation", "delete_bookmark"}
+        self.assertTrue(guarded <= call_names("x.release_preservation(); exclude_camera(); y.delete_bookmark()"))
+        command_paths = sorted(
+            (Path(settings.BASE_DIR) / "apps").glob("**/management/commands/*.py")
+        )
+        self.assertTrue(command_paths)
+        for path in command_paths:
+            with self.subTest(command=path.name):
+                self.assertFalse(guarded & call_names(path.read_text()))
+
+    def test_only_the_release_task_lets_go_of_footage(self):
+        """Release is automatic (rule 7), through exactly one path: the
+        release task calls release_preservation, and only release and a
+        human camera exclusion delete an Aware bookmark. No API view,
+        command, or other task reaches either."""
+        import ast
+
+        def callers(name):
+            found = set()
+            for path in sorted((Path(settings.BASE_DIR) / "apps").glob("**/*.py")):
+                if "tests" in path.parts or "migrations" in path.parts:
+                    continue
+                module = path.relative_to(settings.BASE_DIR).as_posix()
+                for top in ast.parse(path.read_text()).body:
+                    scopes = (
+                        [(f"{top.name}.{m.name}", m) for m in top.body
+                         if isinstance(m, ast.FunctionDef | ast.AsyncFunctionDef)]
+                        if isinstance(top, ast.ClassDef)
+                        else [(getattr(top, "name", "<module>"), top)]
+                    )
+                    for scope, node in scopes:
+                        for call in ast.walk(node):
+                            if not isinstance(call, ast.Call):
+                                continue
+                            called = (
+                                call.func.attr if isinstance(call.func, ast.Attribute)
+                                else getattr(call.func, "id", "")
+                            )
+                            if called == name:
+                                found.add((module, scope))
+            return found
+
+        self.assertEqual(
+            callers("release_preservation"),
+            {("apps/records/tasks.py", "release_due_footage_preservations")},
+        )
+        self.assertEqual(
+            callers("delete_bookmark"),
+            {
+                ("apps/records/triage.py", "release_preservation"),
+                ("apps/records/triage.py", "exclude_camera"),
+            },
+        )
+
     def test_no_automated_path_exists(self):
         """No background task may call either human-only revision entry point."""
         import ast
@@ -648,6 +719,10 @@ class EstimateRevisionTests(TestCase):
                 self.assertNotIn("approve_draft", calls)
                 self.assertNotIn("queue_approved", calls)
                 self.assertNotIn("exclude_camera", calls)
+                # Release is automatic, but only through the one release task
+                # (test_only_the_release_task_lets_go_of_footage); no task
+                # deletes an Aware bookmark directly.
+                self.assertNotIn("delete_bookmark", calls)
                 self.assertNotIn("create_no_records_closure_draft", calls)
                 # Closing a case and telling a third party their records are
                 # about to be disclosed are decisions with consequences no
@@ -750,6 +825,8 @@ class EstimateRevisionTests(TestCase):
                     "create_estimate_revision_draft",
                     "create_authored_draft",
                     "exclude_camera",
+                    "release_preservation",
+                    "delete_bookmark",
                 }
             )
         )

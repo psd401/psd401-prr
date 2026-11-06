@@ -583,7 +583,7 @@ describe('filter pill semantics', () => {
     {
       pageName: 'Preservations',
       groupName: 'Preservation state filters',
-      target: 'pending',
+      target: 'Pending',
       renderPageContent: () => <Preservations roles={['admin']} />,
     },
   ]
@@ -634,7 +634,7 @@ describe('filter pill semantics', () => {
     const filters = await screen.findByRole('group', {
       name: 'Preservation state filters',
     })
-    await user.click(within(filters).getByRole('button', { name: 'held' }))
+    await user.click(within(filters).getByRole('button', { name: 'Held' }))
     expect(screen.getByLabelText('Current search'))
       .toHaveTextContent('?preservation_state=held')
 
@@ -642,7 +642,7 @@ describe('filter pill semantics', () => {
       name: 'Preservation state filters',
     })
     await user.click(
-      within(updatedFilters).getByRole('button', { name: 'pending' }),
+      within(updatedFilters).getByRole('button', { name: 'Pending' }),
     )
     await waitFor(() => expect(
       screen.getByLabelText('Current search'),

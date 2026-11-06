@@ -45,12 +45,44 @@ and cited from code, tests, and ADRs; never renumber them.
    but only a Records Officer approves and sends it. Guards:
    `test_compliance.test_no_automated_path_exists`, `receipt-ast-guard`,
    `scope-ast-guard`, `estimate-letter-ast-guard`.
-7. **Footage: auto-hold always, auto-deny never** — `apps/records/triage.py` holds
-   every camera inside retention via `apps/integrations/avigilon/client.py`;
-   outside retention a human completes the search and chooses the response. There
-   is no auto-denial code path and none may be added; exclusions need a human and
-   a reason through `triage.exclude_camera()`. If Alta is down or unconfigured,
-   holds degrade to URGENT manual instructions to facilities — never to silence.
+7. **Footage: auto-hold always, auto-deny never** — `apps/records/triage.py`
+   auto-holds every camera at each site the request names
+   (`apps/records/footage_sites.py`), or every camera district-wide when no site
+   is identified, with a no-expiry Aware bookmark per camera
+   (`apps/integrations/avigilon/client.py`). Retention is per camera, from
+   Aware's oldest retained footage. A hold narrower than the request (named
+   sites only, or a date span clipped to `CAMERA_HOLD_MAX_SPAN_DAYS`) sends an
+   URGENT scope notice; a Records Officer widens it district-wide with a reason
+   through `triage.widen_preservation()`, which bookmarks only cameras not yet
+   tried. Widening is refused while the first run is PENDING; a widen that
+   cannot list Aware cameras keeps the hold's state and scope; its notices count
+   only the cameras it added. Widening only preserves more, so it is a direct
+   action, not a human-only handoff. Zero cameras at a named site goes to human
+   adequate-search review plus an URGENT notice (`NO_CAMERAS`), never "held";
+   PARTIAL sends an URGENT notice naming each short camera. Where no camera
+   retains the window, a human completes the search and chooses the response.
+   There is no auto-denial code path and none may be added. Camera exclusion
+   is human-only with a reason (`triage.exclude_camera()`, AST-guarded against
+   background callers). Release is automatic, never a click:
+   `tasks.release_due_footage_preservations` (hourly beat, and after every
+   closing transition) is the only caller of `triage.release_preservation()`.
+   A hold is released once the request and any case of record it was merged
+   into are closed: at closing for fulfilled, withdrawn, duplicate, and
+   non-request closures, and `triage.PRA_SUIT_WINDOW` (one year,
+   RCW 42.56.550(6)) after a denial, no-records, or abandoned closure. A
+   request with no closing time, or reopened, is not released; one reopened
+   after its release gets a timeline entry to re-preserve by hand. Release and
+   exclusion keep each bookmark `RELEASE_FAILED` (not yet confirmed deleted)
+   until Aware confirms its delete, so a refusal or crash stays retryable; the
+   next run retries it. Release waits while a hold run is still bookmarking.
+   The hold task is
+   enqueued only after intake commits, and claims each camera before calling
+   Aware, so two runs never bookmark one camera. If Aware is down or
+   unconfigured, or a hold task crashes or stops heartbeating for 15 minutes
+   (the 5-minute sweeper), holds degrade to URGENT manual instructions to
+   facilities — never to silence, and never to EXPIRED. A stalled widen sends
+   the notice and keeps the hold's state; a run's final save never overwrites
+   what the sweeper set.
 8. **The system registry routes collection** — `RecordSystem`, seeded by
    `manage.py seed_systems`; `triage.route_to_systems` opens a CollectionTask per
    match and urgent_hold systems (bus video!) fire a preservation email.

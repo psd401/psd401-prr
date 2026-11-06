@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
@@ -34,7 +35,8 @@ class HumanOnlyRuntimeBoundaryTests(TestCase):
         )
 
     @property
-    def auth(self):
+    def auth(self) -> dict[str, Any]:
+        # Any: these are WSGI environ extras, not the client's typed keywords.
         return {"HTTP_AUTHORIZATION": f"Token {self.token.key}"}
 
     def assert_handoff(self, response):
@@ -88,6 +90,30 @@ class HumanOnlyRuntimeBoundaryTests(TestCase):
             **self.auth,
         )
         self.assert_handoff(response)
+
+    def test_token_has_no_release_route(self):
+        # Release is automatic (rule 7); there is no route to hand off.
+        PublicRecordsRequest.objects.filter(pk=self.prr.pk).update(
+            status=RequestStatus.FULFILLED, closed_at=timezone.now(),
+        )
+        preservation = FootagePreservation.objects.create(
+            request=self.prr,
+            window_start=timezone.now(),
+            window_end=timezone.now(),
+            state=FootagePreservation.State.HELD,
+        )
+        response = self.client.post(
+            f"/api/staff/preservations/{preservation.id}/release/",
+            {
+                "reason": "Request fulfilled and the requester confirmed receipt.",
+                "attest_no_litigation_hold": True,
+            },
+            content_type="application/json",
+            **self.auth,
+        )
+        self.assertIn(response.status_code, (404, 405))
+        preservation.refresh_from_db()
+        self.assertEqual(preservation.state, FootagePreservation.State.HELD)
 
     def test_token_must_handoff_before_clarification_receipt_lookup(self):
         missing_receipt_id = uuid.uuid4()

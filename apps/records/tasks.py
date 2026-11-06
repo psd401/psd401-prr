@@ -3,8 +3,11 @@ Background jobs. The deadline watchdog is the single most important piece of
 Phase 1 — RCW 42.56.550 penalties accrue per day, so a missed 5-day
 acknowledgment is the district's most expensive possible bug.
 """
+import datetime as dt
 import logging
+import re
 from importlib import import_module
+from typing import NamedTuple
 
 from celery import shared_task
 from django.core.exceptions import ValidationError
@@ -853,80 +856,791 @@ def stall_detector():
         )
 
 
-@shared_task
-def execute_footage_hold(preservation_id: int):
-    """Create saved clips on EVERY camera for the preservation window.
-    Broad by default — narrowing is a human decision (triage.exclude_camera).
-    If the Aware API isn't configured/reachable, degrade to a MANUAL hold:
-    urgent email to facilities with exact instructions, because the retention
-    clock does not care about our API status."""
+# A camera is HELD only when footage covers at least this share of the
+# requested window on every head; anything less is a GAP a human reviews.
+FULL_COVERAGE = 0.95
+
+
+def _notify_manual_hold(
+    fp, *, reason: str, error: str, site_codes, cameras=(), condition: str = "",
+) -> None:
+    """Send the URGENT manual-hold instructions and record on the timeline
+    whether the alert went out."""
+    from .models import StatusEvent
+
+    extra = {"cameras": list(cameras), "condition": condition} if cameras or condition else {}
+    notification_result = notifications.notify_footage_manual_hold(
+        fp,
+        error=error,
+        site_codes=list(site_codes),
+        **extra,
+    )
+    if notification_result is True:
+        notification_note = "notification sent or queued to facilities."
+    elif notification_result is None:
+        notification_note = (
+            "an equivalent notification was already sent or queued; "
+            "duplicate alert suppressed."
+        )
+    else:
+        notification_note = (
+            "notification delivery failed or was blocked; operational "
+            "intervention required."
+        )
+    StatusEvent.objects.create(
+        request=fp.request,
+        note=(
+            f"Footage preservation: {reason} — URGENT manual hold "
+            + notification_note
+        ),
+    )
+
+
+class _HoldRun(NamedTuple):
+    """One run of the hold task: the marker it owns and the state it began in."""
+
+    started_at: dt.datetime
+    from_state: str
+
+
+def _start_hold_run(fp) -> _HoldRun:
+    """Adopt the run marker intake or the widen set (or start one for a
+    rerun) and heartbeat once."""
+    from .models import FootagePreservation
+
+    now = timezone.now()
+    run = _HoldRun(fp.hold_run_started_at or now, fp.state)
+    FootagePreservation.objects.filter(pk=fp.pk).update(
+        hold_run_started_at=run.started_at, hold_heartbeat_at=now,
+    )
+    fp.hold_run_started_at, fp.hold_heartbeat_at = run.started_at, now
+    return run
+
+
+def _heartbeat(fp, run: _HoldRun) -> None:
+    from .models import FootagePreservation
+
+    FootagePreservation.objects.filter(
+        pk=fp.pk, hold_run_started_at=run.started_at,
+    ).update(hold_heartbeat_at=timezone.now())
+
+
+def _finish_hold_run(fp, run: _HoldRun, state) -> bool:
+    """Write the run's result only if nothing changed the hold since the run
+    began; in particular never overwrite a MANUAL the sweeper set. Audited
+    when it loses: the URGENT notice that superseded it already went out."""
+    from apps.audit.models import audit
+
+    from .models import FootagePreservation
+
+    won = FootagePreservation.objects.filter(
+        pk=fp.pk, state=run.from_state, hold_run_started_at=run.started_at,
+    ).update(state=state, hold_run_started_at=None)
+    if won:
+        fp.state, fp.hold_run_started_at = state, None
+        return True
+    audit(
+        "footage.hold_result_superseded", target=fp.request.number,
+        result=str(state), run_started=run.started_at.isoformat(),
+    )
+    return False
+
+
+def _degrade_or_report_widen(
+    fp, run: _HoldRun, *, only_new: bool, widened_from, reason: str, error: str,
+) -> None:
+    """A widen only adds cameras: when it cannot run, send the URGENT
+    district-wide notice and leave the hold's state and held cameras as they
+    were. Its scope returns to the sites actually held, so the confirmation
+    never claims district-wide cameras and the widen can be posted again.
+    A first run degrades to MANUAL."""
+    from apps.audit.models import audit
+
+    from . import triage
+    from .models import FootagePreservation, StatusEvent
+
+    if not only_new:
+        _degrade_footage_hold_to_manual(fp, run, reason=reason, error=error)
+        return
+    _notify_manual_hold(
+        fp, reason=f"widened hold not run: {reason}", error=error, site_codes=[],
+    )
+    if widened_from and FootagePreservation.objects.filter(
+        pk=fp.pk, site_codes=[], hold_run_started_at=run.started_at,
+    ).update(site_codes=list(widened_from)):
+        fp.site_codes = list(widened_from)
+        sites = triage.describe_sites(widened_from)
+        audit("footage.hold_widen_not_run", target=fp.request.number,
+              sites=fp.site_codes, reason=reason)
+        StatusEvent.objects.create(
+            request=fp.request,
+            note=(
+                f"Footage hold not widened ({reason}): Aware still holds only "
+                f"{sites}, so the hold's scope is back to {sites}. Facilities "
+                "has URGENT manual instructions for every camera district-wide; "
+                "widen it again once Aware answers."
+            ),
+        )
+
+
+def _end_hold_run(preservation_id: int, run: _HoldRun | None) -> None:
+    """Clear this run's marker when it stops without writing a result."""
+    from .models import FootagePreservation
+
+    if run is not None:
+        FootagePreservation.objects.filter(
+            pk=preservation_id, hold_run_started_at=run.started_at,
+        ).update(hold_run_started_at=None)
+
+
+def _degrade_footage_hold_to_manual(
+    fp, run: _HoldRun, *, reason: str, error: str, site_codes=None,
+) -> None:
+    """Rule 7: when no camera ended up held, fall back to an URGENT manual
+    hold — facilities gets exact instructions and the timeline says why and
+    whether the alert went out. Never silence, never a false "Held"."""
+    from .models import FootagePreservation
+
+    if not _finish_hold_run(fp, run, FootagePreservation.State.MANUAL):
+        return
+    _notify_manual_hold(
+        fp,
+        reason=reason,
+        error=error,
+        site_codes=fp.site_codes if site_codes is None else site_codes,
+    )
+
+
+# Said on every camera whose create may have landed without confirming.
+BOOKMARK_MAY_EXIST = (
+    "a bookmark may already exist on this device; check it in Aware before retrying"
+)
+_HTTP_STATUS = re.compile(r"\bHTTP (\d{3})\b")
+_REDACT = re.compile(
+    r"https?://\S+|host='[^']*'|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
+)
+
+
+def _safe_alta_error(exc: BaseException, *, action: str = "bookmark") -> str:
+    """A short class-plus-status description of an Aware failure. Stored and
+    emailed, so it never carries a URL, a hostname, or a device id."""
     from apps.integrations.avigilon import client as alta
 
-    from .models import CameraHold, FootagePreservation, StatusEvent
+    status = _HTTP_STATUS.search(str(exc))
+    detail = type(exc).__name__ + (f", HTTP {status.group(1)}" if status else "")
+    logger.debug("Aware %s failed: %s", action, _REDACT.sub("<redacted>", str(exc)))
+    if isinstance(exc, alta.AltaWriteUncertain):
+        return f"Aware {action} uncertain ({detail}): {BOOKMARK_MAY_EXIST}."
+    return f"Aware {action} failed ({detail})."
 
-    fp = FootagePreservation.objects.select_related("request").get(pk=preservation_id)
-    prr = fp.request
+
+def _camera_line(ch) -> str:
+    """One camera for a human checklist: name, site, and what happened."""
+    from .models import CameraHold
+
+    label = f"{ch.camera_name or 'Unnamed camera'} ({ch.site or 'no site'})"
+    if ch.state == CameraHold.State.GAP:
+        confirmed = f"{ch.coverage_fraction:.0%}" if ch.coverage_fraction is not None else "unknown"
+        return f"{label}: footage gap or unverified coverage ({confirmed} confirmed)"
+    if ch.state == CameraHold.State.FAILED:
+        return f"{label}: failed — {ch.error}" if ch.error else f"{label}: failed"
+    if ch.state == CameraHold.State.NOT_RETAINED:
+        return f"{label}: no footage retained for the window"
+    return f"{label}: not attempted"
+
+
+def _no_cameras_at(fp, site_codes) -> None:
+    """A named site has no cameras in Aware: queue the adequate search and
+    send the URGENT manual notice, since footage may sit on another recorder."""
+    from . import triage
+
+    sites = triage.describe_sites(site_codes)
+    triage.record_no_cameras_review(fp, site_codes=site_codes)
+    _notify_manual_hold(
+        fp,
+        reason=f"Aware has no cameras at {sites}",
+        error=(
+            f"Aware lists no cameras at {sites}, so nothing was bookmarked "
+            "there; a human must find what, if anything, records the site "
+            "and preserve it"
+        ),
+        site_codes=site_codes,
+        condition="no-cameras:" + ",".join(site_codes),
+    )
+
+
+def _local_time(value) -> str:
+    return f"{timezone.localtime(value):%Y-%m-%d %H:%M} Pacific"
+
+
+def _bookmark_coverage(bookmark, *, sources, start, end, now):
+    """Return (lowest share of the REQUESTED window that footage covers
+    across the camera's heads, a note per short or erroring head, whether
+    every head's coverage was verified).
+
+    Each head reports the seconds of footage Aware stores inside the
+    bookmark. Score them against the requested window [start, end) up to
+    ``now``: footage after now cannot exist yet, and footage before the
+    bookmark start (the oldest retained) is gone, so it counts against the
+    window. A bookmarked head with no report is unverified. All arguments
+    are UTC."""
+    if not bookmark.coverage:
+        return 0.0, ["no per-head coverage reported by Aware; check the bookmark"], False
+    elapsed = (min(end, now) - start).total_seconds()
+    if elapsed <= 0:
+        elapsed = (end - start).total_seconds()
+    fractions, notes = [], []
+    for head in bookmark.coverage:
+        fraction = min(1.0, max(0.0, head.covered_seconds) / elapsed)
+        fractions.append(fraction)
+        if fraction < FULL_COVERAGE or head.error:
+            note = f"head {head.source}: {fraction:.0%}"
+            if head.error:
+                note += f" ({head.error})"
+            notes.append(note)
+    reported = {head.source for head in bookmark.coverage}
+    unreported = [sid for sid in dict.fromkeys(sources) if sid not in reported]
+    for sid in unreported:
+        fractions.append(0.0)
+        notes.append(f"head {sid}: no coverage reported by Aware")
+    verified = not unreported and not any(head.error for head in bookmark.coverage)
+    return min(fractions), notes, verified
+
+
+def _hold_one_camera(fp, cam, ch) -> None:
+    """Bookmark one camera from the later of the window start and its oldest
+    retained footage, then record coverage. Never raises."""
+    import datetime as dt
+
+    from apps.integrations.avigilon import client as alta
+
+    from . import triage
+    from .models import CameraHold
+
+    start = fp.window_start.astimezone(dt.UTC)
+    end = fp.window_end.astimezone(dt.UTC)
+    notes = []
+    if cam.status and cam.status != "CONNECTED":
+        notes.append(f"Camera status {cam.status} when the hold ran.")
+    if end > timezone.now():
+        notes.append("The window ends after the hold ran; later footage did not exist yet.")
+
+    pruned_to = cam.pruned_to
+    if pruned_to is not None:
+        # Aware times are UTC; a naive one must not be read as server-local.
+        pruned_to = (
+            pruned_to.replace(tzinfo=dt.UTC) if timezone.is_naive(pruned_to)
+            else pruned_to.astimezone(dt.UTC)
+        )
+    if pruned_to is None:
+        hold_start = start
+        notes.append("Aware reported no oldest-footage time; bookmarked from the window start.")
+    elif pruned_to >= end:
+        ch.state = CameraHold.State.NOT_RETAINED
+        ch.coverage_fraction = 0.0
+        ch.error = ""
+        ch.hold_claimed_at = None  # no create was attempted
+        notes.append(
+            f"Oldest retained footage ({_local_time(pruned_to)}) is at or after "
+            "the window end; nothing to bookmark, but other users' bookmarks "
+            "on this device may still hold older footage: check them in Aware."
+        )
+        ch.coverage_note = " ".join(notes)[:500]
+        ch.save()
+        return
+    else:
+        hold_start = max(start, pruned_to)
+        if pruned_to > start:
+            notes.append(
+                f"Oldest retained footage is {_local_time(pruned_to)}, after the "
+                "window start; bookmarked from then."
+            )
 
     try:
-        cameras = alta.list_cameras()
-    except alta.AltaError as exc:
-        fp.state = FootagePreservation.State.MANUAL
-        fp.save(update_fields=["state"])
-        notification_result = notifications.notify_footage_manual_hold(
-            fp,
-            error=str(exc),
+        bookmark = alta.create_bookmark_hold(
+            cam, hold_start, end,
+            name=triage.bookmark_name(fp.request, cam.name),
+            description=triage.BOOKMARK_DESCRIPTION,
         )
-        if notification_result is True:
-            notification_note = "notification sent or queued to facilities."
-        elif notification_result is None:
-            notification_note = (
-                "an equivalent notification was already sent or queued; "
-                "duplicate alert suppressed."
+    except Exception as exc:  # noqa: BLE001 — per-camera isolation
+        ch.state = CameraHold.State.FAILED
+        ch.error = _safe_alta_error(exc)[:500]
+        if isinstance(exc, alta.AltaWriteUncertain):
+            notes.append(BOOKMARK_MAY_EXIST[0].upper() + BOOKMARK_MAY_EXIST[1:] + ".")
+        else:
+            ch.hold_claimed_at = None  # Aware made no bookmark; a rerun may retry
+        ch.coverage_note = " ".join(notes)[:500]
+        ch.save()
+        return
+
+    # The bookmark exists now: record it before anything else can fail, so a
+    # rerun never makes a second one and a release can still delete it.
+    ch.clip_id = str(bookmark.id)[:100]
+    ch.save(update_fields=["clip_id"])
+    try:
+        # Score against when this bookmark was made: a camera reached late in
+        # a long run had more footage to store than existed when the run began.
+        fraction, head_notes, verified = _bookmark_coverage(
+            bookmark, sources=cam.sources, start=start, end=end, now=timezone.now(),
+        )
+        ch.coverage_fraction = fraction
+        # An unverified head is never a clean hold.
+        ch.state = (
+            CameraHold.State.HELD if verified and fraction >= FULL_COVERAGE
+            else CameraHold.State.GAP
+        )
+        ch.error = ""
+        if head_notes:
+            notes.append("Short coverage: " + "; ".join(head_notes) + ".")
+        ch.coverage_note = " ".join(notes)[:500]
+        ch.save()
+    except Exception as exc:  # the bookmark stands; say so
+        logger.exception("Recording footage hold %s failed after its bookmark", ch.pk)
+        ch.state = CameraHold.State.FAILED
+        ch.error = (
+            f"Recording the hold failed ({type(exc).__name__}) after Aware made "
+            "the bookmark: the bookmark exists, but its coverage is unconfirmed; "
+            "check it in Aware."
+        )[:500]
+        ch.save(update_fields=["state", "error"])
+
+
+def _window_predates_flat_retention(fp) -> bool:
+    floor = fp.created_at - dt.timedelta(days=runtime.get("CAMERA_RETENTION_DAYS"))
+    return fp.window_end < floor
+
+
+# A hold run whose heartbeat is this old has stopped; tell a human.
+FOOTAGE_HOLD_STALL_MINUTES = 15
+HOLD_STOPPED_ERROR = (
+    "The automatic hold stopped before it finished, so some or all cameras "
+    "may not be bookmarked"
+)
+WIDEN_STOPPED_ERROR = (
+    "Widening the hold district-wide stopped before it finished, so some "
+    "cameras outside the original sites may not be bookmarked"
+)
+
+
+def _claim_pending_as_manual(fp, *, reason: str, error: str, stale_before=None) -> bool:
+    """Move a still-PENDING preservation to MANUAL and send the URGENT notice.
+    Conditional, so a finished hold, a run that just heartbeat, or a second
+    sweeper is left alone."""
+    from .models import FootagePreservation
+
+    still = FootagePreservation.objects.filter(
+        pk=fp.pk, state=FootagePreservation.State.PENDING,
+    )
+    if stale_before is not None:
+        still = still.filter(hold_heartbeat_at__lt=stale_before)
+    if not still.update(state=FootagePreservation.State.MANUAL, hold_run_started_at=None):
+        return False
+    fp.state, fp.hold_run_started_at = FootagePreservation.State.MANUAL, None
+    _notify_manual_hold(fp, reason=reason, error=error, site_codes=fp.site_codes)
+    return True
+
+
+def _notify_widen_stopped(fp) -> None:
+    _notify_manual_hold(
+        fp, reason="widened hold stopped before it finished",
+        error=WIDEN_STOPPED_ERROR, site_codes=[], condition="widen-stopped",
+    )
+
+
+def _claim_stalled_widen(fp, *, stale_before) -> bool:
+    """A widen that stopped keeps the hold's state (its earlier cameras are
+    still bookmarked); end the run and send the URGENT notice."""
+    from .models import FootagePreservation
+
+    if not FootagePreservation.objects.filter(
+        pk=fp.pk, hold_run_started_at=fp.hold_run_started_at,
+        hold_heartbeat_at__lt=stale_before,
+    ).update(hold_run_started_at=None):
+        return False
+    fp.hold_run_started_at = None
+    _notify_widen_stopped(fp)
+    return True
+
+
+@shared_task
+def sweep_stalled_footage_holds() -> int:
+    """Rule 7 backstop: a hold run (the first one or a widen) that never
+    started or stopped mid-way must not sit with nobody told while retention
+    runs out. Acts on a stale heartbeat, never on age: a long district-wide
+    run keeps heartbeating."""
+    from .models import FootagePreservation
+
+    cutoff = timezone.now() - dt.timedelta(minutes=FOOTAGE_HOLD_STALL_MINUTES)
+    stalled = FootagePreservation.objects.select_related("request").filter(
+        Q(state=FootagePreservation.State.PENDING) | Q(hold_run_started_at__isnull=False),
+        hold_heartbeat_at__lt=cutoff,
+    ).exclude(state=FootagePreservation.State.RELEASED)
+    claimed = 0
+    for fp in stalled:
+        if fp.state == FootagePreservation.State.PENDING:
+            claimed += _claim_pending_as_manual(
+                fp,
+                reason=f"hold not finished after {FOOTAGE_HOLD_STALL_MINUTES} minutes",
+                error=HOLD_STOPPED_ERROR,
+                stale_before=cutoff,
             )
         else:
-            notification_note = (
-                "notification delivery failed or was blocked; operational "
-                "intervention required."
+            claimed += _claim_stalled_widen(fp, stale_before=cutoff)
+    return claimed
+
+
+@shared_task
+def execute_footage_hold(
+    preservation_id: int, only_new: bool = False, widened_from=None,
+):
+    """Run the hold; whatever happens, never leave it PENDING. ``only_new``
+    (a widen) bookmarks only cameras with no hold row yet; ``widened_from``
+    is the scope it widened, restored if the widen cannot run."""
+    try:
+        _execute_footage_hold(
+            preservation_id, only_new=only_new, widened_from=widened_from,
+        )
+    except Exception:
+        if only_new:
+            _widen_stopped(preservation_id)
+        raise
+    finally:
+        _never_leave_pending(preservation_id)
+
+
+def _widen_stopped(preservation_id: int) -> None:
+    """A widen that raised is not PENDING, so _never_leave_pending skips it;
+    tell a human now instead of waiting for the sweeper."""
+    from .models import FootagePreservation
+
+    try:
+        fp = FootagePreservation.objects.select_related("request").get(pk=preservation_id)
+        _notify_widen_stopped(fp)
+    except Exception:  # keep the original error
+        logger.exception("Could not report widened footage hold %s", preservation_id)
+
+
+def _never_leave_pending(preservation_id: int) -> None:
+    from .models import FootagePreservation
+
+    try:
+        fp = FootagePreservation.objects.select_related("request").get(pk=preservation_id)
+        if fp.state == FootagePreservation.State.PENDING:
+            _claim_pending_as_manual(
+                fp, reason="hold stopped before it finished", error=HOLD_STOPPED_ERROR,
             )
+    except Exception:  # the sweeper retries; keep the original error
+        logger.exception("Could not move footage hold %s off PENDING", preservation_id)
+
+
+def _execute_footage_hold(
+    preservation_id: int, *, only_new: bool = False, widened_from=None,
+):
+    """Bookmark every in-scope camera for the requested window: each camera at
+    the sites the request names, or every camera district-wide when it names
+    none. Broad by default — narrowing is a human decision
+    (triage.exclude_camera). Holds run one camera at a time, and a rerun
+    skips cameras that already have a bookmark.
+
+    Outcomes: HELD only when every in-scope camera is fully covered; PARTIAL
+    when something is bookmarked but anything is short; NO_CAMERAS when the
+    named sites have no cameras in Aware; EXPIRED when no in-scope camera
+    retains the window; MANUAL (urgent email to facilities) when the API is
+    unreachable, returns no cameras, a named site has no Aware group, or no
+    hold succeeded — the retention clock does not care about our API status.
+    Every result is written conditionally (_finish_hold_run), so a run the
+    sweeper already reported never overwrites what it set.
+    """
+    from .models import FootagePreservation
+
+    fp = FootagePreservation.objects.select_related("request").get(pk=preservation_id)
+    if fp.state == FootagePreservation.State.RELEASED:
+        return
+    run = _start_hold_run(fp)
+    try:
+        _run_footage_hold(fp, run, only_new=only_new, widened_from=widened_from)
+    finally:
+        _end_hold_run(fp.pk, run)
+
+
+def _released_during_run(fp, ch) -> bool:
+    """Whether the hold was released while this run was bookmarking. Release
+    is refused while a run holds its marker, but the sweeper clears the
+    marker of a stalled run; if a release followed, the bookmark this run
+    just made is not in the release's delete list. Mark it not yet confirmed
+    deleted so the release retry deletes it, and stop the run. The check runs
+    after each camera, so at most one bookmark is made after a release. A
+    create Aware never confirmed has no id to delete by, so its bookmark name
+    goes on the timeline for a human to find in Aware."""
+    from apps.audit.models import audit
+
+    from . import triage
+    from .models import CameraHold, FootagePreservation, StatusEvent
+
+    if not FootagePreservation.objects.filter(
+        pk=fp.pk, state=FootagePreservation.State.RELEASED,
+    ).exists():
+        return False
+    camera = ch.camera_name or ch.camera_id
+    if CameraHold.objects.filter(
+        pk=ch.pk, clip_id="", state=CameraHold.State.FAILED,
+        error__contains=BOOKMARK_MAY_EXIST,
+    ).exists():
+        audit("footage.bookmark_may_exist_after_release",
+              target=fp.request.number, camera=camera)
         StatusEvent.objects.create(
-            request=prr,
+            request=fp.request,
             note=(
-                "Footage preservation: API unavailable — URGENT manual hold "
-                + notification_note
+                f"Aware never confirmed a bookmark create on {camera} made after "
+                "the hold was released, so a PRR bookmark may exist; find and "
+                "delete it in Aware: "
+                f"{triage.bookmark_name(fp.request, camera)}."
+            ),
+        )
+    elif CameraHold.objects.filter(pk=ch.pk).exclude(clip_id="").update(
+        state=CameraHold.State.RELEASE_FAILED,
+    ):
+        audit("footage.bookmark_made_after_release", target=fp.request.number,
+              camera=camera)
+        StatusEvent.objects.create(
+            request=fp.request,
+            note=(
+                f"An Aware bookmark on {camera} was made after the hold was "
+                "released and is not yet confirmed deleted. The automatic "
+                "release deletes it on its next run."
+            ),
+        )
+    return True
+
+
+def _run_footage_hold(fp, run: _HoldRun, *, only_new: bool, widened_from) -> None:
+    from collections import Counter
+
+    from apps.integrations.avigilon import client as alta
+
+    from . import triage
+    from .models import CameraHold, FootagePreservation, StatusEvent
+
+    prr = fp.request
+    named = list(fp.site_codes or [])
+
+    try:
+        cameras = alta.list_device_cameras()
+        groups = alta.list_device_groups() if named else []
+    # Rule 7: transport, HTTP, and decode errors must degrade like AltaError
+    # does; an escaping exception would leave the hold PENDING and nobody told.
+    except Exception as exc:  # noqa: BLE001
+        error = _safe_alta_error(exc, action="camera list")
+        if _window_predates_flat_retention(fp):
+            # Never EXPIRED: only Aware knows which cameras keep it longer.
+            error += (
+                " The window predates the "
+                f"{runtime.get('CAMERA_RETENTION_DAYS')}-day retention setting, "
+                "but some cameras keep footage longer: check each camera's "
+                "retention in Aware and bookmark any that still hold the window."
+            )
+        _degrade_or_report_widen(
+            fp, run, only_new=only_new, widened_from=widened_from,
+            reason="API unavailable", error=error,
+        )
+        return
+
+    if not cameras:
+        _degrade_or_report_widen(
+            fp, run, only_new=only_new, widened_from=widened_from,
+            reason="Aware returned zero cameras",
+            error=(
+                "Aware returned zero cameras, so nothing was preserved; a human "
+                "must confirm where any footage for this window lives"
             ),
         )
         return
 
-    held, failed = 0, 0
-    for cam in cameras:
-        ch = CameraHold.objects.create(
-            preservation=fp, camera_id=str(cam["id"]),
-            camera_name=cam.get("name", ""), site=cam.get("site", ""),
-        )
-        try:
-            clip_id = alta.create_clip_hold(
-                str(cam["id"]), fp.window_start, fp.window_end,
-                label=f"{prr.number} PRA hold",
+    def norm(value):
+        return (value or "").strip().upper()
+
+    missing, empty = [], []
+    if named:
+        group_names = {norm(group.name) for group in groups}
+        camera_sites = {norm(cam.site) for cam in cameras}
+        missing = [code for code in named if norm(code) not in group_names]
+        empty = [
+            code for code in named
+            if code not in missing and norm(code) not in camera_sites
+        ]
+        in_scope = {norm(code) for code in named} - {norm(code) for code in missing + empty}
+        scoped = [cam for cam in cameras if norm(cam.site) in in_scope]
+    else:
+        scoped = list(cameras)
+
+    if not scoped:
+        if missing:
+            _degrade_footage_hold_to_manual(
+                fp, run,
+                reason=f"no Aware device group for {triage.describe_sites(missing)}",
+                error=(
+                    "Aware has no device group for "
+                    f"{triage.describe_sites(missing)}, so nothing was preserved "
+                    "there; a human must find which cameras cover the site"
+                ),
+                site_codes=missing,
             )
-            ch.clip_id = clip_id
-            ch.state = CameraHold.State.HELD
-            held += 1
-        except Exception as exc:  # noqa: BLE001 — per-camera isolation
-            ch.state = CameraHold.State.FAILED
-            ch.error = str(exc)[:500]
-            failed += 1
-        ch.save()
+        elif not _finish_hold_run(fp, run, FootagePreservation.State.NO_CAMERAS):
+            return
+        if empty:
+            _no_cameras_at(fp, empty)
+        return
 
-    fp.state = (FootagePreservation.State.HELD if failed == 0
-                else FootagePreservation.State.PARTIAL)
-    fp.save(update_fields=["state"])
+    skip = {CameraHold.State.RELEASED, *CameraHold.BOOKMARKED_STATES}
+    added = []
+    for cam in scoped:  # serial: one Aware bookmark at a time
+        ch, created = CameraHold.objects.get_or_create(
+            preservation=fp,
+            camera_id=str(cam.id)[:100],
+            defaults={
+                "camera_name": (cam.name or "")[:255],
+                "site": (cam.site or "")[:255],
+                "device_group_id": (cam.device_group_id or "")[:100],
+            },
+        )
+        if created:
+            added.append(ch.pk)
+        # A recorded bookmark id means the bookmark exists: never make another.
+        # A widen touches only cameras never tried before.
+        if (only_new and not created) or ch.state in skip or ch.clip_id \
+                or ch.excluded_at is not None:
+            continue
+        # Claim the camera before calling Aware: a concurrent run that got
+        # here first owns it. A run that crashes between the claim and the
+        # create leaves the claim set, so no later run (a widen included)
+        # retries that camera; it stays PENDING and the partial notice
+        # counts it as not held.
+        claimed_at = timezone.now()
+        if not CameraHold.objects.filter(
+            pk=ch.pk, clip_id="", hold_claimed_at__isnull=True,
+        ).update(hold_claimed_at=claimed_at):
+            continue
+        ch.hold_claimed_at = claimed_at
+        _heartbeat(fp, run)
+        _hold_one_camera(fp, cam, ch)
+        if _released_during_run(fp, ch):
+            return
 
-    StatusEvent.objects.create(
-        request=prr,
-        note=f"Footage preservation: {held} camera(s) held, {failed} failed. "
-             "Review the hold and exclude irrelevant cameras (reason required).",
+    holds = fp.camera_holds.filter(excluded_at__isnull=True).exclude(
+        state=CameraHold.State.RELEASED,
     )
-    notifications.notify_footage_hold_complete(fp, held=held, failed=failed)
+    counts = Counter(holds.values_list("state", flat=True))
+    held = counts[CameraHold.State.HELD]
+    gap = counts[CameraHold.State.GAP]
+    not_retained = counts[CameraHold.State.NOT_RETAINED]
+    failed = counts[CameraHold.State.FAILED] + counts[CameraHold.State.PENDING]
+
+    if held + gap == 0:
+        if failed == 0 and not missing:
+            if not _finish_hold_run(fp, run, FootagePreservation.State.EXPIRED):
+                return
+            triage.record_outside_retention_review(
+                fp,
+                reason=(
+                    "Aware holds no footage for the requested window on any of "
+                    f"the {not_retained} camera(s) in scope (each camera's oldest "
+                    "retained footage is after the window end)."
+                ),
+            )
+        else:
+            first_error = (
+                holds.filter(state=CameraHold.State.FAILED)
+                .exclude(error="").values_list("error", flat=True).first() or ""
+            )
+            uncertain = holds.filter(
+                state=CameraHold.State.FAILED, error__contains=BOOKMARK_MAY_EXIST,
+            ).count()
+            reason = (
+                f"every camera hold failed (0 of {failed} held)"
+                if not not_retained else
+                f"no camera was bookmarked ({failed} failed, {not_retained} "
+                "with no retained footage)"
+            )
+            _degrade_footage_hold_to_manual(
+                fp, run,
+                reason=reason,
+                error=f"{reason}; first error: {first_error[:300]}" + (
+                    f" On {uncertain} camera(s) {BOOKMARK_MAY_EXIST}."
+                    if uncertain else ""
+                ),
+            )
+        if empty:
+            _no_cameras_at(fp, empty)
+        return
+
+    complete = held == holds.count() and not missing and not empty
+    if not _finish_hold_run(
+        fp, run,
+        FootagePreservation.State.HELD if complete else FootagePreservation.State.PARTIAL,
+    ):
+        return
+
+    reported = holds
+    if only_new:
+        # A widen reports only the cameras it added: the earlier run already
+        # sent the completion and not-retained reviews for the rest.
+        reported = holds.filter(pk__in=added)
+        counts = Counter(reported.values_list("state", flat=True))
+        held = counts[CameraHold.State.HELD]
+        gap = counts[CameraHold.State.GAP]
+        not_retained = counts[CameraHold.State.NOT_RETAINED]
+        failed = counts[CameraHold.State.FAILED] + counts[CameraHold.State.PENDING]
+    if reported.exists():
+        scope = f" at {triage.describe_sites(named)}" if named else " (district-wide)"
+        StatusEvent.objects.create(
+            request=prr,
+            note=(
+                f"Footage preservation{scope}: {held} camera(s) held, {gap} with "
+                f"footage gaps, {failed} failed, {not_retained} with no retained "
+                "footage for the window. Review the hold and exclude irrelevant "
+                "cameras (reason required)."
+            ),
+        )
+        notifications.notify_footage_hold_complete(
+            fp, held=held, gap=gap, failed=failed, not_retained=not_retained,
+        )
+    short = list(holds.filter(state__in=(
+        CameraHold.State.FAILED, CameraHold.State.GAP, CameraHold.State.PENDING,
+    )).order_by("pk"))
+    if short:
+        _notify_manual_hold(
+            fp,
+            reason=f"{len(short)} camera(s) not confirmed held",
+            error=(
+                f"{len(short)} camera(s) are not confirmed held; the others "
+                "were bookmarked"
+            ),
+            site_codes=named,
+            cameras=[_camera_line(ch) for ch in short],
+            condition="partial:" + ",".join(str(ch.pk) for ch in short),
+        )
+    if not_retained:
+        triage.record_not_retained_review(
+            fp,
+            cameras=[
+                _camera_line(ch)
+                for ch in reported.filter(state=CameraHold.State.NOT_RETAINED).order_by("pk")
+            ],
+        )
+    if missing:
+        _notify_manual_hold(
+            fp,
+            reason=f"no Aware device group for {triage.describe_sites(missing)}",
+            error=(
+                f"Aware has no device group for {triage.describe_sites(missing)}; "
+                "the other named sites were bookmarked"
+            ),
+            site_codes=missing,
+            condition="missing-groups:" + ",".join(missing),
+        )
+    if empty:
+        _no_cameras_at(fp, empty)
 
 
 @shared_task(bind=True, max_retries=3)
@@ -984,3 +1698,45 @@ def build_pending_record_derivatives(*, limit: int = 25) -> int:
         if built >= limit:
             break
     return built
+
+
+@shared_task
+def release_due_footage_preservations() -> int:
+    """Release every footage preservation whose request has closed and whose
+    wait is over (triage.release_eligible_at), and retry each bookmark delete
+    Aware has not confirmed. The only automated caller of
+    triage.release_preservation. Each preservation commits on its own, so
+    one failure never stops the rest; the next run retries it. Returns how
+    many were released or retried."""
+    from . import triage
+    from .models import CameraHold, FootagePreservation
+    from .services import CLOSED_STATUSES
+
+    candidates = list(
+        FootagePreservation.objects.filter(hold_run_started_at__isnull=True)
+        .filter(
+            Q(
+                state__in=triage.RELEASABLE_PRESERVATION_STATES,
+                request__status__in=CLOSED_STATUSES,
+            )
+            # A retry runs even after a reopen: the hold already ended.
+            | Q(
+                state=FootagePreservation.State.RELEASED,
+                camera_holds__state=CameraHold.State.RELEASE_FAILED,
+            )
+        )
+        .distinct()
+        .order_by("pk")
+    )
+    released = 0
+    for fp in candidates:
+        try:
+            if triage.release_preservation(fp) is not None:
+                released += 1
+        except Exception:
+            logger.exception(
+                "Automatic footage release failed for preservation %s; the "
+                "next run retries it.",
+                fp.pk,
+            )
+    return released
