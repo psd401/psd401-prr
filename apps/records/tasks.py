@@ -1713,12 +1713,13 @@ def release_due_footage_preservations() -> int:
     from .services import CLOSED_STATUSES
 
     candidates = list(
-        FootagePreservation.objects.filter(
-            request__status__in=CLOSED_STATUSES,
-            hold_run_started_at__isnull=True,
-        )
+        FootagePreservation.objects.filter(hold_run_started_at__isnull=True)
         .filter(
-            Q(state__in=triage.RELEASABLE_PRESERVATION_STATES)
+            Q(
+                state__in=triage.RELEASABLE_PRESERVATION_STATES,
+                request__status__in=CLOSED_STATUSES,
+            )
+            # A retry runs even after a reopen: the hold already ended.
             | Q(
                 state=FootagePreservation.State.RELEASED,
                 camera_holds__state=CameraHold.State.RELEASE_FAILED,

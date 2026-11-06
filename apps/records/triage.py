@@ -640,18 +640,21 @@ def release_eligible_at(fp: FootagePreservation) -> dt.datetime | None:
     None when it will not (yet): the request or its case of record is open,
     a hold run is still bookmarking, or there is nothing left to delete.
     A released preservation with a delete Aware never confirmed is eligible
-    again, so the next run retries it."""
+    again from its release time, whatever the request's status since: the
+    hold already ended, and stopping would strand the bookmark in Aware."""
     from .models import CameraHold
 
     if fp.hold_run_started_at is not None:
         return None
-    # all() so a prefetched list is read, not queried again.
-    if fp.state not in RELEASABLE_PRESERVATION_STATES and not (
-        fp.state == FootagePreservation.State.RELEASED and any(
+    if fp.state == FootagePreservation.State.RELEASED:
+        # all() so a prefetched list is read, not queried again.
+        if any(
             hold.state == CameraHold.State.RELEASE_FAILED
             for hold in fp.camera_holds.all()
-        )
-    ):
+        ):
+            return fp.released_at or timezone.now()
+        return None
+    if fp.state not in RELEASABLE_PRESERVATION_STATES:
         return None
     return _deciding_case(fp)[1]
 

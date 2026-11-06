@@ -170,7 +170,10 @@ exemption or a last production; those closures are the ones a requester is
 most likely to contest. A merged duplicate waits for its case of record too,
 and the later of the two dates wins. A closed request with no `closed_at` is
 logged and never released on a guess; a reopened request clears `closed_at`
-and keeps its hold. The release reason is a system sentence naming the
+and keeps its hold. A request reopened after its release gets a timeline entry
+naming the release date, telling staff to re-preserve by hand any footage it
+covers; a delete Aware has not confirmed keeps retrying after a reopen, since
+the hold already ended. The release reason is a system sentence naming the
 closure, with the RCW 42.56.550(6) clause when the release waited, and
 `released_by` stays empty.
 

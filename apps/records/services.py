@@ -862,6 +862,7 @@ def reopen_request(
         visible_to_requester=False,
         occurred_at=now,
     )
+    _note_released_footage_on_reopen(prr, occurred_at=now)
     audit(
         "request.reopened",
         target=prr.number,
@@ -874,6 +875,41 @@ def reopen_request(
 
     schedule_source_work_item_reconciliation("requests", prr.pk)
     return prr
+
+
+def _note_released_footage_on_reopen(prr, *, occurred_at) -> None:
+    """Reopening restores the request but not footage whose hold was already
+    released at closing (rule 7), so say so on the timeline. Covers the
+    duplicates merged into this case too: their holds released with it."""
+    from django.db.models import Q
+
+    from .models import FootagePreservation
+
+    released = list(
+        FootagePreservation.objects.filter(
+            Q(request=prr) | Q(request__merged_into=prr),
+            state=FootagePreservation.State.RELEASED,
+        )
+        .select_related("request")
+        .order_by("released_at", "pk")
+    )
+    if not released:
+        return
+    held = "; ".join(
+        f"{fp.request.number} on "
+        f"{timezone.localdate(fp.released_at).isoformat() if fp.released_at else 'an unknown date'}"
+        for fp in released
+    )
+    StatusEvent.objects.create(
+        request=prr,
+        note=(
+            f"The footage hold was released before this reopen ({held}). "
+            "Footage still within camera retention is not held: re-preserve "
+            "any footage the reopened request covers by hand."
+        ),
+        visible_to_requester=False,
+        occurred_at=occurred_at,
+    )
 
 
 @transaction.atomic

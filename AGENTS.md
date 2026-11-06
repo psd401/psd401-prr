@@ -70,7 +70,8 @@ and cited from code, tests, and ADRs; never renumber them.
    into are closed: at closing for fulfilled, withdrawn, duplicate, and
    non-request closures, and `triage.PRA_SUIT_WINDOW` (one year,
    RCW 42.56.550(6)) after a denial, no-records, or abandoned closure. A
-   request with no closing time, or reopened, is not released. Release and
+   request with no closing time, or reopened, is not released; one reopened
+   after its release gets a timeline entry to re-preserve by hand. Release and
    exclusion keep each bookmark `RELEASE_FAILED` (not yet confirmed deleted)
    until Aware confirms its delete, so a refusal or crash stays retryable; the
    next run retries it. Release waits while a hold run is still bookmarking.

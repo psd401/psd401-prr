@@ -2505,25 +2505,82 @@ class ReleaseTaskTests(TestCase):
 
     @mock.patch(f"{CLIENT}.delete_bookmark")
     def test_a_request_reopened_before_release_is_not_released(self, delete_bookmark):
-        from apps.records import services
-
-        officer = get_user_model().objects.create_user(
-            "reopen-officer", password="pw", is_staff=True,
-        )
-        apply_staff_roles(officer, {StaffRole.RECORDS_OFFICER})
         fp = self._held_preservation(
             status=RequestStatus.CLOSED_ABANDONED, closed_at=closed_ago(30),
         )
-        services.reopen_request(
-            fp.request, RequestStatus.GATHERING, actor=officer,
-            reason="Requester followed up with the clarification we asked for.",
-        )
+        self._reopen(fp.request)
         fp.refresh_from_db()
         self.assertIsNone(fp.request.closed_at)
         self.assertIsNone(triage.release_eligible_at(fp))
 
         self.assertEqual(self._run(), 0)
         delete_bookmark.assert_not_called()
+
+    def _reopen(self, prr):
+        from apps.records import services
+
+        officer = get_user_model().objects.create_user(
+            f"reopen-officer-{get_user_model().objects.count()}",
+            password="pw", is_staff=True,
+        )
+        apply_staff_roles(officer, {StaffRole.RECORDS_OFFICER})
+        services.reopen_request(
+            prr, RequestStatus.GATHERING, actor=officer,
+            reason="Requester followed up with the clarification we asked for.",
+        )
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_a_failed_delete_is_still_retried_after_a_reopen(self, delete_bookmark):
+        # The hold was already released; deleting a leftover bookmark is safe
+        # whatever the request's status, and stopping would strand it in Aware.
+        fp = self._held_preservation()
+
+        def refuse_cam_3(bookmark_id):
+            if bookmark_id == "bm-cam-3":
+                raise RuntimeError("reset")
+
+        delete_bookmark.side_effect = refuse_cam_3
+        self._run()
+        self.assertEqual(
+            fp.camera_holds.get(camera_id="cam-3").state,
+            CameraHold.State.RELEASE_FAILED,
+        )
+        self._reopen(fp.request)
+
+        delete_bookmark.reset_mock()
+        delete_bookmark.side_effect = None
+        fp.refresh_from_db()
+        self.assertIsNotNone(triage.release_eligible_at(fp))
+        self.assertEqual(self._run(), 1)
+        delete_bookmark.assert_called_once_with("bm-cam-3")
+        self.assertEqual(
+            fp.camera_holds.get(camera_id="cam-3").state, CameraHold.State.RELEASED,
+        )
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_reopening_after_release_says_the_footage_must_be_re_preserved(
+        self, delete_bookmark,
+    ):
+        fp = self._held_preservation()
+        self._run()
+        fp.refresh_from_db()
+        released_on = timezone.localdate(fp.released_at).isoformat()
+
+        self._reopen(fp.request)
+
+        note = fp.request.events.order_by("-pk").values_list("note", flat=True)
+        self.assertTrue(any(
+            "footage hold was released" in n and released_on in n
+            and "re-preserve" in n
+            for n in note
+        ))
+
+    def test_reopening_with_no_released_hold_adds_no_footage_note(self):
+        fp = self._held_preservation()
+        self._reopen(fp.request)
+        self.assertFalse(
+            fp.request.events.filter(note__contains="footage hold was released").exists()
+        )
 
     def test_the_beat_schedule_runs_the_task(self):
         from config.celery import app
