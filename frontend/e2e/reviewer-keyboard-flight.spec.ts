@@ -28,7 +28,7 @@ test('reviewer-keyboard-flight', async ({ page }) => {
   })
 
   // Find the lunch menu, decide it, and watch it leave the unreviewed list.
-  const lunch = list.getByRole('option', { name: /synthetic-flight-lunch-menu\.pdf/ })
+  const lunch = list.getByRole('option', { name: /synthetic-flight-lunch-menu / })
   while ((await lunch.getAttribute('aria-selected')) !== 'true') await page.keyboard.press('j')
   await expect(page.getByLabel('AI rationale')).toContainText('Cafeteria lunch menu')
   await page.keyboard.press('n')
