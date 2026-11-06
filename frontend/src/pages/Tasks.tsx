@@ -22,6 +22,7 @@ import {
   Textarea,
   useToast,
 } from '../ui'
+import { formatDay } from '../date'
 
 interface CollectionTask {
   id: number
@@ -465,7 +466,7 @@ export function Tasks({
                 cell: (r: CollectionTask) =>
                   r.due_date ? (
                     <span className={isPastDue(r.due_date, r.state) ? 'font-bold text-danger-ink' : ''}>
-                      {r.due_date}
+                      {formatDay(r.due_date)}
                     </span>
                   ) : (
                     '—'
@@ -739,7 +740,7 @@ export function Tasks({
               </div>
             ) : (
               <p className="text-sm text-ink-muted">
-                Due {selected.due_date ?? '—'} · Assigned {selected.assigned_to_username ?? '—'}
+                Due {formatDay(selected.due_date)} · Assigned {selected.assigned_to_username ?? '—'}
               </p>
             )}
 

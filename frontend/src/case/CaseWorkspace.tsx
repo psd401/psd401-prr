@@ -307,7 +307,7 @@ function StageDecision({ stage }: { stage: StageSummary }) {
   if (stage.state === 'blocked') why = stage.reason
   else if (stage.state === 'done') why = 'Nothing is open at this stage.'
   else if (stage.summary) why = stage.summary
-  else if (stage.state === 'upcoming') why = 'Nothing has reached this stage yet.'
+  else if (stage.state === 'upcoming') why = 'Nothing is waiting here right now.'
   else why = 'Every earlier stage is done; this is the next step.'
   return (
     <section

@@ -866,21 +866,37 @@ class WorkItemViewSet(
     )
     @action(detail=False, methods=["get"])
     def counts(self, request):
-        queryset = self._role_scoped_queryset().annotate(
+        # Counted from the bare role-scoped rows, not the annotated list
+        # queryset: its per-row source lookups (casting primary keys to match
+        # a source id) cost seconds over thousands of work items. The same
+        # source facts are matched here once, by uncorrelated subqueries.
+        today = timezone.localdate()
+        matched_message_sources = InboundCorrespondenceReceipt.objects.filter(
+            matched_correspondence__isnull=False,
+        ).annotate(
+            _compact=Replace(Cast("pk", output_field=CharField()), Value("-"), Value("")),
+        ).values("_compact")
+        due_collection_sources = CollectionTask.objects.filter(
+            due_date__lte=today,
+        ).annotate(
+            _text=Cast("pk", output_field=CharField()),
+        ).values("_text")
+        queryset = role_scoped_work_items(WorkItem.objects.all(), request.user).annotate(
             _current_user_read=Exists(
                 WorkItemReceipt.objects.filter(
                     work_item=OuterRef("pk"),
                     user=request.user,
                     read_at__isnull=False,
                 )
-            )
+            ),
+            _source_compact=Replace(F("source_id"), Value("-"), Value("")),
         )
         unresolved = Q(disposition__in=UNRESOLVED_DISPOSITIONS)
         # The message chips count what their lists show by default: messages
         # on cases that are still open. A closed case is not Inbox business.
         inbox_messages = Q(
             work_kind__in=INBOX_MESSAGE_WORK_KINDS,
-            _source_correspondence_id__isnull=False,
+            _source_compact__in=matched_message_sources,
         ) & ~Q(request__status__in=CLOSED_STATUSES)
         values = queryset.aggregate(
             total=Count("id"),
@@ -925,13 +941,11 @@ class WorkItemViewSet(
                         Q(
                             work_kind=WorkItem.WorkKind.REQUEST_ACTION,
                             request__status=RequestStatus.RECEIVED,
-                            request__statutory_response_due__lte=(
-                                timezone.localdate()
-                            ),
+                            request__statutory_response_due__lte=today,
                         )
                         | Q(
                             work_kind=WorkItem.WorkKind.COLLECTION,
-                            _source_due_date__lte=timezone.localdate(),
+                            source_id__in=due_collection_sources,
                         )
                         | Q(
                             work_kind__in=[

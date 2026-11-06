@@ -751,3 +751,73 @@ it('shows the live intake model’s evaluation beside an intake trust setting', 
     screen.getByText(/The live intake model has not been evaluated yet/),
   ).toBeInTheDocument()
 })
+
+const MODEL_ROW = {
+  key: 'PRR_AI_MODEL_INTAKE',
+  label: 'Intake-classification model',
+  type: 'text',
+  category: 'Advisory AI',
+  consequence: 'The Bedrock model that suggests what a new case is.',
+  value: 'us.openai.gpt-6.1-terra',
+  default: '',
+  ...SHAPE,
+  max_length: 255,
+  allow_blank: true,
+  suggestions: ['us.amazon.nova-2-lite-v1:0', 'us.openai.gpt-6.1-terra'],
+  requires: [],
+  required_by: [],
+  last_change: null,
+}
+
+function withModel() {
+  const payload = settingsPayload()
+  return { ...payload, results: [...payload.results, MODEL_ROW] }
+}
+
+it('leads with the switches that shape the work and folds the rest under Advanced', async () => {
+  stubFetch(async () => ok(withModel()))
+  renderPage()
+
+  const main = (await screen.findByRole('heading', { name: 'Main' })).closest('section')!
+  expect(within(main).getByText('Day-5 acknowledgment safety net')).toBeInTheDocument()
+  expect(within(main).getByText('Intake-classification model')).toBeInTheDocument()
+  expect(within(main).queryByText('Camera retention window')).not.toBeInTheDocument()
+  const advanced = screen.getByText('Advanced settings').closest('details')!
+  expect(advanced).not.toHaveAttribute('open')
+  expect(within(advanced).getByText('Camera retention window')).toBeInTheDocument()
+})
+
+it('finds a setting by search and opens Advanced to show it', async () => {
+  stubFetch(async () => ok(withModel()))
+  const user = userEvent.setup()
+  renderPage()
+  await screen.findByRole('heading', { name: 'Main' })
+
+  await user.type(screen.getByRole('searchbox', { name: 'Search settings' }), 'camera')
+
+  expect(screen.queryByRole('heading', { name: 'Main' })).not.toBeInTheDocument()
+  expect(screen.getByText('Advanced settings').closest('details')).toHaveAttribute('open')
+  expect(screen.getByText('Camera retention window')).toBeInTheDocument()
+  expect(screen.queryByText('Day-5 acknowledgment safety net')).not.toBeInTheDocument()
+
+  await user.clear(screen.getByRole('searchbox', { name: 'Search settings' }))
+  await user.type(screen.getByRole('searchbox', { name: 'Search settings' }), 'nothing like this')
+  expect(screen.getByText('No setting matches that search.')).toBeInTheDocument()
+})
+
+it('picks an AI model from the approved list instead of typing it', async () => {
+  stubFetch(async () => ok(withModel()))
+  const user = userEvent.setup()
+  renderPage()
+  const main = (await screen.findByRole('heading', { name: 'Main' })).closest('section')!
+
+  const row = within(main).getByText('Intake-classification model').closest('li')!
+  await user.click(within(row).getByRole('button', { name: 'Change' }))
+
+  const dialog = await screen.findByRole('dialog')
+  const picker = within(dialog).getByRole('combobox')
+  expect(picker).toHaveValue('us.openai.gpt-6.1-terra')
+  expect(within(picker).getAllByRole('option').map((option) => option.textContent))
+    .toEqual(['Not set', 'us.amazon.nova-2-lite-v1:0', 'us.openai.gpt-6.1-terra'])
+  expect(within(dialog).getByText('Pick one of the AI models the district has approved.')).toBeInTheDocument()
+})

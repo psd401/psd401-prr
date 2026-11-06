@@ -888,6 +888,16 @@ describe('CaseWorkspace stage rail (#45)', () => {
     expect(screen.queryByText('No due date')).not.toBeInTheDocument()
   })
 
+  it('says only what is true of a later stage with nothing waiting', async () => {
+    // Every record decided while a collection is still open: Review is not
+    // the current stage, but saying nothing has reached it would be false.
+    renderCase('/requests/PRR-2026-0001/redact', ['records_officer'], withCollections([VAULT_TASK]))
+
+    const card = await screen.findByRole('region', { name: 'Redact decision' })
+    expect(card).toHaveTextContent('Nothing is waiting here right now.')
+    expect(card).not.toHaveTextContent('Nothing has reached this stage yet.')
+  })
+
   it('says a finished stage is done', async () => {
     renderCase('/requests/PRR-2026-0001/scope', ['records_officer'], withCollections([VAULT_TASK]))
 

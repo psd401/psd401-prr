@@ -29,6 +29,7 @@ import {
   reasonTooShort,
 } from '../ui'
 import { proposedVaultQuery } from '../vaultQuery'
+import { formatDay } from '../date'
 
 interface RequesterInfo {
   name: string
@@ -1507,13 +1508,13 @@ export function RequestDetail({
             </div>
             <div className="flex justify-between gap-3">
               <dt className="text-ink-muted">Received</dt>
-              <dd className="font-heading font-bold text-ink">{r.received_at.slice(0, 10)}</dd>
+              <dd className="font-heading font-bold text-ink">{formatDay(r.received_at)}</dd>
             </div>
             {r.matter_kind === 'public_records' && (
               <div className="flex justify-between gap-3">
                 <dt className="text-ink-muted">Statutory response due</dt>
                 <dd className="font-heading font-bold text-ink">
-                  {r.statutory_response_due ?? '—'}
+                  {formatDay(r.statutory_response_due)}
                 </dd>
               </div>
             )}
@@ -1521,14 +1522,14 @@ export function RequestDetail({
               <div className="flex justify-between gap-3">
                 <dt className="text-ink-muted">FERPA access due (45 days)</dt>
                 <dd className="font-heading font-bold text-ink">
-                  {r.ferpa_access_due ?? '—'}
+                  {formatDay(r.ferpa_access_due)}
                 </dd>
               </div>
             )}
             <div className="flex justify-between gap-3">
               <dt className="text-ink-muted">Estimated completion</dt>
               <dd className="font-heading font-bold text-ink">
-                {r.estimated_completion ?? '—'}
+                {formatDay(r.estimated_completion)}
               </dd>
             </div>
             {r.matter_kind === 'public_records' && (
@@ -1542,13 +1543,13 @@ export function RequestDetail({
             <div className="flex justify-between gap-3">
               <dt className="text-ink-muted">Acknowledgment sent</dt>
               <dd className="font-heading font-bold text-ink">
-                {r.acknowledgment_sent_at ? r.acknowledgment_sent_at.slice(0, 10) : '—'}
+                {formatDay(r.acknowledgment_sent_at)}
               </dd>
             </div>
             <div className="flex justify-between gap-3">
               <dt className="text-ink-muted">Closed</dt>
               <dd className="font-heading font-bold text-ink">
-                {r.closed_at ? r.closed_at.slice(0, 10) : '—'}
+                {formatDay(r.closed_at)}
               </dd>
             </div>
           </dl>
@@ -1679,7 +1680,7 @@ export function RequestDetail({
         {showOverview && <Card title="Estimate">
           <p className="text-sm text-ink-muted">Current estimated completion</p>
           <p className="mt-1 font-heading text-2xl font-bold text-ink">
-            {r.estimated_completion ?? '—'}
+            {formatDay(r.estimated_completion)}
           </p>
           {canManageRequest && (
             <p className="mt-2 text-xs text-ink-muted">

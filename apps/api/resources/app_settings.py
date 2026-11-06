@@ -88,6 +88,7 @@ class AppSettingSerializer(serializers.Serializer):
     max_items = serializers.IntegerField(allow_null=True)
     allow_blank = serializers.BooleanField()
     choices = serializers.ListField(child=serializers.CharField())
+    suggestions = serializers.ListField(child=serializers.CharField())
     requires = serializers.ListField(child=serializers.CharField())
     required_by = serializers.ListField(child=serializers.CharField())
     last_change = AppSettingChangeSerializer(allow_null=True)
@@ -192,6 +193,7 @@ def _serialize(spec, *, values, last_change_by_key, secrets_by_key=None, checks=
         "max_items": spec.max_items if listed else None,
         "allow_blank": spec.allow_blank,
         "choices": list(spec.choices),
+        "suggestions": list(spec.suggestions),
         "requires": list(spec.requires),
         "required_by": list(dependents_of(spec.key)),
         "last_change": (

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { PageHeader } from '../layout/AppLayout'
 import { Card, EmptyState, ErrorNote, Spinner, Table } from '../ui'
+import { formatMoment } from '../date'
 
 interface ModelResult {
   items: number
@@ -58,7 +59,7 @@ function RunCard({ run }: { run: EvaluationRun }) {
   const rows = run.model_identifiers.map((model) => ({ model, ...run.results[model]! }))
   return (
     <Card
-      title={`${KIND_TEXT[run.kind]} · ${run.items} examples · ${new Date(run.created_at).toLocaleString()}`}
+      title={`${KIND_TEXT[run.kind]} · ${run.items} examples · ${formatMoment(run.created_at)}`}
       className="mb-5"
     >
       <p className="mb-3 text-sm text-pacific/80">

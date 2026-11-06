@@ -237,6 +237,11 @@ class BedrockGrantMatchesDocumentedModelsTests(TestCase):
         for profile in granted:
             with self.subTest(profile=profile):
                 self.assertIn(f"`{profile}`", docs)
+        # The Settings pick list offers exactly the granted profiles.
+        from apps.configuration.registry import BEDROCK_PROFILES, SETTINGS_BY_KEY
+
+        self.assertEqual(set(BEDROCK_PROFILES), granted)
+        self.assertEqual(SETTINGS_BY_KEY["PRR_AI_MODEL_INTAKE"].suggestions, BEDROCK_PROFILES)
         # And the reverse: the docs' allow-list names nothing the grant lacks.
         documented = set(re.findall(r"^- `(us\.[^`]+)`$", docs, flags=re.MULTILINE))
         self.assertEqual(documented, granted)
