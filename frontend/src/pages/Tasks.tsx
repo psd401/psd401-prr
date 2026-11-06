@@ -46,6 +46,8 @@ interface CollectionTask {
   vault_hold_id: string
   vault_export_id: string
   vault_ingest: VaultIngestProgress | null
+  /** Unreviewed records this collection created, for the supersede confirm. */
+  records_unreviewed?: number
   created_at: string
   completed_at: string | null
 }
@@ -658,6 +660,12 @@ export function Tasks({
                   </div>
                 ) : (
                   <div className="mt-3 space-y-3">
+                    {typeof selected.records_unreviewed === 'number' && (
+                      <p className="text-sm font-semibold text-ink">
+                        This takes {selected.records_unreviewed} unreviewed{' '}
+                        {selected.records_unreviewed === 1 ? 'record' : 'records'} out of review.
+                      </p>
+                    )}
                     <p className="text-sm text-ink-muted">
                       The reason is kept in the audit log and case timeline. Describe the
                       scope problem; do not name students or include record contents.

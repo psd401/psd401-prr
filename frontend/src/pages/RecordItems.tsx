@@ -457,6 +457,8 @@ export function RecordItems({
   const activeSenderDomain = searchParams.get('sender') ?? ''
   const activeCustodian = searchParams.get('custodian') ?? ''
   const activeConfidence = searchParams.get('confidence') ?? ''
+  // Set by "View records" on a Collect stage card (#45): one collection only.
+  const activeCollection = searchParams.get('collection_task') ?? ''
   const activeGroup = searchParams.get('group') ?? ''
   const listPage = Math.max(1, Number(searchParams.get('page') ?? '1') || 1)
   const [searchDraft, setSearchDraft] = useState(activeSearch)
@@ -493,12 +495,13 @@ export function RecordItems({
     if (activeSenderDomain) params.set('sender_domain', activeSenderDomain)
     if (activeCustodian) params.set('custodian', activeCustodian)
     if (activeConfidence) params.set('confidence_min', activeConfidence)
+    if (activeCollection) params.set('collection_task', activeCollection)
     return params
   }
 
   const filterKey = [
     request, activeReviewState, activeHandling, activeSearch, activeTag,
-    activeSenderDomain, activeCustodian, activeConfidence,
+    activeSenderDomain, activeCustodian, activeConfidence, activeCollection,
   ] as const
 
   const list = useQuery({
@@ -669,7 +672,7 @@ export function RecordItems({
   // the chosen outcome, and no advisory proposal takes part in it.
   const hasFilter = Boolean(
     activeReviewState || activeHandling || activeSearch || activeTag
-    || activeSenderDomain || activeCustodian || activeConfidence,
+    || activeSenderDomain || activeCustodian || activeConfidence || activeCollection,
   )
   const selectionPreview = useQuery({
     queryKey: ['record-bulk-selection', ...filterKey, bulkState],
@@ -1484,8 +1487,17 @@ export function RecordItems({
       {canReview && request !== '' && (
         <DiscardBatchCard request={request} onOpen={(id) => updateListParams({ item: id })} />
       )}
-      {canReview && request !== '' && (
+      {/* Inside a case, redaction proposals are the Redact stage's (#45). */}
+      {canReview && request !== '' && !scopedRequestNumber && (
         <RedactionProposals request={request} onOpen={(id) => updateListParams({ item: id })} />
+      )}
+      {activeCollection && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-line bg-surface-raised px-4 py-2 text-sm text-ink">
+          <span>Showing one collection&apos;s records.</span>
+          <Button variant="ghost" onClick={() => changeFilter({ collection_task: '' })}>
+            Show every collection
+          </Button>
+        </div>
       )}
       {activeGroup === 'cluster' && request !== '' && (
         <RecordClusters
@@ -1627,10 +1639,8 @@ export function RecordItems({
                 </div>
               )}
               <p className="text-xs text-ink-muted">
-                The browser receives only a no-store raster preview. Draw from one corner to the
-                other; saved coordinates are normalized to the page. Blue regions are AI
-                candidates, amber is the current human-editable draft, and black regions are
-                approved redactions.
+                Drag a box to redact. Blue is an AI suggestion, amber your draft, black
+                approved.
               </p>
             </section>
 

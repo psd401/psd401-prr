@@ -131,7 +131,7 @@ senders, and either stops or proposes a tighter query with its reason, which is
 counted next. Scoping stops at `PRR_INTENT_MAX_COUNT_ITERATIONS` (in-app,
 default 4), when the agent says stop, when a refinement is unusable or repeats
 an earlier scope, or when a count fails; the last completed count is the
-proposed scope. The Collection tab's **Scope iterations** card shows the trail
+proposed scope. The Scope stage's **Scope iterations** card shows the trail
 (`requests.scoping.read`); **Re-run scoping** (`requests.scoping.rerun`) starts
 a fresh session from the latest intent proposal, with the officer and a reason
 recorded, even when nothing changed. Scoping itself only counts: no hold,
@@ -172,13 +172,30 @@ requesters' request text, which the 2026-11-03 model acceptance in
 sent, so the input does not change while the run waits. Kinds never mix
 (AGENTS.md rule 13).
 
+For a case opened from an email, the model also sees `email_evidence`
+(schema version 2, #33): whether a district address sent it (never the
+sender's domain, which can identify the requester); whether the subject presents as
+a reply or a forward; whether the email carried reply headers; which list or
+automated-mail headers it carried (`auto-submitted`, `list-id`,
+`list-unsubscribe`, `precedence`, named but never quoted); and
+`replies_to_cases`, the earlier same-kind cases whose district mail -- sent
+before this email arrived -- it replies to by In-Reply-To, References, or the
+Gmail thread. Those cases join the candidate list whatever their age, so the
+model can name the case the thread points at. A web-form or staff-entered
+case has no email evidence.
+
 It returns one label -- `new_request`, `follow_up`, `duplicate_of`,
 `related_to`, `non_request`, or `spam` -- with a confidence and the evidence it
 relied on. The three labels that point at a case must name one of the cases it
 was shown; an invented number fails the run. The proposal is not applied,
 except for spam and non-request under the intake trust ladder below.
 
-The case Overview shows the label to Records Officers. **Correct** records the
+The case's Intake stage shows the label to Records Officers, and so does the
+officer's Inbox (#33): an open case whose latest completed label nobody has
+answered shows "AI suggests ..." under its subject with its own **Correct**,
+which records agreement and opens the case with the same prefilled action
+(`?intake_action=`; the parameters are dropped once used, and ignored for any
+other role). **Correct** on the case records the
 officer's agreement (`AdvisoryFeedback`, append-only, one per run) and opens
 the ordinary action prefilled: merge for a duplicate or follow-up, add to an
 existing case for a follow-up on an automatically opened email case, or close
@@ -287,7 +304,7 @@ cost per item. A failed call counts as an error and a miss. Cost needs a
 `--price` (USD per million input/output tokens) per model; the application
 holds no price list, so a model without one reports no cost.
 
-Records Officers read the runs side by side under **Oversight → AI
+Records Officers read the runs side by side under **Settings → Reports → AI
 evaluation** (`advisory_evaluations.list`).
 
 ## Stored agreement and record clusters
@@ -309,12 +326,12 @@ confidence band (90-100%, 70-89%, 50-69%, below 50%), district-wide or for one
 case. Only each record's latest decision counts. Withheld counts as
 responsive; `uncertain` hands the call to a person and has no agreement rate;
 a `duplicate` outcome is not a responsiveness call and is left out. Records
-Officers read it under **Oversight -> AI agreement**
+Officers read it under **Settings -> Reports -> AI agreement**
 (`advisory_agreement.list`). These numbers are what trust-ladder thresholds
 (#34, #39) are to be set from. The report covers every matter kind (rule 13):
 it measures the model, not a statutory obligation, and starts no clock.
 
-The Records tab's **Group by cluster** view (`record_items.clusters`) groups
+The Review stage's **Group by cluster** view (in the **Record list**) (`record_items.clusters`) groups
 every record the current filters match -- not just one page -- by email thread
 (`In-Reply-To` -> `Message-ID`), sender or mailing list (`List-Id` first, then
 sending domain), tag, or AI label and confidence band. Each cluster shows its
@@ -439,7 +456,7 @@ admin-only with a reason, and every change is audited:
 | `PRR_TRUST_ELUSION_SAMPLE_SIZE` | 1-500 records | 30 |
 
 - **Suggest** is per-record review, as before.
-- **Batch.** In the Records tab's cluster view, **Approve cluster as ...**
+- **Batch.** In the Review stage's cluster view, **Approve cluster as ...**
   opens a `ReviewBatch` over the cluster's unreviewed records and draws a
   random sample (`random.SystemRandom`). The reviewer judges each sampled
   record. If every judgment matches, the outcome is applied to the whole
@@ -468,7 +485,7 @@ nothing.
 
 Each redaction proposal now carries a `pattern` (phone, email, address,
 student identifier, government ID, financial account, medical, person's
-name, other); proposals made before that are `other`. The Records tab's
+name, other); proposals made before that are `other`. The Redact stage's
 **Redaction proposals** card groups a case's pending proposals by exemption
 and pattern (`redaction_batches.groups`). With `PRR_TRUST_REDACTION_MODE` set
 to `batch` (choices `suggest`, `batch`; no automatic mode), **Accept all in
@@ -642,9 +659,14 @@ response ceiling are all edited there with a reason and a history:
 | `PRR_AI_MODEL_CASE_TITLE` | blank (uses `PRR_AI_MODEL`) | model for case titles |
 | `PRR_AI_MODEL_RESPONSIVENESS` | blank (uses `PRR_AI_MODEL`) | model for record responsiveness |
 | `PRR_AI_MODEL_REDACTION` | blank (uses `PRR_AI_MODEL`) | model for redaction candidates |
+| `PRR_AI_MODEL_INTAKE` | blank (uses `PRR_AI_MODEL`) | model for intake classification |
 | `PRR_AI_TIMEOUT_SECONDS` | `30` | 1-120 |
 | `PRR_AI_MAX_INPUT_CHARACTERS` | `50000` | 1000-250000 |
 | `PRR_AI_MAX_RESPONSE_BYTES` | `65536` | 1024-1048576 |
+| `PRR_AI_MAX_OUTPUT_TOKENS_INTAKE` | `1000` | 256-16000; output budget for intake classification |
+| `PRR_AI_MAX_OUTPUT_TOKENS_INTENT` | `2000` | 256-16000; output budget for request intent |
+| `PRR_AI_MAX_OUTPUT_TOKENS_RESPONSIVENESS` | `1000` | 256-16000; output budget for record responsiveness |
+| `PRR_AI_MAX_OUTPUT_TOKENS_REDACTION` | `4000` | 256-16000; output budget for redaction candidates |
 
 The district's chosen model is `us.amazon.nova-2-lite-v1:0` in `us-west-2`,
 and the production Compose overlay still carries those three values as the
@@ -673,6 +695,40 @@ in `us-east-1`, `us-east-2`, and `us-west-2` only:
 - `us.anthropic.claude-haiku-5-5`
 - `us.openai.gpt-6.1-sol`
 - `us.openai.gpt-6.1-terra`
+
+**Zero data retention (district decision, 2026-11-05).** The district AWS
+account's Bedrock data retention mode is `none` in `us-west-2`, `us-east-1`,
+and `us-east-2` (`PutAccountDataRetention`). Under that mode, per AWS, "No
+request or response data is written to durable storage by AWS or shared with
+the model provider" (Amazon Bedrock User Guide, *Data retention*,
+https://docs.aws.amazon.com/bedrock/latest/userguide/data-retention.html).
+No CDK resource can hold this account setting, so it is an owned exception to
+"CDK is the only provisioning path": the CIO owns it, the runtime role may
+only read it (`bedrock:GetAccountDataRetention`), and `verify_advisory_ai`
+refuses to verify any model unless the mode reads `none`. Every live call
+checks it too (`invoke_advisory_model`): if the mode ever reads anything else,
+the call fails closed as `provider_rejected` and no request or record text is
+sent. A model whose
+zero-retention access is not in effect for the account is refused under mode
+`none` and fails closed (`provider_rejected`), so nothing is retained. As of
+2026-11-05 that is Claude Fable 5.1: its public default requires `aws_review`
+(AWS retention for human review), and Bedrock still answers "data retention
+mode 'none' is not available for this model" although the district reports
+zero-retention access for all models. It stays in the grant but must not be
+set until `verify_advisory_ai --model us.anthropic.claude-fable-5-1` passes.
+
+Only Amazon Nova is sent `temperature` 0
+(`advisory_ai.inference_config`). The Claude 5.x and GPT-6.1 models reject the
+field outright, so every call to them would fail if it were sent. Those same models
+answer with a `reasoningContent` block before the JSON text; the reasoning is
+dropped unread -- never parsed, stored, or logged -- and exactly one plain
+text block must remain.
+
+Each new Anthropic or OpenAI model also needs a one-time AWS Marketplace
+subscription for the account. It is completed by accepting the model's
+agreement and making one call from a role with
+`aws-marketplace:ViewSubscriptions` and `aws-marketplace:Subscribe`; the
+application's runtime role deliberately has neither.
 
 Before pointing a setting at a model for the first time, run
 `python manage.py verify_advisory_ai --model <profile id>` in production. It

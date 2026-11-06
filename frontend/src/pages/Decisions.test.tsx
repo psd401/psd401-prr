@@ -47,7 +47,7 @@ it('shows what approving does, with the evidence one click away', async () => {
   renderPage()
 
   expect(await screen.findByText('Mark 1 record non-responsive.')).toBeInTheDocument()
-  expect(screen.getByRole('link', { name: 'PRR-2026-0042' })).toHaveAttribute('href', '/requests/PRR-2026-0042/records')
+  expect(screen.getByRole('link', { name: 'PRR-2026-0042' })).toHaveAttribute('href', '/requests/PRR-2026-0042/review?view=records')
   await user.click(screen.getByText('Evidence'))
   expect(screen.getByText('The newsletter, not board minutes.')).toBeVisible()
   expect(screen.getByText('newsletter.eml — now unreviewed')).toBeVisible()

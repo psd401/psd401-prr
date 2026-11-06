@@ -11,7 +11,7 @@ const caseNumber = 'PRR-E2E-0011'
 test('officer-approve-and-collect', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page)
-  await page.goto(`/requests/${caseNumber}/collection`)
+  await page.goto(`/requests/${caseNumber}/scope`)
 
   await expect(page.getByText('Proposed scope:')).toBeVisible()
   const approve = page.getByRole('button', { name: 'Approve and collect' })

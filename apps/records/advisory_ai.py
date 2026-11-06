@@ -9,6 +9,7 @@ import logging
 import math
 import re
 from dataclasses import dataclass
+from email.utils import parseaddr
 from typing import Any
 
 import boto3
@@ -21,6 +22,7 @@ from botocore.exceptions import (
 )
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.api.identity import has_staff_role
@@ -199,7 +201,7 @@ def validate_scope_refinement(raw: Any) -> dict[str, Any]:
 CASE_TITLE_MAX_LENGTH = 80
 
 _CASE_TITLE_SCHEMA_VERSION = 1
-_INTAKE_SCHEMA_VERSION = 1
+_INTAKE_SCHEMA_VERSION = 2
 #: What an intake classification may say. The three that point at an earlier
 #: case must name one the model was shown; the rest must name none.
 INTAKE_LABELS_WITH_TARGET = frozenset({"follow_up", "duplicate_of", "related_to"})
@@ -302,6 +304,53 @@ MAX_OUTPUT_TOKENS: dict[str, int] = {
     AdvisoryRun.Kind.RECORD_REDACTIONS: 4000,
     AdvisoryRun.Kind.INTAKE_CLASSIFICATION: 1000,
 }
+
+
+#: The four kinds whose output budget an administrator sets in the app
+#: (#31); each setting defaults to the budget above. The case title and the
+#: scope refinement keep their code budgets.
+_MAX_TOKENS_SETTING_FOR_KIND: dict[str, str] = {
+    AdvisoryRun.Kind.INTAKE_CLASSIFICATION: "PRR_AI_MAX_OUTPUT_TOKENS_INTAKE",
+    AdvisoryRun.Kind.REQUEST_INTENT: "PRR_AI_MAX_OUTPUT_TOKENS_INTENT",
+    AdvisoryRun.Kind.RECORD_RESPONSIVENESS: "PRR_AI_MAX_OUTPUT_TOKENS_RESPONSIVENESS",
+    AdvisoryRun.Kind.RECORD_REDACTIONS: "PRR_AI_MAX_OUTPUT_TOKENS_REDACTION",
+}
+
+
+def max_output_tokens(kind: str) -> int:
+    """The most output tokens one call of ``kind`` may produce."""
+    setting = _MAX_TOKENS_SETTING_FOR_KIND.get(kind)
+    if setting:
+        return int(runtime.get(setting))
+    return MAX_OUTPUT_TOKENS.get(kind, 1000)
+
+
+def account_data_retention_mode() -> str:
+    """The account's Bedrock data retention mode in the advisory Region.
+
+    Zero retention (``none``, district decision 2026-11-05) is an account
+    setting no CDK resource holds, so ``verify_advisory_ai`` reads it back.
+    Raises ``AdvisoryProviderError`` when it cannot be read.
+    """
+    try:
+        client = boto3.client("bedrock", region_name=runtime.get("PRR_AI_AWS_REGION"))
+        return str(client.get_account_data_retention().get("mode", ""))
+    except (ClientError, BotoCoreError) as exc:
+        raise AdvisoryProviderError("provider_unavailable") from exc
+
+
+def inference_config(kind: str, model_identifier: str) -> dict[str, Any]:
+    """The Converse inference settings for one call.
+
+    Only Amazon Nova is sent ``temperature`` 0. The Claude 5.x and GPT-6.1
+    models reject the field outright (production, 2026-11-05), so asking them
+    for it would fail every run; they are already steered by the instruction
+    and every reply is still validated against its schema.
+    """
+    config: dict[str, Any] = {"maxTokens": max_output_tokens(kind)}
+    if ".nova-" in f".{model_identifier}":
+        config["temperature"] = 0
+    return config
 
 
 def model_for_kind(kind: str) -> str:
@@ -526,7 +575,87 @@ def _request_intent_context(budget: int) -> tuple[list[dict[str, Any]], dict[str
     return systems, knowledge, truncated
 
 
-def _intake_candidates(request) -> list[dict[str, Any]]:
+_REPLY_SUBJECT = re.compile(r"^\s*(re|aw|sv)\s*:", re.IGNORECASE)
+_FORWARD_SUBJECT = re.compile(r"^\s*(fwd?|fw)\s*:", re.IGNORECASE)
+_LIST_OR_BULK_HEADERS = ("auto-submitted", "list-id", "list-unsubscribe", "precedence")
+_INTAKE_MAX_THREAD_CASES = 20
+
+
+def _intake_email_evidence(request) -> dict[str, Any] | None:
+    """Header and thread facts about the email that created this case (#33).
+
+    Facts only, fixed at intake: whether a district address sent it (never
+    the sender's domain, which can identify the requester), whether the email
+    presents as a reply or a forward, which list or bulk headers it carried
+    (named, never quoted), and which earlier cases of the same matter kind
+    it replies to -- an In-Reply-To or References id, or the Gmail thread, of
+    mail the district sent on that case before this email arrived. A
+    web-form or staff-entered case has none.
+    """
+    from apps.correspondence.models import (
+        Correspondence,
+        InboundCorrespondenceReceipt,
+    )
+
+    from .record_tags import district_email_domains
+
+    receipt = (
+        InboundCorrespondenceReceipt.objects.filter(
+            matched_request=request,
+            match_method=InboundCorrespondenceReceipt.MatchMethod.EMAIL_INTAKE,
+        )
+        .select_related("matched_correspondence")
+        .order_by("received_at", "pk")
+        .first()
+    )
+    if receipt is None:
+        return None
+    correspondence = receipt.matched_correspondence
+    headers = {
+        str(name).casefold()
+        for name in ((correspondence.received_headers or {}) if correspondence else {})
+    }
+    subject = correspondence.received_subject if correspondence else ""
+    sender = parseaddr(
+        (correspondence.received_sender if correspondence else "")
+        or receipt.envelope_sender
+    )[1]
+    message_ids = {receipt.in_reply_to, *(receipt.references or [])} - {""}
+    thread = Q(rfc_message_id__in=message_ids)
+    if receipt.provider_thread_id:
+        thread |= Q(
+            provider=receipt.provider,
+            provider_account=receipt.provider_account,
+            provider_thread_id=receipt.provider_thread_id,
+        )
+    replies_to = (
+        Correspondence.objects.filter(
+            thread,
+            direction=Correspondence.Direction.OUTBOUND,
+            status=Correspondence.Status.SENT,
+            sent_at__lte=receipt.received_at,
+            request__matter_kind=request.matter_kind,
+            request__received_at__lt=request.received_at,
+        )
+        .exclude(request=request)
+        .values_list("request__number", flat=True)
+        .distinct()
+        .order_by("request__number")
+    )
+    return {
+        # Whether staff sent it, never the sender's own domain: a personal or
+        # family domain can identify the requester (PR #93 review).
+        "sender_is_district": sender.rpartition("@")[2].lower()
+        in district_email_domains(),
+        "subject_marks_reply": bool(_REPLY_SUBJECT.match(subject)),
+        "subject_marks_forward": bool(_FORWARD_SUBJECT.match(subject)),
+        "has_reply_headers": bool(receipt.in_reply_to or receipt.references),
+        "list_or_bulk_headers": [h for h in _LIST_OR_BULK_HEADERS if h in headers],
+        "replies_to_cases": list(replies_to[:_INTAKE_MAX_THREAD_CASES]),
+    }
+
+
+def _intake_candidates(request, *, also=()) -> list[dict[str, Any]]:
     """Earlier cases of the same matter kind the new one might belong to.
 
     Only cases received before this one, and only fields that do not change
@@ -553,10 +682,15 @@ def _intake_candidates(request) -> list[dict[str, Any]]:
         .select_related("requester")
         .order_by("-received_at", "pk")[:_INTAKE_MAX_SAME_SENDER]
     ) if email else []
+    # Cases the email replies to are offered whatever their age, so the
+    # model can name the one the thread evidence points at.
+    threaded = list(
+        earlier.filter(number__in=list(also)).select_related("requester")
+    ) if also else []
     seen = set()
     rows = []
     for case in sorted(
-        [*recent, *same_sender], key=lambda c: (c.received_at, c.number),
+        [*recent, *same_sender, *threaded], key=lambda c: (c.received_at, c.number),
         reverse=True,
     ):
         if case.pk in seen:
@@ -577,6 +711,7 @@ def _build_advisory_input(run: AdvisoryRun) -> _AdvisoryInput:
     if run.kind == AdvisoryRun.Kind.INTAKE_CLASSIFICATION:
         request = run.request
         description = request.description
+        email_evidence = _intake_email_evidence(request)
         payload = {
             "kind": run.kind,
             "advisory_schema_version": _INTAKE_SCHEMA_VERSION,
@@ -584,7 +719,11 @@ def _build_advisory_input(run: AdvisoryRun) -> _AdvisoryInput:
             "request_email_subject": _case_title_subject(request),
             "request_channel": request.channel,
             "request_received_date": _received_date(request).isoformat(),
-            "candidate_cases": _intake_candidates(request),
+            "email_evidence": email_evidence,
+            "candidate_cases": _intake_candidates(
+                request,
+                also=email_evidence["replies_to_cases"] if email_evidence else (),
+            ),
         }
         return _AdvisoryInput(
             payload=payload,
@@ -1538,6 +1677,12 @@ def _advisory_system_message(kind: str) -> str:
             "different requester. non_request: correspondence that asks for "
             "no records (a complaint, a general question, a notice, a "
             "vendor pitch). spam: unsolicited bulk or automated mail. "
+            "email_evidence, when present, holds facts about the email that "
+            "created the case: replies_to_cases names earlier cases whose "
+            "district mail this email replies to (strong evidence of a "
+            "follow_up), and list_or_bulk_headers names list or automated-mail "
+            "headers it carried (evidence of spam or a non_request, never "
+            "proof). "
             "For follow_up, duplicate_of, and related_to, target_case_number "
             "must be the number of one of the supplied candidate_cases; for "
             "every other label it must be null. Never invent a case number. "
@@ -1673,6 +1818,11 @@ def invoke_advisory_model(
     into it (model evaluation prices runs from them).
     """
     _feature_enabled()
+    # Zero data retention before every call, not only at verification: if the
+    # account's mode ever stops reading `none`, no request or record text is
+    # sent (district decision, 2026-11-05).
+    if account_data_retention_mode() != "none":
+        raise AdvisoryProviderError("provider_rejected")
     system_message = _advisory_system_message(kind)
     try:
         client = boto3.client(
@@ -1696,10 +1846,7 @@ def invoke_advisory_model(
                     ],
                 },
             ],
-            inferenceConfig={
-                "maxTokens": MAX_OUTPUT_TOKENS.get(kind, 1000),
-                "temperature": 0,
-            },
+            inferenceConfig=inference_config(kind, model_identifier),
             requestMetadata={
                 "application": "psd401-prr",
                 "feature": "advisory",
@@ -1732,14 +1879,19 @@ def invoke_advisory_model(
                 usage[key] = reported[key]
     try:
         content_blocks = response["output"]["message"]["content"]
-        if (
-            not isinstance(content_blocks, list)
-            or len(content_blocks) != 1
-            or not isinstance(content_blocks[0], dict)
-            or set(content_blocks[0]) != {"text"}
+        if not isinstance(content_blocks, list) or not all(
+            isinstance(block, dict) for block in content_blocks
         ):
             raise ValueError
-        content = content_blocks[0]["text"]
+        # Reasoning models (Claude 5.x, GPT-6.1) send a reasoningContent block
+        # before the answer. It is dropped here: never parsed, stored, or
+        # logged. Exactly one plain text block must remain, and nothing else.
+        answer_blocks = [
+            block for block in content_blocks if set(block) != {"reasoningContent"}
+        ]
+        if len(answer_blocks) != 1 or set(answer_blocks[0]) != {"text"}:
+            raise ValueError
+        content = answer_blocks[0]["text"]
         if (
             not isinstance(content, str)
             or len(content.encode("utf-8")) > runtime.get("PRR_AI_MAX_RESPONSE_BYTES")

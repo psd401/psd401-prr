@@ -253,3 +253,21 @@ it('wraps back to earlier unreviewed records after finishing a later page', asyn
   expect(await screen.findByText(/Back to the first page of what is left/)).toBeInTheDocument()
   expect(await screen.findByRole('option', { name: /a\.pdf/ })).toHaveAttribute('aria-selected', 'true')
 })
+
+it('marks a single record a duplicate with d', async () => {
+  const { posts, user } = setup()
+  await screen.findByText('Mentions the bus route.')
+  await user.keyboard('d')
+  await waitFor(() => expect(posts.at(-1)).toEqual({
+    url: '/api/staff/record-items/a/review/', body: { state: 'duplicate' },
+  }))
+})
+
+it('preloads the next record so the next key shows it at once', async () => {
+  setup()
+  await screen.findByText('Mentions the bus route.')
+  // Record b follows a; its advisory is fetched before anyone moves to it.
+  await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(
+    ([input]) => String(input) === '/api/staff/record-items/b/advisory-responsiveness/',
+  )).toBe(true))
+})

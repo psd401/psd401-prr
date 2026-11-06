@@ -10,9 +10,12 @@ import { fixtureRequestNumber, login } from './message-workspace.helpers.js'
 test('officer-scope-conversation', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page)
-  await page.goto(`/requests/${fixtureRequestNumber}/collection`)
-  await expect(page.getByRole('heading', { name: 'Collection', level: 2 })).toBeFocused()
+  await page.goto(`/requests/${fixtureRequestNumber}/scope`)
+  await expect(page.getByRole('heading', { name: 'Scope', level: 2, exact: true })).toBeFocused()
 
+  // This case already has a collection, so the scoping inputs sit folded
+  // under the Scope step (#45); opening it shows them unchanged.
+  await page.getByText('Scope: request intent and Vault count').click()
   // The count and the proposed window are already there. Nobody asked for
   // either; the case answered "how big is this?" on arrival.
   await expect(page.getByText('29,380 possible Gmail messages')).toBeVisible()

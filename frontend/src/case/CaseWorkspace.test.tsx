@@ -1,5 +1,5 @@
-// ABOUTME: Routing, role, lazy-load, caching, and focus contracts for case tabs.
-// ABOUTME: Nested routes preserve browser behavior without broadening authority.
+// ABOUTME: Routing, role, lazy-load, caching, and focus contracts for the case
+// ABOUTME: stage rail (#45); legacy tab URLs redirect without broadening authority.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -35,6 +35,31 @@ const SUMMARY = {
     tab: 'collection',
     work_item_id: 'work-1',
   },
+  title: 'Board minutes for the spring term',
+  summary: 'Minutes and agendas from every spring board meeting.',
+  matter_kind: 'public_records',
+  next_due: null,
+  stages: [
+    { id: 'intake', label: 'Intake', state: 'done', open_count: 0, summary: '', reason: '' },
+    { id: 'scope', label: 'Scope', state: 'done', open_count: 0, summary: '', reason: '' },
+    {
+      id: 'collect', label: 'Collect', state: 'current', open_count: 2,
+      summary: '2 open collections', reason: '',
+    },
+    {
+      id: 'review', label: 'Review', state: 'upcoming', open_count: 5,
+      summary: '5 records to review', reason: '',
+    },
+    { id: 'redact', label: 'Redact', state: 'upcoming', open_count: 0, summary: '', reason: '' },
+    { id: 'release', label: 'Release', state: 'upcoming', open_count: 0, summary: '', reason: '' },
+    { id: 'close', label: 'Close', state: 'upcoming', open_count: 0, summary: '', reason: '' },
+  ],
+}
+
+const STAGE_NAMES = ['Intake', 'Scope', 'Collect', 'Review', 'Redact', 'Release', 'Close']
+
+function stageLink(name: string) {
+  return screen.queryByRole('link', { name: new RegExp(`^${name}\\b`) })
 }
 
 const DETAIL = {
@@ -138,20 +163,25 @@ afterEach(() => {
 })
 
 describe('CaseWorkspace', () => {
-  it('renders the persistent bounded header and all officer tabs at a direct URL', async () => {
-    renderCase('/requests/PRR-2026-0001/overview')
+  it('renders the persistent bounded header and the whole rail at a direct URL', async () => {
+    renderCase('/requests/PRR-2026-0001/intake')
 
-    expect(await screen.findByRole('heading', { name: 'PRR-2026-0001' }))
+    // The case opens on what it is, what was asked, and the one next step.
+    expect(await screen.findByRole('heading', { name: 'Board minutes for the spring term', level: 1 }))
       .toBeInTheDocument()
-    expect(screen.getByText('Jane Q. Public')).toBeInTheDocument()
-    expect(screen.getByText('Case Officer')).toBeInTheDocument()
-    expect(screen.getByText('Complete record search')).toBeInTheDocument()
-    expect(screen.getByText('2 new')).toBeInTheDocument()
-    expect(screen.getByText('3 need attention')).toBeInTheDocument()
-    for (const tab of ['Overview', 'Messages', 'Collection', 'Records', 'Releases']) {
-      expect(screen.getByRole('link', { name: tab })).toBeInTheDocument()
-    }
-    expect(await screen.findByRole('heading', { name: 'Overview', level: 2 }))
+    const header = screen.getByRole('region', { name: 'Case summary' })
+    expect(header).toHaveTextContent('PRR-2026-0001')
+    expect(header).toHaveTextContent('Jane Q. Public')
+    expect(header).toHaveTextContent('Case Officer')
+    expect(header).toHaveTextContent('Minutes and agendas from every spring board meeting.')
+    expect(header).toHaveTextContent('No due date')
+    expect(screen.getByRole('link', { name: 'Finish collection' }))
+      .toHaveAttribute('href', '/requests/PRR-2026-0001/collect')
+    expect(screen.queryByText('2 new')).not.toBeInTheDocument()
+    for (const stage of STAGE_NAMES) expect(stageLink(stage)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Messages' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Activity' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Intake', level: 2 }))
       .toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'Time entries' }))
       .toBeInTheDocument()
@@ -160,8 +190,8 @@ describe('CaseWorkspace', () => {
   it('loads only the active tab and keeps the case summary cached across navigation', async () => {
     // The case timeline is now the Running log on Overview, so Overview is
     // what must fetch it -- there is no second tab showing the same feed.
-    const { fetchMock } = renderCase('/requests/PRR-2026-0001/overview')
-    await screen.findByRole('heading', { name: 'Overview', level: 2 })
+    const { fetchMock } = renderCase('/requests/PRR-2026-0001/intake')
+    await screen.findByRole('heading', { name: 'Intake', level: 2 })
     // The Running log loads once the case record arrives, so wait for it
     // rather than sampling the calls made so far.
     await waitFor(() => {
@@ -216,7 +246,7 @@ describe('CaseWorkspace', () => {
       }
       return fakeResponse({ count: 0, next: null, previous: null, results: [] })
     })
-    renderCase('/requests/PRR-2026-0001/overview', ['records_officer'], fetchMock)
+    renderCase('/requests/PRR-2026-0001/intake', ['records_officer'], fetchMock)
     const user = userEvent.setup()
 
     await user.selectOptions(await screen.findByLabelText('Case owner'), '8')
@@ -231,15 +261,21 @@ describe('CaseWorkspace', () => {
   })
 
   it.each([
-    ['liaison', ['Overview', 'Messages', 'Collection']],
-    ['reviewer', ['Overview', 'Records', 'Releases']],
-    ['admin', ['Overview', 'Collection', 'Records', 'Releases']],
-  ] as Array<[StaffRole, string[]]>)('shows only %s case tabs', async (role, visible) => {
-    renderCase('/requests/PRR-2026-0001/overview', [role])
+    ['liaison', ['Intake', 'Collect', 'Close', 'Messages', 'Activity']],
+    ['reviewer', ['Intake', 'Review', 'Redact', 'Release', 'Close', 'Activity']],
+    ['admin', ['Intake', 'Collect', 'Review', 'Release', 'Close', 'Activity']],
+  ] as Array<[StaffRole, string[]]>)('links only the stages %s may open', async (role, visible) => {
+    renderCase('/requests/PRR-2026-0001/intake', [role])
 
-    await screen.findByRole('heading', { name: 'PRR-2026-0001' })
-    for (const tab of ['Overview', 'Messages', 'Collection', 'Records', 'Releases']) {
-      const link = screen.queryByRole('link', { name: tab })
+    await screen.findByRole('heading', { name: 'Board minutes for the spring term', level: 1 })
+    // Every stage is shown, so progress reads the same for everyone; only
+    // the ones the role may open are links.
+    const rail = screen.getByRole('navigation', { name: 'Case stages' })
+    for (const stage of STAGE_NAMES) expect(rail).toHaveTextContent(stage)
+    for (const tab of [...STAGE_NAMES, 'Messages', 'Activity']) {
+      const link = STAGE_NAMES.includes(tab)
+        ? stageLink(tab)
+        : screen.queryByRole('link', { name: tab })
       if (visible.includes(tab)) expect(link).toBeInTheDocument()
       else expect(link).not.toBeInTheDocument()
     }
@@ -280,21 +316,21 @@ describe('CaseWorkspace', () => {
 
   it.each([
     [
-      '/requests/PRR-2026-0001/overview',
+      '/requests/PRR-2026-0001/intake',
       '/api/staff/staff-users/?role=records_officer',
       '/api/staff/staff-users/?role=records_officer&page=2',
     ],
     [
-      '/requests/PRR-2026-0001/collection',
+      '/requests/PRR-2026-0001/collect',
       '/api/staff/collection-tasks/?request=PRR-2026-0001',
       '/api/staff/collection-tasks/?request=PRR-2026-0001&page=2',
     ],
     [
-      '/requests/PRR-2026-0001/releases',
+      '/requests/PRR-2026-0001/release',
       '/api/staff/installments/?request=PRR-2026-0001',
       '/api/staff/installments/?request=PRR-2026-0001&page=2',
     ],
-  ])('loads every page needed by the active case tab', async (route, first, next) => {
+  ])('loads every page needed by the active stage', async (route, first, next) => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.endsWith('/workspace-summary/')) return fakeResponse(SUMMARY)
@@ -335,7 +371,7 @@ describe('CaseWorkspace', () => {
       return fakeResponse({ count: 0, next: null, previous: null, results: [] })
     })
 
-    renderCase('/requests/PRR-2026-0001/records', ['records_officer'], fetchMock)
+    renderCase('/requests/PRR-2026-0001/review?view=records', ['records_officer'], fetchMock)
 
     await waitFor(() => expect(fetchMock.mock.calls.some(
       ([input]) => String(input) === first,
@@ -372,7 +408,7 @@ describe('CaseWorkspace', () => {
       }
       return fakeResponse({ count: 0, next: null, previous: null, results: [] })
     })
-    renderCase('/requests/PRR-2026-0001/records', ['admin'], fetchMock)
+    renderCase('/requests/PRR-2026-0001/review', ['admin'], fetchMock)
 
     await userEvent.click(await screen.findByText('inventory-only.pdf'))
     expect(await screen.findByRole('dialog', { name: /inventory-only\.pdf/i }))
@@ -398,7 +434,7 @@ describe('CaseWorkspace', () => {
       }
       return fakeResponse({ count: 0, next: null, previous: null, results: [] })
     })
-    renderCase('/requests/PRR-2026-0001/collection', ['liaison'], fetchMock)
+    renderCase('/requests/PRR-2026-0001/collect', ['liaison'], fetchMock)
 
     expect(await screen.findByText(/Records Officer handoff required/i))
       .toBeInTheDocument()
@@ -527,7 +563,7 @@ describe('CaseWorkspace', () => {
     render(
       <QueryClientProvider client={qc}>
         <ToastProvider>
-          <MemoryRouter initialEntries={['/requests/PRR-2026-0001/collection']}>
+          <MemoryRouter initialEntries={['/requests/PRR-2026-0001/scope']}>
             <CaseHops />
             <Routes>
               <Route
@@ -601,7 +637,7 @@ describe('CaseWorkspace', () => {
     render(
       <QueryClientProvider client={qc}>
         <ToastProvider>
-          <MemoryRouter initialEntries={['/requests/PRR-2026-0001/releases']}>
+          <MemoryRouter initialEntries={['/requests/PRR-2026-0001/release']}>
             <ReleaseHops />
             <Routes>
               <Route
@@ -636,10 +672,10 @@ function ReleaseHops() {
   const navigate = useNavigate()
   return (
     <>
-      <button type="button" onClick={() => navigate('/requests/PRR-2026-0001/releases')}>
+      <button type="button" onClick={() => navigate('/requests/PRR-2026-0001/release')}>
         Releases for PRR-2026-0001
       </button>
-      <button type="button" onClick={() => navigate('/requests/PRR-2026-0002/releases')}>
+      <button type="button" onClick={() => navigate('/requests/PRR-2026-0002/release')}>
         Releases for PRR-2026-0002
       </button>
     </>
@@ -650,10 +686,10 @@ function CaseHops() {
   const navigate = useNavigate()
   return (
     <>
-      <button type="button" onClick={() => navigate('/requests/PRR-2026-0001/collection')}>
+      <button type="button" onClick={() => navigate('/requests/PRR-2026-0001/scope')}>
         Open PRR-2026-0001
       </button>
-      <button type="button" onClick={() => navigate('/requests/PRR-2026-0002/collection')}>
+      <button type="button" onClick={() => navigate('/requests/PRR-2026-0002/scope')}>
         Open PRR-2026-0002
       </button>
     </>
@@ -672,7 +708,7 @@ function LocationProbe() {
 }
 
 describe('LegacyRequestRedirect', () => {
-  it('replaces history with the reloadable overview URL', async () => {
+  it('replaces history with the reloadable intake URL', async () => {
     render(
       <MemoryRouter
         initialEntries={['/cases', '/requests/PRR-2026-0001']}
@@ -685,7 +721,7 @@ describe('LegacyRequestRedirect', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('/requests/PRR-2026-0001/overview'))
+    expect(await screen.findByText('/requests/PRR-2026-0001/intake'))
       .toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(await screen.findByText('/cases')).toBeInTheDocument()
@@ -693,21 +729,21 @@ describe('LegacyRequestRedirect', () => {
 })
 
 describe('CaseWorkspace record uploads', () => {
-  const RECORDS = '/requests/PRR-2026-0001/records'
+  const RECORDS = '/requests/PRR-2026-0001/collect'
 
-  it('offers the upload button to a Records Officer on the records tab', async () => {
+  it('offers the upload button to a Records Officer on the Collect stage', async () => {
     renderCase(RECORDS, ['records_officer'])
 
     expect(await screen.findByRole('button', { name: 'Upload records' }))
       .toBeEnabled()
   })
 
-  it.each([['reviewer'], ['admin']] as Array<[StaffRole]>)(
+  it.each([['liaison'], ['admin']] as Array<[StaffRole]>)(
     'hides the upload button from %s',
     async (role) => {
       renderCase(RECORDS, [role])
 
-      await screen.findByRole('heading', { name: 'Records', level: 2 })
+      await screen.findByRole('heading', { name: 'Collect', level: 2 })
       expect(screen.queryByRole('button', { name: 'Upload records' }))
         .not.toBeInTheDocument()
     },
@@ -733,6 +769,7 @@ describe('CaseWorkspace record uploads', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (url.endsWith('/workspace-summary/')) return fakeResponse(SUMMARY)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
       if (url.endsWith('/record-uploads/') && init?.method === 'POST') {
         return fakeResponse({
           added_count: 1,
@@ -790,6 +827,7 @@ describe('CaseWorkspace record uploads', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (url.endsWith('/workspace-summary/')) return fakeResponse(SUMMARY)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
       if (url.endsWith('/record-uploads/') && init?.method === 'POST') {
         return fakeResponse({
           added_count: 1,
@@ -836,6 +874,7 @@ describe('CaseWorkspace record uploads', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (url.endsWith('/workspace-summary/')) return fakeResponse(SUMMARY)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
       if (url.endsWith('/record-uploads/') && init?.method === 'POST') {
         return fakeResponse({
           code: 'multipart_upload_limit_exceeded',
@@ -858,3 +897,244 @@ describe('CaseWorkspace record uploads', () => {
       .toHaveTextContent('A multipart file exceeds the per-file size limit.')
   })
 })
+
+describe('CaseWorkspace stage rail (#45)', () => {
+  const VAULT_TASK = {
+    id: 41,
+    kind: 'vault_mail',
+    state: 'complete',
+    source_label: 'Google Workspace (Gmail)',
+    records_created: 120,
+    records_unreviewed: 37,
+    search_terms: 'levy',
+    created_at: '2026-07-03T12:00:00Z',
+    completed_at: '2026-07-04T12:00:00Z',
+  }
+
+  function withCollections(tasks: unknown[], extra?: (url: string, init?: RequestInit) => Response | null) {
+    return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const handled = extra?.(url, init)
+      if (handled) return handled
+      if (url.endsWith('/workspace-summary/')) return fakeResponse(SUMMARY)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url === '/api/staff/collection-tasks/?request=PRR-2026-0001') {
+        return fakeResponse({ count: tasks.length, next: null, previous: null, results: tasks })
+      }
+      if (url.endsWith('/closure-readiness/')) {
+        return fakeResponse({ ready: true, counts: {}, blockers: [] })
+      }
+      if (url.endsWith('/advisory-intent/')) return fakeResponse({ enabled: true, latest: null })
+      if (url.endsWith('/vault-counts/')) {
+        return fakeResponse({ enabled: true, corpus: 'MAIL', latest: null })
+      }
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    })
+  }
+
+  it('shows each stage state, marks the open stage, and gives a blocked reason', async () => {
+    const blocked = {
+      ...SUMMARY,
+      stages: SUMMARY.stages.map((stage) => (stage.id === 'collect'
+        ? { ...stage, state: 'blocked', reason: "Waiting on the requester's deposit" }
+        : stage)),
+    }
+    renderCase('/requests/PRR-2026-0001/review', ['records_officer'], vi.fn(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/workspace-summary/')) return fakeResponse(blocked)
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    }))
+
+    expect(await screen.findByRole('link', { name: 'Intake: Done' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: "Collect: Blocked, Waiting on the requester's deposit" }))
+      .toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Review: Upcoming, 5 records to review' }))
+      .toHaveAttribute('aria-current', 'page')
+  })
+
+  it('heads the stage with what it asks, and jumps to the work when already there', async () => {
+    renderCase('/requests/PRR-2026-0001/collect', ['records_officer'], withCollections([VAULT_TASK]))
+
+    const card = await screen.findByRole('region', { name: 'Collect decision' })
+    expect(card).toHaveTextContent('Finish the open collections')
+    expect(card).toHaveTextContent('2 open collections')
+    expect(card).toHaveTextContent('Supersede takes unreviewed records out of review; nothing is deleted.')
+    expect(card).not.toHaveTextContent('Your call')
+    expect(screen.queryByRole('link', { name: 'See the evidence' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Finish collection' })).toHaveAttribute('href', '#stage-evidence')
+  })
+
+  it('offers no next step on a closed case', async () => {
+    const closed = {
+      ...SUMMARY,
+      legal_status: 'fulfilled',
+      stages: SUMMARY.stages.map((stage) => ({ ...stage, state: 'done' })),
+    }
+    renderCase('/requests/PRR-2026-0001/intake', ['records_officer'], withCollections([], (url) => (
+      url.endsWith('/workspace-summary/') ? fakeResponse(closed) : null
+    )))
+
+    await screen.findByRole('heading', { name: 'Board minutes for the spring term', level: 1 })
+    expect(screen.queryByRole('link', { name: 'Finish collection' })).not.toBeInTheDocument()
+    expect(screen.queryByText('No due date')).not.toBeInTheDocument()
+  })
+
+  it('says a finished stage is done', async () => {
+    renderCase('/requests/PRR-2026-0001/scope', ['records_officer'], withCollections([VAULT_TASK]))
+
+    const card = await screen.findByRole('region', { name: 'Scope decision' })
+    expect(card).toHaveTextContent('Scope is done')
+    expect(card).toHaveTextContent('Nothing is open at this stage.')
+    expect(card).not.toHaveTextContent('Your call')
+  })
+
+  it('leads Collect with one card per collection and its actions on the card', async () => {
+    const fetchMock = withCollections([VAULT_TASK], (url, init) => (
+      url === '/api/staff/collection-tasks/41/supersede/' && init?.method === 'POST'
+        ? fakeResponse({ collection_task_id: 41, record_count: 37 })
+        : null
+    ))
+    renderCase('/requests/PRR-2026-0001/collect', ['records_officer'], fetchMock)
+    const user = userEvent.setup()
+
+    const cards = await screen.findByRole('list', { name: 'Collections' })
+    expect(cards).toHaveTextContent('Google Workspace (Gmail)')
+    expect(cards).toHaveTextContent('Complete')
+    expect(cards).toHaveTextContent('120')
+    expect(cards).toHaveTextContent('37')
+    expect(screen.getByRole('link', { name: 'View records' })).toHaveAttribute(
+      'href', '/requests/PRR-2026-0001/review?view=records&collection_task=41',
+    )
+    expect(screen.getByRole('link', { name: 'Re-scope' }))
+      .toHaveAttribute('href', '/requests/PRR-2026-0001/scope')
+
+    // Supersede opens on the card, not behind a row click or a dialog.
+    await user.click(screen.getByRole('button', { name: 'Supersede' }))
+    const submit = screen.getByRole('button', { name: 'Supersede unreviewed records' })
+    expect(submit).toBeDisabled()
+    expect(screen.getByText('This takes 37 unreviewed records out of review.')).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Reason'), 'The export matched every staff mailbox.')
+    await user.click(submit)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/staff/collection-tasks/41/supersede/',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ reason: 'The export matched every staff mailbox.' }),
+      }),
+    ))
+  })
+
+  it('keeps Supersede and Re-scope from a liaison', async () => {
+    renderCase('/requests/PRR-2026-0001/collect', ['liaison'], withCollections([VAULT_TASK]))
+
+    await screen.findByRole('list', { name: 'Collections' })
+    expect(screen.getByRole('link', { name: 'View records' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Supersede' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Re-scope' })).not.toBeInTheDocument()
+  })
+
+  it('folds the scoping inputs away once a collection exists', async () => {
+    const { unmount } = renderCase(
+      '/requests/PRR-2026-0001/scope', ['records_officer'], withCollections([]),
+    )
+    const open = await screen.findByText('Scope: request intent and Vault count')
+    expect(open.closest('details')).toHaveAttribute('open')
+    unmount()
+
+    renderCase('/requests/PRR-2026-0001/scope', ['records_officer'], withCollections([VAULT_TASK]))
+    const folded = await screen.findByText('Scope: request intent and Vault count')
+    expect(folded.closest('details')).not.toHaveAttribute('open')
+  })
+
+  it.each([
+    ['/requests/PRR-2026-0001/overview', '/requests/PRR-2026-0001/intake'],
+    ['/requests/PRR-2026-0001/collection?task=7', '/requests/PRR-2026-0001/collect?task=7'],
+    ['/requests/PRR-2026-0001/records?record_state=unreviewed', '/requests/PRR-2026-0001/review?record_state=unreviewed&view=records'],
+    ['/requests/PRR-2026-0001/releases', '/requests/PRR-2026-0001/release'],
+  ])('redirects the old tab URL %s', async (from, to) => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse({ count: 0, results: [] })))
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={[from]}>
+          <Routes>
+            <Route
+              path="/requests/:number/:tab"
+              element={<><CaseWorkspace roles={['records_officer']} /><SearchProbe /></>}
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText(to)).toBeInTheDocument()
+  })
+
+  it('offers the one-by-one flight and the record list on Review', async () => {
+    renderCase('/requests/PRR-2026-0001/review', ['reviewer'])
+    const user = userEvent.setup()
+
+    const flight = await screen.findByRole('button', { name: 'Review one by one' })
+    expect(flight).toHaveAttribute('aria-pressed', 'true')
+    await user.click(screen.getByRole('button', { name: 'Record list' }))
+    expect(screen.getByRole('button', { name: 'Record list' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('shows an admin the record list without the flight toggle', async () => {
+    const { fetchMock } = renderCase('/requests/PRR-2026-0001/review', ['admin'])
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(
+      ([input]) => String(input).startsWith('/api/staff/record-items/?request=PRR-2026-0001'),
+    )).toBe(true))
+    expect(screen.queryByRole('button', { name: 'Review one by one' })).not.toBeInTheDocument()
+  })
+
+  it('lists one collection when a card sends the officer to its records', async () => {
+    const { fetchMock } = renderCase(
+      '/requests/PRR-2026-0001/review?view=records&collection_task=41', ['records_officer'],
+    )
+    const user = userEvent.setup()
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(
+      ([input]) => String(input) === '/api/staff/record-items/?request=PRR-2026-0001&collection_task=41',
+    )).toBe(true))
+    // Inside a case the proposals belong to Redact, not the record list.
+    expect(fetchMock.mock.calls.some(
+      ([input]) => String(input).includes('/redaction-batches/groups/'),
+    )).toBe(false)
+    await user.click(screen.getByRole('button', { name: 'Show every collection' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(
+      ([input]) => String(input) === '/api/staff/record-items/?request=PRR-2026-0001',
+    )).toBe(true))
+  })
+
+  it('puts the case redaction proposals on the Redact stage', async () => {
+    const { fetchMock } = renderCase('/requests/PRR-2026-0001/redact', ['reviewer'])
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(
+      ([input]) => String(input) === '/api/staff/redaction-batches/groups/?request=PRR-2026-0001',
+    )).toBe(true))
+  })
+
+  it('carries the closure readiness report and the closing action on Close', async () => {
+    const { fetchMock } = renderCase('/requests/PRR-2026-0001/close', ['records_officer'])
+
+    expect(await screen.findByText('No listed blockers')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Close case…' })).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(
+      ([input]) => String(input).endsWith('/closure-readiness/'),
+    )).toBe(true)
+  })
+
+  it('gives a liaison the closing action without the officer readiness report', async () => {
+    const { fetchMock } = renderCase('/requests/PRR-2026-0001/close', ['liaison'])
+
+    expect(await screen.findByRole('button', { name: 'Close case…' })).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(
+      ([input]) => String(input).endsWith('/closure-readiness/'),
+    )).toBe(false)
+  })
+})
+
+function SearchProbe() {
+  const location = useLocation()
+  return <output>{`${location.pathname}${location.search}`}</output>
+}

@@ -20,6 +20,7 @@ import {
   parseCaseSort,
 } from '../caseSort'
 import { AddToExistingCaseModal } from '../case/AddToExistingCaseModal'
+import { INTAKE_LABEL_TEXT, type IntakeLabel } from '../case/intakeLabels'
 import { InboxRow, InboxRowList } from '../inbox/InboxRow'
 import { PageHeader } from '../layout/AppLayout'
 import { NoActionModal } from '../NoActionModal'
@@ -849,6 +850,12 @@ export interface CaseListItem {
   /** Requester emails waiting on the case; sent only by `?queue=inbox`. */
   inbox_needs_attention?: number
   latest_inbound_at?: string | null
+  /** The unanswered intake label (#33), on an officer's Inbox rows only. */
+  intake_suggestion?: {
+    label: IntakeLabel
+    target_case_number: string | null
+    confidence: number | null
+  } | null
 }
 
 /**
@@ -1079,6 +1086,21 @@ function CaseTable({
     },
     onError: (error) => toast('error', error.message),
   })
+  // Correct on an Inbox row (#33): record the officer's agreement, then open
+  // the case with the same prefilled action the case page offers.
+  const confirmLabel = useMutation({
+    mutationFn: ({ number, label }: { number: string; label: IntakeLabel; target: string | null }) =>
+      api(`/api/staff/requests/${number}/advisory-intake/feedback/`, {
+        method: 'POST',
+        body: { outcome: 'confirmed', final_label: label, reason: '' },
+      }),
+    onSuccess: (_data, { number, label, target }) => {
+      const params = new URLSearchParams({ intake_action: label })
+      if (target) params.set('intake_target', target)
+      navigate(`/requests/${number}/intake?${params.toString()}`)
+    },
+    onError: (error) => toast('error', error.message),
+  })
 
   if (rows.length === 0) return <EmptyState>{empty}</EmptyState>
 
@@ -1174,12 +1196,47 @@ function CaseTable({
       grow: true,
       cell: (row) => {
         const unread = triage && (row.inbox_needs_attention ?? 0) > 0
+        const suggestion = triage ? row.intake_suggestion : null
+        const suggestionText = suggestion
+          ? `${INTAKE_LABEL_TEXT[suggestion.label]}${
+            suggestion.target_case_number ? ` ${suggestion.target_case_number}` : ''
+          }`
+          : ''
         return (
-          <span className="flex items-start">
-            <HoverNote full={row.subject} className={`line-clamp-2 ${unread ? 'font-semibold' : ''}`}>
-              {row.subject || '—'}
-            </HoverNote>
-            {row.subject_source === 'ai' && <AdvisoryMark />}
+          <span className="flex flex-col gap-1">
+            <span className="flex items-start">
+              <HoverNote full={row.subject} className={`line-clamp-2 ${unread ? 'font-semibold' : ''}`}>
+                {row.subject || '—'}
+              </HoverNote>
+              {row.subject_source === 'ai' && <AdvisoryMark />}
+            </span>
+            {suggestion && (
+              <span className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+                <span>
+                  AI suggests {suggestionText}
+                  {typeof suggestion.confidence === 'number'
+                    ? ` · ${Math.round(suggestion.confidence * 100)}%`
+                    : ''}
+                </span>
+                <button
+                  type="button"
+                  className="font-semibold text-accent underline-offset-2 hover:underline"
+                  aria-label={`Correct: ${suggestionText} for ${row.number}`}
+                  disabled={confirmLabel.isPending}
+                  onClick={(event) => {
+                    // The row itself opens the case; this button does more.
+                    event.stopPropagation()
+                    confirmLabel.mutate({
+                      number: row.number,
+                      label: suggestion.label,
+                      target: suggestion.target_case_number,
+                    })
+                  }}
+                >
+                  Correct
+                </button>
+              </span>
+            )}
           </span>
         )
       },

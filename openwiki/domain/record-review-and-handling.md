@@ -148,9 +148,10 @@ Minimal validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records
 
 ## Keyboard review in the case Review tab
 
-`ReviewFlight` (`frontend/src/case/ReviewFlight.tsx`) is the case workspace's `review` tab:
-`CaseWorkspace.tsx` mounts it when the tab is `review`. `CASE_TAB_ROLES.review` in
-`frontend/src/nav.ts` limits the tab to records officers and reviewers. The screen lists one
+`ReviewFlight` (`frontend/src/case/ReviewFlight.tsx`) is the case workspace's Review stage:
+`CaseWorkspace.tsx` mounts it through `ReviewStage` when the segment is `review`.
+`CASE_TAB_ROLES.review` in `frontend/src/nav.ts` limits the stage to records officers and
+reviewers ([case stage rail](case-workspace.md#case-stage-rail)). The screen lists one
 request's records beside their preview, and each key sends one decision:
 
 - `r` responsive, `n` non-responsive, `d` duplicate, `u` undo, `x` select, and `j` or `k` to move.

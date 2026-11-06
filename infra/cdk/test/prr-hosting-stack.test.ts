@@ -1166,6 +1166,15 @@ describe.each(environments)("psd401-prr-%s identity", (envName, config) => {
       ["us.openai.gpt-6.1-terra", "openai.gpt-6.1-terra"],
     ];
 
+    // One read-only statement lets verification confirm zero retention.
+    const retention = statements.filter((statement) =>
+      actionsFor(statement).includes("bedrock:GetAccountDataRetention"),
+    );
+    expect(retention).toHaveLength(1);
+    expect(actionsFor(retention[0])).toEqual(["bedrock:GetAccountDataRetention"]);
+    expect(JSON.stringify(statements)).not.toContain("PutAccountDataRetention");
+    const invoke = statements.filter((statement) => statement !== retention[0]);
+    statements.splice(0, statements.length, ...invoke);
     expect(statements).toHaveLength(allowed.length * 2);
     expect(new Set(statements.flatMap(actionsFor))).toEqual(
       new Set(["bedrock:InvokeModel"]),

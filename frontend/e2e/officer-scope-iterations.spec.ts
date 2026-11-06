@@ -12,7 +12,7 @@ const caseNumber = 'PRR-E2E-0011'
 test('officer-scope-iterations', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page)
-  await page.goto(`/requests/${caseNumber}/collection`)
+  await page.goto(`/requests/${caseNumber}/scope`)
 
   const trail = page.getByRole('list', { name: 'Scope iterations' })
   await expect(trail.getByRole('listitem')).toHaveCount(2)

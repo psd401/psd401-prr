@@ -62,7 +62,7 @@ stateDiagram-v2
 ## The one-step package build
 
 `build_release_package(request_number, *, actor)` in `apps/records/release_package.py` is the
-Releases tab's "1. Build package" step. The staff endpoint is
+Release stage's "1. Build package" step. The staff endpoint is
 `POST /api/staff/requests/{number}/release-package/` (`RequestsViewSet.release_package` in
 `apps/api/resources/requests.py`). It runs the create, exemption-log, and prepare stages above in
 the order an officer used to click through them. It never releases or sends.

@@ -52,7 +52,7 @@ test('officer-case-table-sort', async ({ page }) => {
   const caseNumber = (await caseLink.innerText()).trim()
   await caseLink.click()
   await expect(page).toHaveURL(new RegExp(`/requests/${caseNumber}`))
-  await expect(page.getByRole('heading', { name: caseNumber })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Case summary' })).toContainText(caseNumber)
 })
 
 /**
@@ -152,7 +152,7 @@ test('officer-case-table-row-opens-the-case', async ({ page }) => {
   // The Status cell belongs to no control, so it opens the case.
   await row.getByRole('cell').nth(4).click()
   await expect(page).toHaveURL(new RegExp(`/requests/${number}`))
-  await expect(page.getByRole('heading', { name: number })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Case summary' })).toContainText(number)
 })
 
 /** Keyboard parity for the same thing: Enter on a focused row opens it. */

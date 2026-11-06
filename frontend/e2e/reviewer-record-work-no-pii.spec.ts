@@ -7,12 +7,12 @@ import { fixtureRequestNumber, login } from './message-workspace.helpers.js'
 test('reviewer-record-work-no-pii', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page, 'e2e-reviewer', 'e2e-reviewer-local-only')
-  await page.goto(`/requests/${fixtureRequestNumber}/records`)
+  await page.goto(`/requests/${fixtureRequestNumber}/review?view=records`)
 
   await expect(page).toHaveURL(
-    new RegExp(`/requests/${fixtureRequestNumber}/records$`),
+    new RegExp(`/requests/${fixtureRequestNumber}/review\\?view=records$`),
   )
-  await expect(page.getByRole('heading', { name: 'Records', level: 2 })).toBeFocused()
+  await expect(page.getByRole('heading', { name: 'Review', level: 2, exact: true })).toBeFocused()
   await expect(page.getByText('Restricted', { exact: true })).toBeVisible()
   await expect(page.getByText('synthetic.requester@example.org')).toHaveCount(0)
   await expect(page.getByText('Synthetic Requester')).toHaveCount(0)

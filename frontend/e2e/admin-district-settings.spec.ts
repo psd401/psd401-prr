@@ -17,7 +17,7 @@ import { login, signOut } from './message-workspace.helpers.js'
 // consequence in front of the administrator while they type.
 test('admin-district-settings', async ({ page }) => {
   await login(page, 'e2e-admin', 'e2e-admin-local-only')
-  await expect(page.getByRole('heading', { name: 'Configuration' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
 
   await page.getByRole('link', { name: 'District settings' }).click()
   await expect(page).toHaveURL(/\/configuration\/settings$/)

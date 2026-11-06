@@ -12,6 +12,9 @@ import {
 test('officer-message-disposition', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page)
+  // Login lands on Today; these queues live on the Inbox.
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
+  await page.goto('/inbox')
 
   // The Inbox row carries the dispositions itself: an officer must not have to
   // open a case to clear a message that needs nothing further.

@@ -261,22 +261,23 @@ class CaseworkVerificationFoundationTests(SimpleTestCase):
             "admin-agent-configuration": ("/configuration/agent-access",),
             "intake-clerk-route-boundary": ("Not authorized",),
             "officer-new-case": (
-                "/overview",
+                "/intake",
                 "officer-new-case-overview.png",
                 "officer-case-collection.png",
                 "officer-case-records.png",
                 "officer-case-releases.png",
+                "officer-case-close.png",
             ),
             "officer-clarification-response": (
                 "/messages",
                 "officer-clarification-response.png",
             ),
             "liaison-assigned-case-work": (
-                "/collection",
+                "/collect",
                 "liaison-assigned-case-work.png",
             ),
             "reviewer-record-work-no-pii": (
-                "/records",
+                "/review",
                 "reviewer-record-work-no-pii.png",
             ),
             "correspondence-destination-parity": (

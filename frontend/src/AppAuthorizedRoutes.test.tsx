@@ -33,6 +33,7 @@ vi.mock('./pages/WorkItem', () => ({
 }))
 vi.mock('./pages/Requests', () => ({ Requests: () => <h1>Cases child</h1> }))
 vi.mock('./pages/Inbox', () => ({ Inbox: () => <h1>Inbox child</h1> }))
+vi.mock('./pages/Today', () => ({ Today: () => <h1>Today child</h1> }))
 vi.mock('./pages/Review', () => ({ Review: () => <h1>Review child</h1> }))
 vi.mock('./pages/Decisions', () => ({ Decisions: () => <h1>Decisions child</h1> }))
 vi.mock('./pages/StaffIntake', () => ({
@@ -74,6 +75,7 @@ import App from './App'
 
 const HEADING_BY_ROUTE: Record<string, string> = {
   '/cases': 'Cases child',
+  '/today': 'Today child',
   '/inbox': 'Inbox child',
   '/review': 'Review child',
   '/decisions': 'Decisions child',

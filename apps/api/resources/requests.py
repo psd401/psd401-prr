@@ -125,6 +125,7 @@ from apps.records.response_due import (
     annotate_next_response_due,
     next_response_due,
 )
+from apps.records.stages import STAGE_IDS, case_stages, current_stages
 from apps.records.upload_handlers import (
     IntakeAttachmentLimitUploadHandler,
     RecordUploadLimitUploadHandler,
@@ -234,6 +235,35 @@ def description_snippet(description: str | None) -> str:
     return collapsed[:DESCRIPTION_SNIPPET_LENGTH].rstrip() + "…"
 
 
+#: Long enough for two lines at the top of a case page.
+CASE_SUMMARY_LENGTH = 280
+
+
+def description_preview(description: str | None) -> str:
+    """The opening of a request, collapsed to about two lines.
+
+    Like ``description_snippet``, a reading of the legal record that never
+    writes it (rule 9).
+    """
+    collapsed = " ".join((description or "").split())
+    if len(collapsed) <= CASE_SUMMARY_LENGTH:
+        return collapsed
+    return collapsed[:CASE_SUMMARY_LENGTH].rstrip() + "…"
+
+
+def latest_intent_summary(prr) -> str:
+    """The summary from the case's newest completed request-intent run, or
+    "". Advisory text a person has not adopted; callers gate it to Records
+    Officers, the same boundary as the advisory title."""
+    run = AdvisoryRun.objects.filter(
+        request=prr,
+        kind=AdvisoryRun.Kind.REQUEST_INTENT,
+        state=AdvisoryRun.State.COMPLETE,
+    ).order_by("-created_at", "-pk").first()
+    summary = (run.proposal or {}).get("summary") if run else None
+    return summary.strip() if isinstance(summary, str) else ""
+
+
 def advisory_short_title(obj) -> str:
     """The annotated advisory short title, or "" when there is none.
 
@@ -273,6 +303,55 @@ class CaseNoteCreateSerializer(serializers.Serializer):
 CASE_NOTE_SNIPPET_LENGTH = 160
 
 
+def _unanswered_intake_labels(cases) -> dict:
+    """Each case's latest completed intake label nobody has answered (#33).
+
+    One query for the page: the newest completed intake run per case, kept
+    only when no officer feedback exists for it. A case whose latest run is
+    still pending or failed shows nothing.
+    """
+    latest = {}
+    runs = (
+        AdvisoryRun.objects.filter(
+            request__in=[case.pk for case in cases],
+            kind=AdvisoryRun.Kind.INTAKE_CLASSIFICATION,
+            record_item__isnull=True,
+        )
+        .annotate(
+            _answered=Exists(
+                AdvisoryFeedback.objects.filter(advisory_run=OuterRef("pk"))
+            )
+        )
+        .order_by("request_id", "-created_at")
+        .values("request_id", "state", "proposal", "_answered")
+    )
+    for run in runs:
+        latest.setdefault(run["request_id"], run)
+    suggestions = {}
+    for request_id, run in latest.items():
+        proposal = run["proposal"] or {}
+        if (
+            run["state"] == AdvisoryRun.State.COMPLETE
+            and not run["_answered"]
+            and proposal.get("label")
+        ):
+            suggestions[request_id] = {
+                "label": proposal.get("label"),
+                "target_case_number": proposal.get("target_case_number"),
+                "confidence": proposal.get("confidence"),
+            }
+    return suggestions
+
+
+class CaseStageSerializer(serializers.Serializer):
+    id = serializers.ChoiceField(choices=list(STAGE_IDS))
+    label = serializers.CharField()  # pyright: ignore[reportAssignmentType]
+    state = serializers.ChoiceField(choices=["done", "current", "blocked", "upcoming"])
+    open_count = serializers.IntegerField(min_value=0)
+    summary = serializers.CharField(allow_blank=True)
+    reason = serializers.CharField(allow_blank=True)
+
+
 class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
     requester_email = serializers.EmailField(source="requester.email", read_only=True)
     requester_name = serializers.CharField(source="requester.name", read_only=True)
@@ -289,6 +368,8 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
     next_due = serializers.SerializerMethodField()
     next_due_basis = serializers.SerializerMethodField()
     latest_note = serializers.SerializerMethodField()
+    intake_suggestion = serializers.SerializerMethodField()
+    stage = serializers.SerializerMethodField()
 
     class Meta:
         model = PublicRecordsRequest
@@ -303,7 +384,7 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
                   "next_due", "next_due_basis",
                   "latest_note",
                   "inbox_needs_attention", "latest_inbound_at",
-                  "subject", "subject_source"]
+                  "subject", "subject_source", "intake_suggestion", "stage"]
         read_only_fields = ["id", "number", "status", "matter_kind",
                             "received_at",
                             "statutory_response_due", "ferpa_access_due",
@@ -311,6 +392,21 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
                             "closed_at", "tolled_business_days",
                             "acknowledgment_sent_at",
                             "initial_response_delivered"]
+
+    @extend_schema_field(serializers.JSONField(allow_null=True))
+    def get_intake_suggestion(self, obj):
+        """The case's unanswered intake label, on a Records Officer's Inbox
+        rows only (#33); null everywhere else. Precomputed for the page."""
+        return (self.context.get("intake_suggestions") or {}).get(obj.pk)
+
+    @extend_schema_field(CaseStageSerializer(allow_null=True))
+    def get_stage(self, obj):
+        """The stage the case is in now, as its rail reads it (#45).
+
+        Precomputed for the whole page by ``stages.current_stages``; null on
+        any response that did not compute it, such as a single case.
+        """
+        return (self.context.get("stages") or {}).get(obj.pk)
 
     @extend_schema_field(serializers.IntegerField())
     def get_inbox_needs_attention(self, obj):
@@ -1183,6 +1279,14 @@ class CaseWorkspaceSummarySerializer(serializers.Serializer):
     estimated_completion = serializers.DateField(allow_null=True)
     counts = CaseWorkspaceCountsSerializer()
     next_action = CaseWorkspaceNextActionSerializer(allow_null=True)
+    stages = CaseStageSerializer(many=True)
+    title = serializers.CharField()
+    summary = serializers.CharField(allow_blank=True)
+    matter_kind = serializers.CharField()
+    next_due = serializers.DateField(allow_null=True)
+    next_due_basis = serializers.ChoiceField(
+        choices=list(DueBasis.CHOICES), allow_null=True,
+    )
 
 
 class CaseActivityEntrySerializer(serializers.Serializer):
@@ -1730,6 +1834,21 @@ class RequestsViewSet(
             return qs.order_by(*ordering)
         return qs.order_by(CASE_DUE_DATE.asc(nulls_last=True), "pk")
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        rows = page if page is not None else list(queryset)
+        context = dict(self.get_serializer_context())
+        context["stages"] = current_stages(rows)
+        if request.query_params.get("queue") == "inbox" and has_staff_role(
+            request.user, StaffRole.RECORDS_OFFICER,
+        ):
+            context["intake_suggestions"] = _unanswered_intake_labels(rows)
+        data = self.get_serializer_class()(rows, many=True, context=context).data
+        if page is not None:
+            return self.get_paginated_response(data)
+        return Response(data)
+
     def get_serializer_class(self):
         if self.action == "intake":
             return StaffIntakeSerializer
@@ -1837,7 +1956,20 @@ class RequestsViewSet(
                 ),
             }
         response_plan = initial_response_plan(prr)
+        is_officer = has_staff_role(request.user, StaffRole.RECORDS_OFFICER)
+        # What the case is about, at the top of its page: the advisory title
+        # and summary for a Records Officer (``advisory_short_title`` is
+        # already officer-only), the opening of the request for everyone.
+        due = next_response_due(prr)
         payload = {
+            "title": advisory_short_title(prr) or description_snippet(prr.description),
+            "summary": (
+                (latest_intent_summary(prr) if is_officer else "")
+                or description_preview(prr.description)
+            ),
+            "matter_kind": prr.matter_kind,
+            "next_due": due.date.isoformat() if due.date else None,
+            "next_due_basis": due.basis,
             "number": prr.number,
             "legal_status": prr.status,
             "requester": requester,
@@ -1894,6 +2026,7 @@ class RequestsViewSet(
                 if next_work is not None
                 else None
             ),
+            "stages": case_stages(prr),
         }
         return Response(CaseWorkspaceSummarySerializer(payload).data)
 

@@ -42,6 +42,7 @@ function vaultTask(state: string) {
     vault_hold_id: '',
     vault_export_id: '',
     vault_ingest: null,
+    records_unreviewed: 40,
     created_at: '2026-08-01T12:00:00Z',
     completed_at: null,
   }
@@ -87,6 +88,8 @@ it('supersedes a completed collection only after a substantive reason', async ()
   await user.click(screen.getByRole('button', { name: 'Supersede collection' }))
   const confirm = screen.getByRole('button', { name: 'Supersede unreviewed records' })
   expect(confirm).toBeDisabled()
+  // The confirmation states exactly how many records it moves (#28).
+  expect(screen.getByText('This takes 40 unreviewed records out of review.')).toBeInTheDocument()
 
   await user.type(screen.getByLabelText('Reason'), REASON)
   expect(confirm).toBeEnabled()

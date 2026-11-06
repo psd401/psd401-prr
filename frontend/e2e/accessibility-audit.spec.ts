@@ -117,7 +117,7 @@ async function checkResponsiveSurface(
   await page.setViewportSize({ width: 320, height: 800 })
   await page.goto(route)
   await expect(page.getByRole('main')).toBeVisible()
-  await expect(page.getByRole('heading', { name: readyHeading })).toBeVisible()
+  await expect(page.getByRole('heading', { name: readyHeading, exact: true })).toBeVisible()
   if (readyText) {
     await expect(page.getByText(readyText, { exact: false }).first()).toBeVisible()
   }
@@ -196,37 +196,48 @@ async function auditSurfaces(page: Page, theme: Theme, records: AuditRecord[]) {
   await audit(page, 'login', records)
 
   await login(page)
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
   await audit(page, 'shell and Inbox', records)
 
   await page.goto('/inbox?view=team')
   await expect(page.getByText('Complete record search').first()).toBeVisible()
   await audit(page, 'Inbox assignment queues', records)
 
-  for (const tab of ['overview', 'messages', 'collection', 'records', 'releases']) {
-    await page.goto(`/requests/${fixtureRequestNumber}/${tab}`)
+  // Every stage of the rail (#45) and the Messages view beside it.
+  for (const tab of [
+    'intake', 'scope', 'collect', 'review', 'redact', 'release', 'close', 'messages',
+  ]) {
+    const query = tab === 'review' ? '?view=records' : ''
+    await page.goto(`/requests/${fixtureRequestNumber}/${tab}${query}`)
     await expect(page.getByRole('heading', {
       name: tab.charAt(0).toUpperCase() + tab.slice(1),
       level: 2,
       exact: true,
     })).toBeVisible()
-    if (tab === 'overview') {
+    if (tab === 'intake') {
       await expect(page.getByText('Legal record of the request as received', { exact: false }))
         .toBeVisible()
     } else if (tab === 'messages') {
       await expect(page.getByText('Showing 1–50 of 2000 messages')).toBeVisible()
-    } else if (tab === 'collection') {
-      await expect(page.getByText('Google Vault scope count')).toBeVisible()
+    } else if (tab === 'scope') {
+      const vault = page.getByText('Google Vault scope count')
+      if (!(await vault.isVisible())) {
+        await page.getByText('Scope: request intent and Vault count').click()
+      }
+      await expect(vault).toBeVisible()
+    } else if (tab === 'collect') {
+      await expect(page.getByRole('list', { name: 'Collections' })).toBeVisible()
       await expect(page.getByRole('cell', { name: 'e2e-liaison' })).toBeVisible()
-    } else if (tab === 'records') {
+    } else if (tab === 'review') {
       await expect(page.getByText('synthetic-review-record.pdf')).toBeVisible()
-    } else if (tab === 'releases') {
-      await expect(page.getByText('Read-only blocker report.', { exact: false })).toBeVisible()
+    } else if (tab === 'redact') {
+      await expect(page.getByRole('region', { name: 'Redact decision' })).toBeVisible()
+    } else if (tab === 'release') {
       await expect(page.getByText(
         'Installments appear when records are released in batches.',
       )).toBeVisible()
     } else {
-      await expect(page.locator('main ol > li').first()).toBeVisible()
+      await expect(page.getByText('Read-only blocker report.', { exact: false })).toBeVisible()
     }
     await audit(page, `case ${tab}`, records)
   }
@@ -312,11 +323,11 @@ async function auditSurfaces(page: Page, theme: Theme, records: AuditRecord[]) {
     records,
   )
 
-  await page.goto(`/requests/${fixtureRequestNumber}/overview`)
+  await page.goto(`/requests/${fixtureRequestNumber}/intake`)
   await auditDialog(page, 'Close case…', 'Close case', 'Close case dialog', records)
   await auditDialog(page, 'Log time', 'Log time', 'Log time dialog', records)
 
-  await page.goto(`/requests/${fixtureRequestNumber}/collection`)
+  await page.goto(`/requests/${fixtureRequestNumber}/collect`)
   await auditDialog(
     page,
     'Add search assignment',
@@ -339,16 +350,16 @@ async function auditSurfaces(page: Page, theme: Theme, records: AuditRecord[]) {
     await page.keyboard.press('Escape')
   }
 
-  await page.goto(`/requests/${fixtureRequestNumber}/records`)
+  await page.goto(`/requests/${fixtureRequestNumber}/review?view=records`)
   await page.getByRole('row').filter({ hasText: 'synthetic-review-record.pdf' }).click()
   const reviewDialog = page.getByRole('dialog', { name: /synthetic-review-record\.pdf/ })
   await expect(reviewDialog).toBeVisible()
   await audit(page, 'record review dialog', records)
   await page.keyboard.press('Escape')
 
-  await page.goto(`/requests/${fixtureRequestNumber}/releases`)
+  await page.goto(`/requests/${fixtureRequestNumber}/release`)
   await expect(page.getByRole('heading', {
-    name: 'Releases',
+    name: 'Release',
     level: 2,
     exact: true,
   })).toBeVisible()
@@ -411,10 +422,10 @@ test('accessibility-audit', async ({ page }) => {
   )
   await checkResponsiveSurface(
     page,
-    `/requests/${fixtureRequestNumber}/overview`,
+    `/requests/${fixtureRequestNumber}/intake`,
     'case overview',
     'accessibility-case-overview',
-    'Overview',
+    'Intake',
     'Legal record of the request as received',
     automatedChecks,
   )

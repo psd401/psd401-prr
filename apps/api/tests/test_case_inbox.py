@@ -39,6 +39,28 @@ class CaseInboxViewTests(StaffApiTestCase):
             closed_at=timezone.now(),
         )
 
+    def test_each_listed_case_carries_its_current_stage(self):
+        # The Today list shows one next step per case without opening it.
+        response = self.client.get(
+            "/api/staff/requests/", {"status": "open", "ordering": "due"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        rows = response.json()["results"]
+        self.assertEqual(
+            [row["number"] for row in rows],
+            [self.web.number, self.emailed.number],
+        )
+        for row in rows:
+            self.assertEqual(row["stage"], {
+                "id": "intake",
+                "label": "Intake",
+                "state": "current",
+                "open_count": 1,
+                "summary": "Received and not yet acknowledged",
+                "reason": "",
+            })
+
     def test_open_cases_view_lists_each_open_case_once_flagged_first(self):
         response = self.client.get("/api/staff/requests/", {"queue": "inbox"})
 

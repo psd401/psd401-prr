@@ -5,6 +5,7 @@ import type { StaffRole } from './api/auth'
 import {
   CONFIGURATION_NAV,
   PRIMARY_NAV,
+  caseTabPath,
   defaultLanding,
   routeIsAuthorized,
   visibleNav,
@@ -21,55 +22,55 @@ const ROLE_CASES: RoleCase[] = [
   {
     name: 'Records Officer',
     roles: ['records_officer'],
-    labels: ['Inbox', 'Review', 'Decisions', 'Staff Intake', 'Oversight', 'Configuration'],
-    landing: '/inbox',
+    labels: ['Today', 'New request', 'Settings'],
+    landing: '/today',
   },
   {
     name: 'Department Liaison',
     roles: ['liaison'],
-    labels: ['Inbox', 'Configuration'],
-    landing: '/inbox',
+    labels: ['Today', 'Settings'],
+    landing: '/today',
   },
   {
     name: 'Reviewer',
     roles: ['reviewer'],
-    labels: ['Inbox', 'Review', 'Decisions', 'Oversight', 'Configuration'],
-    landing: '/review',
+    labels: ['Today', 'Settings'],
+    landing: '/today',
   },
   {
     name: 'Intake Clerk',
     roles: ['intake_clerk'],
-    labels: ['Staff Intake', 'Configuration'],
+    labels: ['New request', 'Settings'],
     landing: '/staff-intake',
   },
   {
     name: 'Application Admin',
     roles: ['admin'],
-    labels: ['Inbox', 'Oversight', 'Configuration'],
+    labels: ['Today', 'Settings'],
     landing: '/configuration',
   },
   {
     name: 'Officer and admin',
     roles: ['records_officer', 'admin'],
-    labels: ['Inbox', 'Review', 'Decisions', 'Staff Intake', 'Oversight', 'Configuration'],
-    landing: '/inbox',
+    labels: ['Today', 'New request', 'Settings'],
+    landing: '/today',
   },
   {
     name: 'Liaison and reviewer',
     roles: ['liaison', 'reviewer'],
-    labels: ['Inbox', 'Review', 'Decisions', 'Oversight', 'Configuration'],
-    landing: '/inbox',
+    labels: ['Today', 'Settings'],
+    landing: '/today',
   },
   {
     name: 'Reviewer and admin',
     roles: ['reviewer', 'admin'],
-    labels: ['Inbox', 'Review', 'Decisions', 'Oversight', 'Configuration'],
-    landing: '/review',
+    labels: ['Today', 'Settings'],
+    landing: '/today',
   },
   {
     name: 'Intake and admin',
     roles: ['intake_clerk', 'admin'],
-    labels: ['Inbox', 'Staff Intake', 'Oversight', 'Configuration'],
+    labels: ['Today', 'New request', 'Settings'],
     landing: '/staff-intake',
   },
 ]
@@ -98,22 +99,34 @@ describe('role-aware shell contract', () => {
     expect(routeIsAuthorized('/requests/P000123-101426/constructor', ['admin'])).toBe(false)
   })
 
-  it('keeps one work surface: Inbox absorbed My Work', () => {
-    const paths = PRIMARY_NAV.map((item) => item.path)
-
-    expect(paths).not.toContain('/my-work')
-    expect(paths[0]).toBe('/inbox')
-    expect(visibleNav(PRIMARY_NAV, ['liaison']).map((item) => item.path))
-      .toContain('/inbox')
+  it('maps server tab names to stage URLs', () => {
+    expect(caseTabPath('P1', 'overview')).toBe('/requests/P1/intake')
+    expect(caseTabPath('P1', 'records')).toBe('/requests/P1/review?view=records')
+    expect(caseTabPath('P1', 'review')).toBe('/requests/P1/review')
+    expect(caseTabPath('P1', 'messages')).toBe('/requests/P1/messages')
   })
 
-  it('advertises correspondence destinations without the compatibility URL', () => {
-    const paths = [...PRIMARY_NAV, ...CONFIGURATION_NAV]
-      .map((item) => item.path)
+  it('authorizes the stage rail and keeps legacy tab URLs openable for redirect', () => {
+    expect(routeIsAuthorized('/requests/P000123-101426/scope', ['records_officer'])).toBe(true)
+    expect(routeIsAuthorized('/requests/P000123-101426/scope', ['liaison'])).toBe(false)
+    expect(routeIsAuthorized('/requests/P000123-101426/collect', ['liaison'])).toBe(true)
+    expect(routeIsAuthorized('/requests/P000123-101426/redact', ['admin'])).toBe(false)
+    expect(routeIsAuthorized('/requests/P000123-101426/close', ['liaison'])).toBe(true)
+    expect(routeIsAuthorized('/requests/P000123-101426/collection', ['liaison'])).toBe(true)
+    expect(routeIsAuthorized('/requests/P000123-101426/records', ['reviewer'])).toBe(true)
+    expect(routeIsAuthorized('/requests/P000123-101426/overview', ['admin'])).toBe(true)
+  })
 
-    expect(paths).toContain('/inbox')
-    expect(paths).toContain('/configuration/correspondence')
-    expect(paths).not.toContain('/correspondence')
+  it('keeps the menu to three stops, with Today first', () => {
+    expect(PRIMARY_NAV.map((item) => item.path)).toEqual(['/today', '/staff-intake', '/configuration'])
+  })
+
+  it('still opens the pages Today and Settings link to', () => {
+    for (const path of ['/inbox', '/review', '/decisions', '/oversight']) {
+      expect(routeIsAuthorized(path, ['records_officer'])).toBe(true)
+    }
+    expect(routeIsAuthorized('/inbox', ['intake_clerk'])).toBe(false)
+    expect(routeIsAuthorized('/today', ['intake_clerk'])).toBe(false)
   })
 
   it('defines every top-level and Configuration route in the authorization registry', () => {

@@ -283,6 +283,7 @@ class RecordReviewInputSerializer(serializers.Serializer):
 BULK_FILTER_KEYS = (
     "request", "review_state", "source_system", "tag", "sender_domain",
     "custodian", "advisory_state", "confidence_min", "search", "handling",
+    "collection_task",
 )
 
 
@@ -566,6 +567,13 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         source_system = params.get("source_system")
         if source_system:
             qs = qs.filter(source_system=source_system)
+        collection_task = (params.get("collection_task") or "").strip()
+        if collection_task:
+            if not collection_task.isdigit():
+                raise serializers.ValidationError(
+                    {"collection_task": ["Supply a collection task id."]}
+                )
+            qs = qs.filter(collection_task_id=int(collection_task))
         # Derived release filters. "release_ready" is the same condition
         # production enforces when it builds the ZIP; "unreleased" means no
         # live installment has claimed the record yet. Together they are the

@@ -6,6 +6,8 @@ import { login } from './message-workspace.helpers.js'
 
 test('complete-reviewer-journey', async ({ page }) => {
   await login(page, 'e2e-reviewer', 'e2e-reviewer-local-only')
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
+  await page.goto('/review')
   await expect(page.getByRole('heading', { name: 'Review' })).toBeVisible()
   await page.getByRole('link', { name: /Open Review record/ }).click()
   await expect(page.getByRole('heading', { name: 'Work context' })).toBeVisible()

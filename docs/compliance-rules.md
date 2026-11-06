@@ -254,12 +254,12 @@ Every one is still a count.
 
 Collection from the approved scope (#37, rule 11 amendment, district decision
 of the epic #27 plan). A Records Officer approves the proposed scope and
-starts the Vault collection in one action from the Collection tab
+starts the Vault collection in one action from the Scope stage
 (`requests.vault_collection.start`). With the in-app `PRR_TRUST_SCOPE_MODE`
 set to `auto` (default `suggest`), the export also starts unattended -- and
 only then: from the final completed count of a finished *automatic* scoping
 session, on a request with no Vault collection yet, with no actor and
-`CollectionTask.trigger=automatic`, which the Collection tab shows. It is the
+`CollectionTask.trigger=automatic`, which the Collect stage shows. It is the
 same collection an officer would start: the same deposit gate, the same
 targeted hold for named district mailboxes and no organization-wide hold, the
 same export into review. An officer's re-run never collects by itself;

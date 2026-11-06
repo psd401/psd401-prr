@@ -38,7 +38,7 @@ test('officer-matter-kinds', async ({ page }) => {
   const caseNumber = (await number.textContent())!.trim()
 
   await page.goto(`/requests/${caseNumber}/overview`)
-  await expect(page.getByRole('heading', { name: caseNumber })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Case summary' })).toContainText(caseNumber)
   await expect(page.getByText('Running log')).toBeVisible()
 
   // The FERPA clock is shown and the RCW 42.56.520 one is absent entirely.

@@ -1258,3 +1258,43 @@ it('shows messages on open cases by default and closed ones on request', async (
   await user.selectOptions(select, 'all')
   await waitFor(() => expect(urls).toContain(base))
 })
+
+it('shows an unanswered intake label on the case row and opens its action', async () => {
+  // #33: the officer can act on the suggested label from the Inbox.
+  const suggested = {
+    ...openEmailedCase,
+    intake_suggestion: {
+      label: 'duplicate_of', target_case_number: 'PRR-2026-0048', confidence: 0.9,
+    },
+  }
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    const method = init?.method ?? 'GET'
+    if (url === '/api/staff/requests/?queue=inbox' && method === 'GET') {
+      return response(page([suggested, openWebCase]))
+    }
+    if (url === '/api/staff/requests/PRR-2026-0051/advisory-intake/feedback/' && method === 'POST') {
+      return response({ outcome: 'confirmed' })
+    }
+    throw new Error(`Unexpected fetch: ${method} ${url}`)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const user = userEvent.setup()
+  renderInbox(['records_officer'], counts)
+
+  const rows = (await screen.findAllByRole('row')).slice(1)
+  expect(rows[0]).toHaveTextContent('AI suggests Duplicate of PRR-2026-0048 · 90%')
+  expect(rows[1]).not.toHaveTextContent('AI suggests')
+
+  await user.click(screen.getByRole('button', { name: 'Correct: Duplicate of PRR-2026-0048 for PRR-2026-0051' }))
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+    '/api/staff/requests/PRR-2026-0051/advisory-intake/feedback/',
+    expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ outcome: 'confirmed', final_label: 'duplicate_of', reason: '' }),
+    }),
+  ))
+  await waitFor(() =>
+    expect(screen.getByTestId('location')).toHaveTextContent('/requests/PRR-2026-0051/intake'))
+})

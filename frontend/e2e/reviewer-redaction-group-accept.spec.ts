@@ -12,7 +12,7 @@ const caseNumber = 'PRR-E2E-0012'
 test('reviewer-redaction-group-accept', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page, 'e2e-reviewer', 'e2e-reviewer-local-only')
-  await page.goto(`/requests/${caseNumber}/records`)
+  await page.goto(`/requests/${caseNumber}/redact`)
 
   const groups = page.getByRole('list', { name: 'Redaction proposal groups' })
   const phones = groups.getByRole('listitem').filter({ hasText: 'Phone number' })

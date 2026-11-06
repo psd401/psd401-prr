@@ -5,31 +5,29 @@ system keeps legal status, message transport, personal read state, and team
 work disposition separate. A convenient UI action never changes another one
 by implication.
 
-## Start with the queue for your role
+## Start on Today
 
-There is one work surface. The Inbox carries cross-case requester messages, the
-statutory backlog, and every queue that used to live on a separate My Work
-screen; `/my-work` now redirects into it.
+The menu has three stops: **Today**, **New request**, and **Settings**.
 
-- **Records Officers** land on the **Inbox**. Triage messages under *Needs
-  you*, then use *Your queues* — Assigned to you, Unassigned, Team, and
-  Critical — for work of every other kind. Each row states where its case
-  stands and carries its own actions.
-- **Department Liaisons** land on the Inbox with *Your queues* only; there is
-  no cross-case message triage for the role. A liaison can update authorized
-  collection work and prepare eligible drafts, but approval, statutory
-  decisions, and human-only actions stay with a Records Officer.
-- **Reviewers** land on **Review** and open assigned record work directly in a
-  case's Records tab. The reviewer view does not expose requester contact or
-  correspondence.
-- **Intake Clerks** use **Staff Intake**. A submitted request returns its
-  request number but does not grant access to case browsing.
-- **Application Admins** use Configuration and authorized operations. The role
-  does not imply Records Officer authority.
+**Today** lists every open case once, most urgent first: late cases on top,
+then by the date each one is due next. Each row shows the case's title, its
+number and requester, and one button: the next step for the stage the case is
+in, such as *Send acknowledgment*, *Set the scope*, *Review 40 records*, or
+*Close the case*. The button opens the case where that step is done. A grey
+button means the case is waiting on the requester.
 
-Queue counts update while the page is visible and when focus returns to the
-window. Screen readers receive a polite summary; the application does not move
-focus or scroll the current selection.
+Above the list, small links name work that is not on a case yet: email that
+needs a case, email held for review, messages that did not deliver, and
+decisions waiting for a person. Each opens the Inbox view or the Decisions
+page that handles it.
+
+The search box finds any case, open or closed, by number, requester, or words
+in the request.
+
+**New request** logs a phone, mailed, or in-person request. **Settings** holds
+configuration and, under *Reports*, JLARC reporting, the audit log, and the AI
+evaluation and agreement reports. The Inbox, Review, Decisions, and Oversight
+pages still open from their links and old bookmarks.
 
 ## Triage the Inbox
 
@@ -46,7 +44,7 @@ as equals:
 **Awaiting statutory response** lists every received request that has no
 delivered five-business-day response under RCW 42.56.520, soonest due first,
 with its due date on each row. A draft or an approval does not satisfy the
-deadline; only a confirmed delivery does. The Overview tab of each of those
+deadline; only a confirmed delivery does. The Intake stage of each of those
 cases shows the ordered steps that remain — prepare the draft, approve the
 exact wording, queue it, and wait for the mail provider to confirm — along with
 the single next action.
@@ -77,6 +75,14 @@ the step that is actually outstanding: prepare the draft, review and approve
 it, or open the approved message to queue it. Each remains a separate,
 human-confirmed action, because a draft is not a response and neither is an
 approval.
+
+
+When advisory AI is on, an open case whose intake label nobody has answered
+shows **AI suggests** and the label (for example "Duplicate of PRR-…") under
+its subject, with a **Correct** link. Correct records that you agree and
+opens the case with the matching action already filled in -- merge, add to an
+existing case, or close as not a request. Nothing happens until you read and
+submit that action. To disagree, open the case and choose **Not correct**.
 
 ## The Cases table
 
@@ -133,30 +139,57 @@ due.
 
 ## Work inside a case
 
-The case header identifies the request and exposes only information allowed for
-the current role. Each tab has one purpose:
+A case opens on four things: when it is due (in plain words, such as "3 days
+late"), its title, about two lines on what was asked, and one large button for
+the next step, the same step Today shows. Records Officers see the AI title and
+summary; everyone else sees the opening of the request itself. When you are
+already on the stage where the step is done, the button jumps down to that work.
 
-- **Overview**: immutable request text, owner, deadlines, lifecycle progress,
-  intake attachments, time entries, and authorized legal actions.
-- **Messages**: bounded message summaries, search, selected-message detail,
-  drafting and transport actions, and message work state.
-- **Collection**: collection assignments, preservation work, Vault handoffs,
-  and advisory intent. Camera exclusion remains a reasoned human action and
-  footage is never auto-denied.
-- **Records**: uploading records you already have, responsiveness review,
-  redaction, exemption citations, and second review.
-- **Releases**: installments, fees, packages, exemption-log readiness,
-  downloads, and the read-only closure blocker report. Opening this tab does
-  not release records or close the case.
-- **Activity**: append-only lifecycle, work, and delivery events. It is
-  read-only and is not a substitute for the work queue.
+Under it, the **stage rail** runs the case in order: Intake, Scope, Collect,
+Review, Redact, Release, Close. Each stage shows whether it is done, current,
+blocked (with the reason, such as waiting on the requester's clarification or
+deposit), or upcoming, and how much open work is already waiting there. The
+current stage is the earliest one with open work. Every stage is shown to every
+role so progress reads the same for everyone; only the stages your role may
+open are links. Each stage is headed by what it asks and how much is open; its
+work follows directly below.
 
-The description on Overview is the legal record of what was requested and is
+A long request, such as a forwarded email thread, opens folded to its first
+lines; **Show full request** shows all of it. The text is never edited.
+
+- **Intake**: immutable request text, owner, deadlines, lifecycle progress,
+  the intake label, intake attachments, time entries, the running log, and
+  authorized legal actions.
+- **Scope** (Records Officer): the scoping trail with **Re-scope**, then the
+  request-intent advisory and the Vault count. Once a collection exists the
+  advisory and count fold under one "Scope" step; open it to scope again.
+- **Collect**: one card per collection naming its source (for example
+  "Google Workspace (Gmail)"), its state, the records it created, and how many
+  are still unreviewed, with **View records**, **Supersede**, and **Re-scope**
+  on the card. Below the cards: collection assignments, preservation work,
+  Vault handoffs, and **Upload records**. Camera exclusion remains a reasoned
+  human action and footage is never auto-denied.
+- **Review**: **Review one by one** (the keyboard flight) or the **Record
+  list** with filters, clusters, redaction, exemption citations, and second
+  review. Admins see the record list read-only.
+- **Redact**: the case's AI redaction proposals grouped by exemption and
+  pattern.
+- **Release**: installments, fees, packages, exemption-log readiness, and
+  downloads. Opening it does not release records.
+- **Close**: the read-only closure blocker report and the same closing actions
+  as Intake. Opening it does not close the case.
+
+**Messages** and **Activity** sit beside the rail rather than in it: message
+work happens at every stage. Old links to the pre-rail tabs (Overview,
+Collection, Records, Releases) still work and open the stage that now holds
+that work.
+
+The description on Intake is the legal record of what was requested and is
 never edited after intake. Clarification creates new evidence instead.
 
 ### Closing a case
 
-**Close case…** on Overview is available to everyone who works cases here, not
+**Close case…** on Intake and Close is available to everyone who works cases here, not
 only Records Officers. It records one of two endings — *Closed – Withdrawn* or
 *Closed – Abandoned* — and requires a written reason, which goes on the
 timeline and into the audit trail under your name. If the case is awaiting
@@ -173,8 +206,8 @@ Officer decisions.
 
 When you already have the files — a department emailed them, a custodian
 handed over a drive, you scanned a paper file — use **Upload records** at the
-top of the **Records** tab. It is a Records Officer action; reviewers and
-admins see the tab without the button.
+**Collect** stage. It is a Records Officer action; liaisons and admins see the
+stage without the button.
 
 Choose one or more files and select **Upload**. Each file is scanned for
 malware and stored unchanged before it appears in the list as an
@@ -205,7 +238,7 @@ names where a record was found, not who uploaded it.
 
 ### Deciding every record a filter matches
 
-On the **Records** tab, filter to the set you mean (for example one sender
+On the **Review** stage's **Record list**, filter to the set you mean (for example one sender
 domain, or the **Unreviewed** state) and choose **Select all N matching**,
 then an outcome and **Review all matching**. The confirmation shows how many
 records the outcome will change and lists any it will skip (withheld,
@@ -216,15 +249,15 @@ the count is shown again. Each record is audited in your name.
 ### Superseding an over-broad Vault collection
 
 A Vault export can bring in far more mail than the request asked for. When
-that happens, open the Vault task on the **Collection** tab and choose
-**Supersede collection**. It is a Records Officer action, available once the
+that happens, choose **Supersede** on that collection's card on the
+**Collect** stage. It is a Records Officer action, available once the
 collection has finished, and needs a written reason of at least 20
 characters. The reason is kept in the audit log and the case timeline, so
 describe the scope problem without naming students or quoting records.
 
 Every record from that export that nobody has reviewed yet leaves the review
 queue, the work counts, and the release list. Nothing is deleted: the records
-stay on the case under the **Superseded** filter on the **Records** tab, and
+stay on the case under the **Superseded** filter in the **Record list**, and
 any of them can still be reviewed one at a time. Records a reviewer already
 decided are not changed. A later collection that finds one of the same
 messages puts it back in review as **Unreviewed**. Superseded records count as

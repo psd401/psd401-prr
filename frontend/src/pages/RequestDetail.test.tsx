@@ -87,7 +87,8 @@ function fakeResponse(body: unknown, status = 200): Response {
 
 function renderPage(
   roles: StaffRole[] = ['records_officer'],
-  mode: 'overview' | 'collection' = 'overview',
+  mode: 'overview' | 'scope' | 'collection' | 'close' = 'overview',
+  entry = '/requests/PRR-2026-0001',
 ) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -95,7 +96,7 @@ function renderPage(
   const rendered = render(
     <QueryClientProvider client={qc}>
       <ToastProvider>
-        <MemoryRouter initialEntries={['/requests/PRR-2026-0001']}>
+        <MemoryRouter initialEntries={[entry]}>
           <Routes>
             <Route
               path="/requests/:number"
@@ -109,12 +110,12 @@ function renderPage(
   return { ...rendered, queryClient: qc }
 }
 
-// The advisory and Vault-scoping surfaces live on the Collection tab.
-function renderCollection(roles: StaffRole[] = ['records_officer']) {
-  return renderPage(roles, 'collection')
+// The advisory and Vault-scoping surfaces live on the Scope stage (#45).
+function renderScope(roles: StaffRole[] = ['records_officer']) {
+  return renderPage(roles, 'scope')
 }
 
-// A Collection tab with no advisory proposal and no recorded Vault count,
+// A Scope stage with no advisory proposal and no recorded Vault count,
 // where queueing a count is accepted. The end-date tests only differ in what
 // the officer does with the form.
 function vaultCountFetchMock(countId: string) {
@@ -186,6 +187,42 @@ describe('RequestDetail', () => {
       expect(screen.queryByText(/unknown/i)).not.toBeInTheDocument()
     },
   )
+
+  it('folds a long request to its opening and shows all of it on request', async () => {
+    const thread = Array.from({ length: 30 }, (_, line) => `Quoted line ${line + 1}`).join('\n')
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') {
+        return fakeResponse({ ...DETAIL, description: thread })
+      }
+      if (url.endsWith('/advisory-intent/')) return fakeResponse({ enabled: true, latest: null })
+      if (url.endsWith('/vault-counts/')) return fakeResponse({ enabled: true, corpus: 'MAIL', latest: null })
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    }))
+    const user = userEvent.setup()
+    renderPage()
+
+    const toggle = await screen.findByRole('button', { name: 'Show full request' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    // The whole text is always in the page, unaltered; folding only clips it.
+    expect(screen.getByText(/Quoted line 30/)).toBeInTheDocument()
+    await user.click(toggle)
+    expect(screen.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('shows a short request whole, with nothing to unfold', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url.endsWith('/advisory-intent/')) return fakeResponse({ enabled: true, latest: null })
+      if (url.endsWith('/vault-counts/')) return fakeResponse({ enabled: true, corpus: 'MAIL', latest: null })
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    }))
+    renderPage()
+
+    expect(await screen.findByText('All emails about the bond levy.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Show full request' })).not.toBeInTheDocument()
+  })
 
   it('explains the five-day safety-net schedule on the case itself', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -323,7 +360,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
     expect(await screen.findByText(/permanently not applied/i)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Run advisory' }))
 
@@ -376,7 +413,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
     const query = await screen.findByLabelText('Vault search query')
     expect(query).toHaveValue(
       '"Jordan Sample" AND ("educational records" OR "counseling records")',
@@ -408,7 +445,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
 
     // Responsive records are those in existence when the request arrived, so
     // the officer should not have to retype the case's own receipt date.
@@ -439,7 +476,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
 
     // The default is a starting point, not a floor: clearing it must stick
     // rather than be refilled by the effect that supplied it.
@@ -504,7 +541,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
     await screen.findByLabelText('Vault search query')
     await user.click(screen.getByRole('radio', { name: 'All district accounts' }))
     const button = screen.getByRole('button', { name: 'Count possible messages' })
@@ -551,7 +588,7 @@ describe('RequestDetail', () => {
       return fakeResponse({ count: 0, next: null, previous: null, results: [] })
     }))
 
-    renderCollection()
+    renderScope()
 
     expect(await screen.findByText('1,842 possible Gmail messages')).toBeInTheDocument()
     expect(screen.getAllByText(/not a responsiveness determination/i)).toHaveLength(2)
@@ -598,7 +635,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
     await screen.findByText('1,842 possible Gmail messages')
     await user.click(screen.getByRole('button', { name: 'Start Vault collection' }))
 
@@ -651,7 +688,7 @@ describe('RequestDetail', () => {
       return fakeResponse({ count: 0, next: null, previous: null, results: [] })
     }))
 
-    renderCollection()
+    renderScope()
 
     expect(await screen.findByText(/failed before a Vault export was recorded/i))
       .toBeInTheDocument()
@@ -1581,5 +1618,32 @@ describe('a first response sent outside this system', () => {
     expect(
       (within(dialog).getByLabelText(/^Reason/) as HTMLTextAreaElement).value,
     ).toContain('duplicate of PRR-2026-0048')
+  })
+
+  it('opens the prefilled action when Correct was pressed on the Inbox row', async () => {
+    // #33: Inbox Correct already recorded agreement; the case opens the same
+    // prefilled dialog, and the officer still reads and submits it.
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/advisory-intake/')) {
+        return fakeResponse({ enabled: true, latest: null, feedback: null, auto_applied: null })
+      }
+      return fakeResponse(DETAIL)
+    }))
+    renderPage(
+      ['records_officer'],
+      'overview',
+      '/requests/PRR-2026-0001?intake_action=duplicate_of&intake_target=PRR-2026-0048',
+    )
+
+    const heading = await screen.findByRole('heading', { name: 'Merge into case' })
+    const dialog = heading.closest('dialog') as HTMLElement
+    expect(within(dialog).getByLabelText(/^Merge into case number/)).toHaveValue('PRR-2026-0048')
+  })
+
+  it('ignores an Inbox action for someone who is not a Records Officer', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse({ ...DETAIL, requester: null })))
+    renderPage(['liaison'], 'overview', '/requests/PRR-2026-0001?intake_action=duplicate_of&intake_target=PRR-2026-0048')
+    await screen.findByText('Running log')
+    expect(screen.queryByRole('heading', { name: 'Merge into case' })).not.toBeInTheDocument()
   })
 })

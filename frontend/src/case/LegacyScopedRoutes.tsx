@@ -116,7 +116,7 @@ export function LegacyRequestRedirect() {
   if (uuid(message)) {
     return <Navigate to={requestMessagesDestination(source, number)} replace />
   }
-  return <Navigate to={`/requests/${encodeURIComponent(number)}/overview`} replace />
+  return <Navigate to={`/requests/${encodeURIComponent(number)}/intake`} replace />
 }
 
 function legacyInboundView(source: URLSearchParams) {

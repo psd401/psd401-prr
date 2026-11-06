@@ -1,8 +1,8 @@
 // ABOUTME: Request detail screen — legal record, deadlines, estimate history,
 // ABOUTME: status timeline, collection tasks, and any footage preservation hold.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState, type FormEvent } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { api, unwrap, type Page } from '../api/client'
 import type { StaffRole } from '../api/auth'
 import { isTerminalStatus } from '../caseStatus'
@@ -318,18 +318,56 @@ function humanFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/** Past this, a request opens folded: a forwarded thread can run for pages. */
+const FOLDED_REQUEST_LINES = 12
+
+/**
+ * The request as received, folded to its first lines when it is long. The
+ * whole text is one click away and is never altered (rule 9).
+ */
+function RequestText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const long = text.split('\n').length > FOLDED_REQUEST_LINES || text.length > 1200
+  return (
+    <div>
+      <div
+        className={`whitespace-pre-wrap rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink ${
+          long && !open ? 'max-h-64 overflow-hidden [mask-image:linear-gradient(to_bottom,black_70%,transparent)]' : ''
+        }`}
+      >
+        {text}
+      </div>
+      {long && (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          className="mt-2 text-sm font-semibold text-accent underline-offset-2 hover:underline"
+        >
+          {open ? 'Show less' : 'Show full request'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function RequestDetail({
   roles,
   mode,
 }: {
   roles: StaffRole[]
-  mode: 'overview' | 'collection'
+  /** Which stage of the rail (#45) this mounts for: Intake is the overview. */
+  mode: 'overview' | 'scope' | 'collection' | 'close'
 }) {
   const { number } = useParams<{ number: string }>()
   const canManageRequest = roles.includes('records_officer')
   const canCloseCase = roles.some((role) => CASE_WORK_ROLES.includes(role))
   const showOverview = mode === 'overview'
+  const showScope = mode === 'scope'
   const showCollection = mode === 'collection'
+  // The Close stage carries the same lifecycle actions as Intake, so the
+  // closing decision sits where the closure readiness report is read.
+  const showClose = mode === 'close'
   const qc = useQueryClient()
   const toast = useToast()
   const navigate = useNavigate()
@@ -386,7 +424,7 @@ export function RequestDetail({
     queryFn: () => api<AdvisoryLatest>(
       `/api/staff/requests/${number}/advisory-intent/`,
     ),
-    enabled: !!number && canManageRequest && showCollection,
+    enabled: !!number && canManageRequest && showScope,
     refetchInterval: (query) => {
       const state = query.state.data?.latest?.state
       return state === 'pending' || state === 'running' ? 2000 : false
@@ -398,7 +436,7 @@ export function RequestDetail({
     queryFn: () => api<VaultCountLatest>(
       `/api/staff/requests/${number}/vault-counts/`,
     ),
-    enabled: !!number && canManageRequest && showCollection,
+    enabled: !!number && canManageRequest && showScope,
     refetchInterval: (query) => {
       const state = query.state.data?.latest?.state
       return state === 'pending' || state === 'running' ? 2000 : false
@@ -727,7 +765,7 @@ export function RequestDetail({
     const reason = `Intake classification confirmed: ${INTAKE_LABEL_TEXT[label].toLowerCase()}${
       target ? ` ${target}` : ''
     }.`
-    const action = intakeAction(label, target, Boolean(r?.email_intake_auto_created))
+    const action = intakeAction(label, target, Boolean(detail.data?.email_intake_auto_created))
     if (action === 'add_to_case' && target) {
       setAddToCaseDestination(target)
       setAddingToCase(true)
@@ -737,6 +775,25 @@ export function RequestDetail({
       openNonRequestClosure(reason)
     }
   }
+
+  // Correct on an Inbox row (#33) recorded agreement and sent the officer
+  // here with the label; open the same prefilled action once, then drop the
+  // parameters so a reload does not reopen it.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const inboxAction = searchParams.get('intake_action') as IntakeLabel | null
+  const inboxTarget = searchParams.get('intake_target')
+  const inboxActionApplied = useRef(false)
+  useEffect(() => {
+    if (!inboxAction || !detail.data || !showOverview || inboxActionApplied.current) return
+    inboxActionApplied.current = true
+    if (canManageRequest && inboxAction in INTAKE_LABEL_TEXT) {
+      applyIntakeLabel(inboxAction, inboxTarget)
+    }
+    const next = new URLSearchParams(searchParams)
+    next.delete('intake_action')
+    next.delete('intake_target')
+    setSearchParams(next, { replace: true })
+  })
 
   function openFerpaVerification() {
     setFerpaMethod('in_person_photo_id')
@@ -871,7 +928,7 @@ export function RequestDetail({
       ? reasonHint('document the basis for abandonment')
       : reasonHint('this is recorded on the timeline and in the audit trail')
   const emailIntakeReceiptId = r.email_intake_receipt_id
-  const showActionZone = showOverview
+  const showActionZone = (showOverview || showClose)
     && !terminalRequest
     && (canManageRequest || canCloseCase)
 
@@ -882,9 +939,7 @@ export function RequestDetail({
           <p className="mb-1 font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
             Description
           </p>
-          <div className="whitespace-pre-wrap rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink">
-            {r.description}
-          </div>
+          <RequestText text={r.description} />
           <p className="mt-2 text-xs italic text-ink-muted">
             Legal record of the request as received — never edited (RCW 42.56).
           </p>
@@ -971,7 +1026,7 @@ export function RequestDetail({
             sits directly under the request text because that text is what
             justifies the decision, and directly above Deadlines because the
             clock is what makes it urgent. */}
-        {showActionZone && canManageRequest && !terminalRequest && (
+        {showActionZone && showOverview && canManageRequest && !terminalRequest && (
           <div className="lg:col-span-2">
             <IntakeClassificationCard
               number={r.number}
@@ -1034,7 +1089,7 @@ export function RequestDetail({
         {/* A merged duplicate has no next action here at all: its emails and
             its five-day obligation live on the case of record, and reopening
             it would leave an empty case with a retired number. */}
-        {showOverview && terminalRequest && r.merged_into && (
+        {(showOverview || showClose) && terminalRequest && r.merged_into && (
           <div className="lg:col-span-2 rounded-md border border-line bg-surface-sunken px-4 py-3 text-sm text-ink">
             This case was merged into{' '}
             <Link className="font-semibold underline" to={`/requests/${r.merged_into}`}>
@@ -1045,7 +1100,7 @@ export function RequestDetail({
             duplicate and cannot be reopened.
           </div>
         )}
-        {showOverview && canManageRequest && terminalRequest && !r.merged_into && (
+        {(showOverview || showClose) && canManageRequest && terminalRequest && !r.merged_into && (
           <div className="lg:col-span-2 flex flex-wrap items-center justify-end gap-3">
             <p className="mr-auto text-sm text-ink-muted">
               This request is closed. Reopening it is recorded on the timeline
@@ -1076,7 +1131,7 @@ export function RequestDetail({
           </div>
         )}
 
-        {showCollection && canManageRequest && (
+        {showScope && canManageRequest && (
           <Card title="Request-intent advisory" className="lg:col-span-2">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="max-w-3xl">
@@ -1205,7 +1260,7 @@ export function RequestDetail({
           </Card>
         )}
 
-        {showCollection && canManageRequest && (
+        {showScope && canManageRequest && (
           <Card title="Google Vault scope count" className="lg:col-span-2">
             <p className="text-sm text-ink-muted">
               Count possible Gmail messages for human-reviewed terms, district
@@ -1421,7 +1476,7 @@ export function RequestDetail({
                         : 'Review the failed export or ingest evidence under Collection tasks before choosing the next action.'}
                     </p>
                     <Link
-                      to={`/requests/${r.number}/collection`}
+                      to={`/requests/${r.number}/collect`}
                       className="mt-2 inline-block underline"
                     >
                       Open Collection tasks
@@ -1433,11 +1488,11 @@ export function RequestDetail({
                     <p className="font-semibold">Vault export queued.</p>
                     <p className="mt-1 text-ink-muted">
                       Follow it in{' '}
-                      <Link to={`/requests/${r.number}/collection`} className="text-accent underline">
+                      <Link to={`/requests/${r.number}/collect`} className="text-accent underline">
                         Collection tasks
                       </Link>
                       . After ingestion, classify the exported messages in{' '}
-                      <Link to={`/requests/${r.number}/records`} className="text-accent underline">
+                      <Link to={`/requests/${r.number}/review?view=records`} className="text-accent underline">
                         Record items
                       </Link>
                       .
@@ -1751,7 +1806,7 @@ export function RequestDetail({
             />
           )}
           <Link
-            to={`/requests/${r.number}/collection`}
+            to={`/requests/${r.number}/collect`}
             className="mt-4 inline-block text-sm font-semibold text-accent underline-offset-2 hover:underline"
           >
             Open collection work
