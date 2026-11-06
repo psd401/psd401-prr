@@ -105,6 +105,7 @@ class FeatureAuditRegressionTests(TestCase):
             return_value=[pruned],
         ), self.captureOnCommitCallbacks(execute=True):
             preservation = triage_footage(request)
+        assert preservation is not None
         preservation.refresh_from_db()
 
         self.assertEqual(preservation.state, FootagePreservation.State.EXPIRED)

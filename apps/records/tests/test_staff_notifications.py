@@ -9,6 +9,7 @@ from unittest import mock
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -279,7 +280,7 @@ class StaffNotificationServiceTests(TestCase):
         self, _list_device_cameras, send_raw,
     ):
         send_raw.return_value = SentMessage("gmail-urgent", "thread-urgent")
-        officer = get_user_model().objects.create_user(
+        officer = User.objects.create_user(
             "widen-notice-officer", password="pw", is_staff=True,
         )
         apply_staff_roles(officer, {StaffRole.RECORDS_OFFICER})
@@ -301,10 +302,11 @@ class StaffNotificationServiceTests(TestCase):
             )
 
         self.assertEqual(send_raw.call_count, 2)
-        body = BytesParser(policy=policy.default).parsebytes(
+        part = BytesParser(policy=policy.default).parsebytes(
             send_raw.call_args.args[0]
-        ).get_body().get_content()
-        self.assertIn("ALL cameras district-wide", body)
+        ).get_body()
+        assert part is not None
+        self.assertIn("ALL cameras district-wide", part.get_content())
         latest = request.events.order_by("-occurred_at", "-pk").first().note
         self.assertNotIn("duplicate alert suppressed", latest)
 

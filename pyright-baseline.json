@@ -1,6 +1,6 @@
 {
   "pyright": "1.1.414",
-  "total": 1764,
+  "total": 1763,
   "files": {
     "apps/api/access_tokens.py": 2,
     "apps/api/advisory.py": 1,
@@ -168,7 +168,7 @@
     "apps/records/tests/test_document_reconciliation.py": 1,
     "apps/records/tests/test_exemption_logs.py": 9,
     "apps/records/tests/test_external_initial_response.py": 4,
-    "apps/records/tests/test_feature_audit_regressions.py": 2,
+    "apps/records/tests/test_feature_audit_regressions.py": 1,
     "apps/records/tests/test_fees.py": 2,
     "apps/records/tests/test_footage.py": 9,
     "apps/records/tests/test_installment_downloads.py": 1,
