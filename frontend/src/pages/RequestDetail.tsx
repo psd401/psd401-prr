@@ -311,6 +311,39 @@ function humanFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/** Past this, a request opens folded: a forwarded thread can run for pages. */
+const FOLDED_REQUEST_LINES = 12
+
+/**
+ * The request as received, folded to its first lines when it is long. The
+ * whole text is one click away and is never altered (rule 9).
+ */
+function RequestText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const long = text.split('\n').length > FOLDED_REQUEST_LINES || text.length > 1200
+  return (
+    <div>
+      <div
+        className={`whitespace-pre-wrap rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink ${
+          long && !open ? 'max-h-64 overflow-hidden [mask-image:linear-gradient(to_bottom,black_70%,transparent)]' : ''
+        }`}
+      >
+        {text}
+      </div>
+      {long && (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          className="mt-2 text-sm font-semibold text-accent underline-offset-2 hover:underline"
+        >
+          {open ? 'Show less' : 'Show full request'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function RequestDetail({
   roles,
   mode,
@@ -899,9 +932,7 @@ export function RequestDetail({
           <p className="mb-1 font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
             Description
           </p>
-          <div className="whitespace-pre-wrap rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink">
-            {r.description}
-          </div>
+          <RequestText text={r.description} />
           <p className="mt-2 text-xs italic text-ink-muted">
             Legal record of the request as received — never edited (RCW 42.56).
           </p>

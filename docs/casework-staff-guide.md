@@ -139,16 +139,23 @@ due.
 
 ## Work inside a case
 
-The case header identifies the request and exposes only information allowed for
-the current role. Under it, the **stage rail** runs the case in order: Intake,
-Scope, Collect, Review, Redact, Release, Close. Each stage shows whether it is
-done, current, blocked (with the reason, such as waiting on the requester's
-clarification or deposit), or upcoming, and how much open work is already
-waiting there. The current stage is the earliest one with open work. Every
-stage is shown to every role so progress reads the same for everyone; only the
-stages your role may open are links. A stage opens with a decision card that
-names the decision it needs, why, how much is open, and a **See the evidence**
-link to the work below it.
+A case opens on four things: when it is due (in plain words, such as "3 days
+late"), its title, about two lines on what was asked, and one large button for
+the next step, the same step Today shows. Records Officers see the AI title and
+summary; everyone else sees the opening of the request itself. When you are
+already on the stage where the step is done, the button jumps down to that work.
+
+Under it, the **stage rail** runs the case in order: Intake, Scope, Collect,
+Review, Redact, Release, Close. Each stage shows whether it is done, current,
+blocked (with the reason, such as waiting on the requester's clarification or
+deposit), or upcoming, and how much open work is already waiting there. The
+current stage is the earliest one with open work. Every stage is shown to every
+role so progress reads the same for everyone; only the stages your role may
+open are links. Each stage is headed by what it asks and how much is open; its
+work follows directly below.
+
+A long request, such as a forwarded email thread, opens folded to its first
+lines; **Show full request** shows all of it. The text is never edited.
 
 - **Intake**: immutable request text, owner, deadlines, lifecycle progress,
   the intake label, intake attachments, time entries, the running log, and

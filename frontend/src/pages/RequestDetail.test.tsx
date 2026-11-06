@@ -188,6 +188,42 @@ describe('RequestDetail', () => {
     },
   )
 
+  it('folds a long request to its opening and shows all of it on request', async () => {
+    const thread = Array.from({ length: 30 }, (_, line) => `Quoted line ${line + 1}`).join('\n')
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') {
+        return fakeResponse({ ...DETAIL, description: thread })
+      }
+      if (url.endsWith('/advisory-intent/')) return fakeResponse({ enabled: true, latest: null })
+      if (url.endsWith('/vault-counts/')) return fakeResponse({ enabled: true, corpus: 'MAIL', latest: null })
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    }))
+    const user = userEvent.setup()
+    renderPage()
+
+    const toggle = await screen.findByRole('button', { name: 'Show full request' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    // The whole text is always in the page, unaltered; folding only clips it.
+    expect(screen.getByText(/Quoted line 30/)).toBeInTheDocument()
+    await user.click(toggle)
+    expect(screen.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('shows a short request whole, with nothing to unfold', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url.endsWith('/advisory-intent/')) return fakeResponse({ enabled: true, latest: null })
+      if (url.endsWith('/vault-counts/')) return fakeResponse({ enabled: true, corpus: 'MAIL', latest: null })
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    }))
+    renderPage()
+
+    expect(await screen.findByText('All emails about the bond levy.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Show full request' })).not.toBeInTheDocument()
+  })
+
   it('explains the five-day safety-net schedule on the case itself', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)

@@ -19,6 +19,7 @@ from apps.correspondence.models import (
     CorrespondenceDeliveryAttempt,
 )
 from apps.records.models import (
+    AdvisoryRun,
     CollectionTask,
     EstimateRevision,
     ExemptionCitation,
@@ -190,6 +191,11 @@ class CaseWorkspaceReadModelTests(TestCase):
                 "counts",
                 "next_action",
                 "stages",
+                "title",
+                "summary",
+                "matter_kind",
+                "next_due",
+                "next_due_basis",
             },
         )
         # The stage rail (#45) is server-derived: seven stages in order, each
@@ -245,6 +251,55 @@ class CaseWorkspaceReadModelTests(TestCase):
         admin_payload = self.get_as(self.admin, "workspace-summary").json()
         self.assertEqual(admin_payload["counts"]["needs_attention"], 0)
         self.assertIsNone(admin_payload["next_action"])
+
+    def test_summary_leads_with_a_title_and_a_short_summary(self):
+        # The case page opens on what was asked, not on the whole email. The
+        # model's title and summary are officer-only advisory text; everyone
+        # else reads the opening of the description, which is never edited.
+        AdvisoryRun.objects.create(
+            kind=AdvisoryRun.Kind.REQUEST_INTENT,
+            state=AdvisoryRun.State.COMPLETE,
+            request=self.prr,
+            model_identifier="test-model",
+            input_sha256="0" * 64,
+            requested_by=self.officer,
+            proposal={
+                "short_title": "Board records",
+                "summary": "Board minutes and agendas for the spring term.",
+            },
+        )
+
+        officer = self.get_as(self.officer, "workspace-summary").json()
+        self.assertEqual(officer["title"], "Board records")
+        self.assertEqual(
+            officer["summary"], "Board minutes and agendas for the spring term.",
+        )
+        self.assertEqual(officer["matter_kind"], "public_records")
+        self.assertEqual(officer["next_due"], self.prr.statutory_response_due.isoformat())
+        self.assertEqual(officer["next_due_basis"], "statutory")
+
+        liaison = self.get_as(self.liaison, "workspace-summary").json()
+        self.assertEqual(liaison["title"], "Immutable request for board records.")
+        self.assertEqual(liaison["summary"], "Immutable request for board records.")
+        self.prr.refresh_from_db()
+        self.assertEqual(self.prr.description, "Immutable request for board records.")
+
+    def test_summary_without_a_model_answer_is_the_opening_of_the_request(self):
+        long_text = "Every email about the bus route change. " * 20
+        case = PublicRecordsRequest.objects.create(
+            requester=self.requester,
+            description=long_text,
+            status=RequestStatus.RECEIVED,
+        )
+        self.client.force_login(self.officer)
+
+        payload = self.client.get(
+            f"/api/staff/requests/{case.number}/workspace-summary/"
+        ).json()
+
+        self.assertTrue(payload["summary"].endswith("…"))
+        self.assertLessEqual(len(payload["summary"]), 281)
+        self.assertTrue(payload["summary"].startswith("Every email about the bus route change."))
 
     def test_liaison_with_assigned_draft_work_can_open_its_case_workspace(self):
         draft_only = PublicRecordsRequest.objects.create(

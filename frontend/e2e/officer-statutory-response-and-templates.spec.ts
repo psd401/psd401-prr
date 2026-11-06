@@ -67,9 +67,8 @@ test('officer-statutory-response-and-templates', async ({ page }) => {
 
   // Workstream A: the guided statutory send steps on the case that owes one.
   await page.goto(`/requests/${awaitingRequestNumber}/overview`)
-  await expect(
-    page.getByRole('heading', { name: awaitingRequestNumber }),
-  ).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Case summary' }))
+    .toContainText(awaitingRequestNumber)
   const steps = page.getByRole('list', { name: 'Statutory response steps' })
   await expect(steps).toBeVisible()
   await expect(steps.getByText('Prepare the acknowledgment draft')).toBeVisible()

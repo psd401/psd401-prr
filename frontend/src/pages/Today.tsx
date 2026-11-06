@@ -5,17 +5,11 @@ import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { api, unwrap, type Page } from '../api/client'
 import { pacificDateString } from '../date'
-import { dueLabel, nextStep, plural, type TodayCase } from '../today'
+import { DUE_TONE, dueLabel, nextStep, plural, type TodayCase } from '../today'
 import { PageHeader } from '../layout/AppLayout'
 import { ErrorNote, Spinner } from '../ui'
 import type { WorkItemCounts } from '../work'
 
-const TONE = {
-  late: 'bg-danger-soft text-danger-ink',
-  soon: 'bg-warning-soft text-warning-ink',
-  calm: 'bg-surface-sunken text-ink',
-  none: 'bg-surface-sunken text-ink-muted',
-} as const
 
 function CaseRow({ row }: { row: TodayCase }) {
   const due = dueLabel(row.next_due)
@@ -24,7 +18,7 @@ function CaseRow({ row }: { row: TodayCase }) {
   return (
     <li className="flex flex-col gap-3 rounded-xl border border-line bg-surface-raised p-4 shadow-sm sm:flex-row sm:items-center sm:gap-5">
       <span
-        className={`w-fit shrink-0 rounded-full px-3 py-1 text-sm font-semibold sm:w-36 sm:text-center ${TONE[due.tone]}`}
+        className={`w-fit shrink-0 rounded-full px-3 py-1 text-sm font-semibold sm:w-36 sm:text-center ${DUE_TONE[due.tone]}`}
       >
         {due.text}
       </span>

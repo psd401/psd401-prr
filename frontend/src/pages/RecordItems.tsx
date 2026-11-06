@@ -1639,10 +1639,8 @@ export function RecordItems({
                 </div>
               )}
               <p className="text-xs text-ink-muted">
-                The browser receives only a no-store raster preview. Draw from one corner to the
-                other; saved coordinates are normalized to the page. Blue regions are AI
-                candidates, amber is the current human-editable draft, and black regions are
-                approved redactions.
+                Drag a box to redact. Blue is an AI suggestion, amber your draft, black
+                approved.
               </p>
             </section>
 

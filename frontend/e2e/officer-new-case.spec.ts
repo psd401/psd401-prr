@@ -12,9 +12,8 @@ test('officer-new-case', async ({ page }) => {
   await expect(page).toHaveURL(
     new RegExp(`/requests/${fixtureRequestNumber}/intake$`),
   )
-  await expect(
-    page.getByRole('heading', { name: fixtureRequestNumber }),
-  ).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Case summary' }))
+    .toContainText(fixtureRequestNumber)
   await expect(page.getByText('Synthetic Requester', { exact: true }).first()).toBeVisible()
   await expect(page.getByLabel('Case owner')).toHaveValue(/\d+/)
   await expect(page.getByRole('heading', { name: 'Intake', level: 2, exact: true })).toBeFocused()
