@@ -410,7 +410,11 @@ def exclude_camera(camera_hold, reason: object, *, actor=None):
         )
     bookmark_id = camera_hold.clip_id
 
-    camera_hold.state = CameraHold.State.RELEASED
+    # Like a release: not yet confirmed deleted until Aware says so, so a
+    # failed or interrupted delete is retried by the release.
+    camera_hold.state = (
+        CameraHold.State.RELEASE_FAILED if bookmark_id else CameraHold.State.RELEASED
+    )
     camera_hold.excluded_at = timezone.now()
     camera_hold.excluded_by = actor
     camera_hold.exclusion_reason = reason
@@ -424,8 +428,9 @@ def exclude_camera(camera_hold, reason: object, *, actor=None):
             from .tasks import _safe_alta_error
 
             try:
-                alta.delete_bookmark(bookmark_id)
-            # The exclusion is committed: record the failure, don't raise.
+                alta.delete_bookmark(bookmark_id)  # NOT_FOUND counts as deleted
+            # The exclusion is committed: record the failure, don't raise. The
+            # camera stays release_failed, so the release deletes it later.
             except Exception as exc:  # noqa: BLE001
                 audit(
                     "footage.camera_release_failed",
@@ -434,6 +439,10 @@ def exclude_camera(camera_hold, reason: object, *, actor=None):
                     camera=camera_hold.camera_name or camera_hold.camera_id,
                     error=_safe_alta_error(exc, action="bookmark delete"),
                 )
+            else:
+                CameraHold.objects.filter(
+                    pk=camera_hold.pk, state=CameraHold.State.RELEASE_FAILED,
+                ).update(state=CameraHold.State.RELEASED)
 
         transaction.on_commit(delete_bookmark_after_evidence_commits)
     return camera_hold
@@ -619,15 +628,20 @@ def release_preservation(
             "open. This hold preserves the footage that case answers for."
         )
 
-    live = fp.camera_holds.select_for_update().filter(excluded_at__isnull=True)
+    rows = fp.camera_holds.select_for_update()
+    # Bookmarks whose delete Aware has not confirmed, from an earlier release
+    # or an exclusion: always deleted, excluded cameras included.
+    unconfirmed = Q(state=CameraHold.State.RELEASE_FAILED)
     if retry:
-        # Only the bookmarks Aware would not delete last time.
-        holds = list(live.filter(state=CameraHold.State.RELEASE_FAILED))
+        holds = list(rows.filter(unconfirmed))
     else:
         # A FAILED hold with an id crashed after Aware made the bookmark.
-        holds = list(live.filter(
-            Q(state__in=CameraHold.BOOKMARKED_STATES)
-            | (Q(state=CameraHold.State.FAILED) & ~Q(clip_id=""))
+        holds = list(rows.filter(
+            unconfirmed
+            | Q(excluded_at__isnull=True) & (
+                Q(state__in=CameraHold.BOOKMARKED_STATES)
+                | (Q(state=CameraHold.State.FAILED) & ~Q(clip_id=""))
+            )
         ))
     bookmarks = [
         (hold.pk, hold.camera_name or hold.camera_id, hold.clip_id)

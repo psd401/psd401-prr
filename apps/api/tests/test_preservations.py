@@ -161,14 +161,16 @@ class PreservationApiTests(TestCase):
 
     # -- exclude-camera action --------------------------------------------
 
-    def test_exclude_camera_happy_path(self):
-        r = self.client.post(
-            f"/api/staff/preservations/{self.fp.id}/exclude-camera/",
-            {"camera_hold_id": self.other.id,
-             "reason": "Camera faces staff parking; request concerns the "
-                       "gym entrance only."},
-            content_type="application/json",
-        )
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_exclude_camera_happy_path(self, delete_bookmark):
+        with self.captureOnCommitCallbacks(execute=True):
+            r = self.client.post(
+                f"/api/staff/preservations/{self.fp.id}/exclude-camera/",
+                {"camera_hold_id": self.other.id,
+                 "reason": "Camera faces staff parking; request concerns the "
+                           "gym entrance only."},
+                content_type="application/json",
+            )
         self.assertEqual(r.status_code, 200)
         self.other.refresh_from_db()
         self.assertEqual(self.other.state, CameraHold.State.RELEASED)

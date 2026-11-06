@@ -1538,7 +1538,8 @@ class ExclusionGateTests(TestCase):
             triage.exclude_camera(ch, reason, actor=officer)
 
         ch.refresh_from_db()
-        self.assertEqual(ch.state, CameraHold.State.RELEASED)
+        # Still excluded, but unconfirmed until a release deletes the bookmark.
+        self.assertEqual(ch.state, CameraHold.State.RELEASE_FAILED)
         self.assertEqual(ch.excluded_by, officer)
         self.assertEqual(ch.exclusion_reason, reason)
         delete_bookmark.assert_called_once_with("bm-cam-2")
@@ -2113,3 +2114,74 @@ class ReleaseGateTests(TestCase):
 
         log = AuditLog.objects.get(action="footage.camera_release_failed")
         self.assertEqual(log.detail["error"], "Aware bookmark delete failed (RuntimeError).")
+
+    def _exclude_cam_2_with_a_failed_delete(self, fp, delete_bookmark):
+        delete_bookmark.side_effect = alta.AltaError("Aware delete unavailable")
+        with self.captureOnCommitCallbacks(execute=True):
+            triage.exclude_camera(
+                fp.camera_holds.get(camera_id="cam-2"),
+                "Camera faces staff parking; request concerns the gym entrance only.",
+                actor=self._records_officer(),
+            )
+        delete_bookmark.reset_mock()
+        delete_bookmark.side_effect = None
+        excluded = fp.camera_holds.get(camera_id="cam-2")
+        self.assertEqual(excluded.state, CameraHold.State.RELEASE_FAILED)
+        self.assertIsNotNone(excluded.excluded_at)
+        return excluded
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_release_deletes_an_excluded_bookmark_aware_would_not_delete(
+        self, delete_bookmark,
+    ):
+        fp = self._held_preservation()
+        excluded = self._exclude_cam_2_with_a_failed_delete(fp, delete_bookmark)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self._release(fp)
+
+        self.assertIn("bm-cam-2", [c.args[0] for c in delete_bookmark.call_args_list])
+        excluded.refresh_from_db()
+        self.assertEqual(excluded.state, CameraHold.State.RELEASED)
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_a_release_retry_picks_up_a_failed_exclusion_delete(self, delete_bookmark):
+        fp = self._held_preservation()
+        with self.captureOnCommitCallbacks(execute=True):
+            self._release(fp)
+        excluded = fp.camera_holds.get(camera_id="cam-2")
+        # The exclusion's delete failed after the release removed the rest.
+        CameraHold.objects.filter(pk=excluded.pk).update(
+            state=CameraHold.State.RELEASE_FAILED, excluded_at=timezone.now(),
+        )
+        delete_bookmark.reset_mock()
+        fp.refresh_from_db()
+        self.assertTrue(triage.is_releasable(fp))
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self._release(fp)
+
+        delete_bookmark.assert_called_once_with("bm-cam-2")
+        excluded.refresh_from_db()
+        self.assertEqual(excluded.state, CameraHold.State.RELEASED)
+
+    @mock.patch(f"{CLIENT}.delete_bookmark")
+    def test_an_exclusion_is_unconfirmed_until_aware_deletes_its_bookmark(
+        self, delete_bookmark,
+    ):
+        fp = self._held_preservation()
+        hold = fp.camera_holds.get(camera_id="cam-2")
+        with self.captureOnCommitCallbacks(execute=False) as deletes:
+            triage.exclude_camera(
+                hold,
+                "Camera faces staff parking; request concerns the gym entrance only.",
+                actor=self._records_officer(),
+            )
+        hold.refresh_from_db()
+        self.assertEqual(hold.state, CameraHold.State.RELEASE_FAILED)
+
+        for callback in deletes:
+            callback()
+
+        hold.refresh_from_db()
+        self.assertEqual(hold.state, CameraHold.State.RELEASED)
