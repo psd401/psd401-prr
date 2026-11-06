@@ -28,9 +28,8 @@ test('keyboard-case-inbox', async ({ page }) => {
   await page.keyboard.press('Enter')
   await expect(page.getByRole('main')).toBeFocused()
 
-  const inboxLink = page.getByRole('link', { name: /Inbox/ })
-  await inboxLink.focus()
-  await page.keyboard.press('Enter')
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
+  await page.goto('/inbox?view=cases')
   await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
 
   // The case table's headers are controls and its rows are links, so the

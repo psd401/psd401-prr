@@ -19,9 +19,15 @@ RCW 42.56 reading -- that a received case still owes its acknowledgment --
 is made for ``public_records`` alone; another kind reads only as received.
 The blocked reasons read the case's own state (an open clarification, an
 open deposit gate) and assert no statute.
+
+The counts are read for many cases at once (``_work_counts``), so the Today
+list costs the same handful of queries for one case or a full page.
 """
 
-from django.db.models import Exists, OuterRef
+from collections import Counter
+from collections.abc import Iterable
+
+from django.db.models import Count, Exists, OuterRef, Q
 
 from apps.correspondence.models import ClarificationCycle
 
@@ -33,9 +39,10 @@ from .models import (
     MatterKind,
     PublicRecordsRequest,
     RecordItem,
+    RedactionProposal,
+    RedactionProposalDecision,
     RequestStatus,
 )
-from .redaction_batches import pending_proposal_count
 
 STAGES = (
     ("intake", "Intake"),
@@ -53,41 +60,99 @@ def _plural(count: int, singular: str, plural: str) -> str:
     return f"{count} {singular if count == 1 else plural}"
 
 
-def _open_clarifications(prr: PublicRecordsRequest) -> int:
-    return ClarificationCycle.objects.filter(
-        request=prr, resolved_at__isnull=True, cancelled_at__isnull=True,
-    ).count()
+def _by_request(rows, key: str = "request_id") -> Counter:
+    return Counter({row[key]: row["n"] for row in rows})
 
 
-def _open_deposit_gates(prr: PublicRecordsRequest) -> int:
-    return FeeDepositGate.objects.filter(
-        request=prr, satisfied_at__isnull=True, lifted_at__isnull=True,
-    ).count()
-
-
-def _open_work(prr: PublicRecordsRequest) -> dict[str, tuple[int, str, str]]:
-    """Each stage's (open count, summary, blocked reason)."""
-    tasks = CollectionTask.objects.filter(request=prr)
-    records = RecordItem.objects.filter(request=prr)
-    has_collection = tasks.exists() or records.exists()
-    waiting_on_clarification = (
-        prr.status == RequestStatus.CLARIFICATION or _open_clarifications(prr) > 0
+def _open_deposit_gates(ids: list[int]) -> Counter:
+    return _by_request(
+        FeeDepositGate.objects.filter(
+            request_id__in=ids, satisfied_at__isnull=True, lifted_at__isnull=True,
+        ).values("request_id").annotate(n=Count("pk"))
     )
-    open_tasks = tasks.exclude(state=CollectionTask.State.COMPLETE).count()
-    to_review = records.filter(
-        review_state=RecordItem.ReviewState.UNREVIEWED,
-    ).count()
-    proposals = pending_proposal_count(prr)
+
+
+def _pending_proposals(ids: list[int]) -> Counter:
+    """Redaction proposals still waiting for a person's decision, per case.
+    The same rule as ``redaction_batches.pending_proposal_count``."""
+    return _by_request(
+        RedactionProposal.objects.filter(
+            record_item__request_id__in=ids,
+            record_item__review_state=RecordItem.ReviewState.RESPONSIVE,
+        ).exclude(
+            Exists(RedactionProposalDecision.objects.filter(proposal=OuterRef("pk")))
+        ).values("record_item__request_id").annotate(n=Count("pk")),
+        key="record_item__request_id",
+    )
+
+
+def _work_counts(ids: list[int]) -> dict[str, Counter]:
+    """Every count the rail reads, per case, in six queries."""
+    tasks = CollectionTask.objects.filter(request_id__in=ids).values(
+        "request_id",
+    ).annotate(
+        total=Count("pk"),
+        open=Count("pk", filter=~Q(state=CollectionTask.State.COMPLETE)),
+    )
     released_coverage = Installment.objects.filter(
-        request=prr, released_at__isnull=False, items=OuterRef("pk"),
+        released_at__isnull=False, items=OuterRef("pk"),
     )
-    unreleased = records.filter(
-        review_state=RecordItem.ReviewState.RESPONSIVE,
-    ).exclude(Exists(released_coverage)).count()
-    open_installments = Installment.objects.filter(
-        request=prr, released_at__isnull=True,
-    ).count()
-    deposits = _open_deposit_gates(prr)
+    records = RecordItem.objects.filter(request_id__in=ids).values(
+        "request_id",
+    ).annotate(
+        total=Count("pk"),
+        unreviewed=Count(
+            "pk", filter=Q(review_state=RecordItem.ReviewState.UNREVIEWED),
+        ),
+        unreleased=Count(
+            "pk",
+            filter=Q(review_state=RecordItem.ReviewState.RESPONSIVE)
+            & ~Q(Exists(released_coverage)),
+        ),
+    )
+    counts: dict[str, Counter] = {
+        name: Counter()
+        for name in (
+            "tasks", "open_tasks", "records", "to_review", "unreleased",
+        )
+    }
+    for row in tasks:
+        counts["tasks"][row["request_id"]] = row["total"]
+        counts["open_tasks"][row["request_id"]] = row["open"]
+    for row in records:
+        counts["records"][row["request_id"]] = row["total"]
+        counts["to_review"][row["request_id"]] = row["unreviewed"]
+        counts["unreleased"][row["request_id"]] = row["unreleased"]
+    counts["clarifications"] = _by_request(
+        ClarificationCycle.objects.filter(
+            request_id__in=ids, resolved_at__isnull=True, cancelled_at__isnull=True,
+        ).values("request_id").annotate(n=Count("pk"))
+    )
+    counts["open_installments"] = _by_request(
+        Installment.objects.filter(
+            request_id__in=ids, released_at__isnull=True,
+        ).values("request_id").annotate(n=Count("pk"))
+    )
+    counts["deposits"] = _open_deposit_gates(ids)
+    counts["proposals"] = _pending_proposals(ids)
+    return counts
+
+
+def _open_work(
+    prr: PublicRecordsRequest, counts: dict[str, Counter],
+) -> dict[str, tuple[int, str, str]]:
+    """Each stage's (open count, summary, blocked reason)."""
+    pk = prr.pk
+    has_collection = counts["tasks"][pk] > 0 or counts["records"][pk] > 0
+    waiting_on_clarification = (
+        prr.status == RequestStatus.CLARIFICATION or counts["clarifications"][pk] > 0
+    )
+    open_tasks = counts["open_tasks"][pk]
+    to_review = counts["to_review"][pk]
+    proposals = counts["proposals"][pk]
+    unreleased = counts["unreleased"][pk]
+    open_installments = counts["open_installments"][pk]
+    deposits = counts["deposits"][pk]
     received = prr.status == RequestStatus.RECEIVED
     if not received:
         intake_summary = ""
@@ -143,12 +208,7 @@ def _open_work(prr: PublicRecordsRequest) -> dict[str, tuple[int, str, str]]:
     }
 
 
-def case_stages(prr: PublicRecordsRequest) -> list[dict]:
-    """The rail for one case: id, label, state, open_count, summary, reason.
-
-    ``state`` is ``done``, ``current``, ``blocked`` or ``upcoming``. ``reason``
-    is set only on a blocked stage.
-    """
+def _rail(prr: PublicRecordsRequest, counts: dict[str, Counter]) -> list[dict]:
     if prr.status in TERMINAL_STATUSES:
         return [
             {
@@ -157,7 +217,7 @@ def case_stages(prr: PublicRecordsRequest) -> list[dict]:
             }
             for stage_id, label in STAGES
         ]
-    work = _open_work(prr)
+    work = _open_work(prr, counts)
     current = next(
         (stage_id for stage_id in STAGE_IDS if work[stage_id][0] > 0),
         "close",
@@ -181,3 +241,32 @@ def case_stages(prr: PublicRecordsRequest) -> list[dict]:
             "reason": blocked_reason if state == "blocked" else "",
         })
     return stages
+
+
+def case_stages(prr: PublicRecordsRequest) -> list[dict]:
+    """The rail for one case: id, label, state, open_count, summary, reason.
+
+    ``state`` is ``done``, ``current``, ``blocked`` or ``upcoming``. ``reason``
+    is set only on a blocked stage.
+    """
+    if prr.status in TERMINAL_STATUSES:
+        return _rail(prr, {})
+    return _rail(prr, _work_counts([prr.pk]))
+
+
+def current_stages(cases: Iterable[PublicRecordsRequest]) -> dict[int, dict]:
+    """The stage each case is in now, keyed by primary key.
+
+    The rail's current (or blocked) stage; a closed case gets its Close
+    stage, done. One set of grouped queries for all of them.
+    """
+    cases = list(cases)
+    counts = _work_counts([case.pk for case in cases])
+    current = {}
+    for case in cases:
+        rail = _rail(case, counts)
+        current[case.pk] = next(
+            (stage for stage in rail if stage["state"] in {"current", "blocked"}),
+            rail[-1],
+        )
+    return current

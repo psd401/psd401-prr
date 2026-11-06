@@ -196,7 +196,7 @@ async function auditSurfaces(page: Page, theme: Theme, records: AuditRecord[]) {
   await audit(page, 'login', records)
 
   await login(page)
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
   await audit(page, 'shell and Inbox', records)
 
   await page.goto('/inbox?view=team')

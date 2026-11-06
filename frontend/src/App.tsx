@@ -31,6 +31,7 @@ import { Registry } from './pages/Registry'
 import { Reporting } from './pages/Reporting'
 import { Review } from './pages/Review'
 import { ConfigurationIndex, OversightIndex } from './pages/SectionIndex'
+import { Today } from './pages/Today'
 import { StaffIntake } from './pages/StaffIntake'
 import { EmptyState, Spinner } from './ui'
 
@@ -82,6 +83,7 @@ function StaffApp() {
           path="requests/:number/:tab"
           element={guard(<CaseWorkspace roles={user.roles} />)}
         />
+        <Route path="today" element={guard(<Today />)} />
         <Route path="inbox" element={guard(<Inbox roles={user.roles} />)} />
         <Route path="review" element={guard(<Review />)} />
         <Route path="decisions" element={guard(<Decisions />)} />

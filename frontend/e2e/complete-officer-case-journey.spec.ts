@@ -10,6 +10,9 @@ import {
 
 test('complete-officer-case-journey', async ({ page }) => {
   await login(page)
+  // Login lands on Today; these queues live on the Inbox.
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
+  await page.goto('/inbox')
   // The officer lands on Inbox message triage; assigned work of every kind is
   // the "Assigned to you" chip that absorbed the retired My Work screen.
   await page.getByRole('button', { name: /^Assigned to you/ }).click()

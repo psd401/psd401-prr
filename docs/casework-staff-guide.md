@@ -5,31 +5,29 @@ system keeps legal status, message transport, personal read state, and team
 work disposition separate. A convenient UI action never changes another one
 by implication.
 
-## Start with the queue for your role
+## Start on Today
 
-There is one work surface. The Inbox carries cross-case requester messages, the
-statutory backlog, and every queue that used to live on a separate My Work
-screen; `/my-work` now redirects into it.
+The menu has three stops: **Today**, **New request**, and **Settings**.
 
-- **Records Officers** land on the **Inbox**. Triage messages under *Needs
-  you*, then use *Your queues* — Assigned to you, Unassigned, Team, and
-  Critical — for work of every other kind. Each row states where its case
-  stands and carries its own actions.
-- **Department Liaisons** land on the Inbox with *Your queues* only; there is
-  no cross-case message triage for the role. A liaison can update authorized
-  collection work and prepare eligible drafts, but approval, statutory
-  decisions, and human-only actions stay with a Records Officer.
-- **Reviewers** land on **Review** and open assigned record work directly in a
-  case's Review stage. The reviewer view does not expose requester contact or
-  correspondence.
-- **Intake Clerks** use **Staff Intake**. A submitted request returns its
-  request number but does not grant access to case browsing.
-- **Application Admins** use Configuration and authorized operations. The role
-  does not imply Records Officer authority.
+**Today** lists every open case once, most urgent first: late cases on top,
+then by the date each one is due next. Each row shows the case's title, its
+number and requester, and one button: the next step for the stage the case is
+in, such as *Send acknowledgment*, *Set the scope*, *Review 40 records*, or
+*Close the case*. The button opens the case where that step is done. A grey
+button means the case is waiting on the requester.
 
-Queue counts update while the page is visible and when focus returns to the
-window. Screen readers receive a polite summary; the application does not move
-focus or scroll the current selection.
+Above the list, small links name work that is not on a case yet: email that
+needs a case, email held for review, messages that did not deliver, and
+decisions waiting for a person. Each opens the Inbox view or the Decisions
+page that handles it.
+
+The search box finds any case, open or closed, by number, requester, or words
+in the request.
+
+**New request** logs a phone, mailed, or in-person request. **Settings** holds
+configuration and, under *Reports*, JLARC reporting, the audit log, and the AI
+evaluation and agreement reports. The Inbox, Review, Decisions, and Oversight
+pages still open from their links and old bookmarks.
 
 ## Triage the Inbox
 

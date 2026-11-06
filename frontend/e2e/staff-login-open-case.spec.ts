@@ -21,7 +21,7 @@ test('staff-login-open-case', async ({ page }) => {
 
   // Wait for the authenticated shell before navigating: a goto issued while
   // the session is still being established lands back on the sign-in screen.
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
   await page.goto('/inbox?view=cases')
   await page
     .getByRole('link', { name: new RegExp(`^Open case ${fixtureRequestNumber}`) })

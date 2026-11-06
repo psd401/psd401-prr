@@ -1,14 +1,13 @@
 // ABOUTME: Responsive, keyboard-operable application shell with role-scoped navigation.
-// ABOUTME: Navigation counts are lightweight metadata and never replace API authorization.
+// ABOUTME: Three menu stops; route authorization stays with the API.
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
 import { appAsset } from '../appAssets'
 import { useLogout, type StaffUser } from '../api/auth'
-import { PRIMARY_NAV, visibleNav, type NavItem } from '../nav'
+import { PRIMARY_NAV, visibleNav } from '../nav'
 import { QueueCountStatus } from '../queueCounts'
 import { useQueueCounts } from '../useQueueCounts'
 import { ThemePicker, TrustFooter } from '../ui'
-import { itemCountLabel, type WorkItemCounts } from '../work'
 
 function useDesktopLayout() {
   const [desktop, setDesktop] = useState(
@@ -24,31 +23,6 @@ function useDesktopLayout() {
   }, [])
 
   return desktop
-}
-
-/**
- * The badge and what it counts. The Inbox badge deliberately counts different
- * things by role -- an officer triages messages needing attention, a liaison
- * has no cross-case message queue at all and works from personal assignments,
- * and everyone else only sees delivery exceptions -- so it must also SAY
- * which, or three people looking at the same number read it three ways.
- */
-function navCount(
-  item: NavItem,
-  counts: WorkItemCounts | undefined,
-  user: StaffUser,
-): { value: number; description: string } | null {
-  if (!item.countKey || !counts) return null
-  if (item.countKey === 'review') {
-    return { value: counts.review, description: 'awaiting review' }
-  }
-  if (user.roles.includes('records_officer')) {
-    return { value: counts.inbox_needs_attention, description: 'needing attention' }
-  }
-  if (user.roles.includes('liaison')) {
-    return { value: counts.personal, description: 'assigned to you' }
-  }
-  return { value: counts.inbox_delivery_exceptions, description: 'delivery exceptions' }
 }
 
 /**
@@ -156,9 +130,7 @@ export function AppLayout({ user }: { user: StaffUser }) {
           </p>
         </div>
         <nav aria-label="Primary navigation" className="flex-1 overflow-y-auto px-3 py-5">
-          {nav.map((item) => {
-            const count = navCount(item, counts.data, user)
-            return (
+          {nav.map((item) => (
               <NavLink
                 key={item.path}
                 to={item.path}
@@ -172,18 +144,8 @@ export function AppLayout({ user }: { user: StaffUser }) {
                 }
               >
                 <span>{item.label}</span>
-                {count !== null && (
-                  <span
-                    title={`${count.value} ${count.description}`}
-                    aria-label={`${itemCountLabel(count.value, item.label)}, ${count.description}`}
-                    className="min-w-7 rounded-full bg-on-header/15 px-2 py-0.5 text-center text-xs tabular-nums"
-                  >
-                    <span aria-hidden="true">{count.value}</span>
-                  </span>
-                )}
               </NavLink>
-            )
-          })}
+          ))}
         </nav>
         <div className="border-t border-on-header-muted/20 px-5 py-4 text-sm">
           <p className="truncate font-heading font-semibold">{user.username}</p>

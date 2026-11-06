@@ -304,7 +304,7 @@ cost per item. A failed call counts as an error and a miss. Cost needs a
 `--price` (USD per million input/output tokens) per model; the application
 holds no price list, so a model without one reports no cost.
 
-Records Officers read the runs side by side under **Oversight → AI
+Records Officers read the runs side by side under **Settings → Reports → AI
 evaluation** (`advisory_evaluations.list`).
 
 ## Stored agreement and record clusters
@@ -326,7 +326,7 @@ confidence band (90-100%, 70-89%, 50-69%, below 50%), district-wide or for one
 case. Only each record's latest decision counts. Withheld counts as
 responsive; `uncertain` hands the call to a person and has no agreement rate;
 a `duplicate` outcome is not a responsiveness call and is left out. Records
-Officers read it under **Oversight -> AI agreement**
+Officers read it under **Settings -> Reports -> AI agreement**
 (`advisory_agreement.list`). These numbers are what trust-ladder thresholds
 (#34, #39) are to be set from. The report covers every matter kind (rule 13):
 it measures the model, not a statutory obligation, and starts no clock.

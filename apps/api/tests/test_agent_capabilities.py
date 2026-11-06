@@ -483,7 +483,7 @@ class AgentCapabilityRegistryTests(SimpleTestCase):
         }
         self.assertEqual(
             by_id["requests.list"]["ui_routes"],
-            ["/cases"],
+            ["/today", "/cases"],
         )
         self.assertEqual(
             by_id["requests.submit_staff"]["ui_routes"],

@@ -69,57 +69,34 @@ function isCaseTabKey(tab: string): tab is CaseTabKey {
   return Object.hasOwn(CASE_TAB_ROLES, tab)
 }
 
-export type QueueCountKey = 'inbox' | 'review'
-
 export interface NavItem {
   label: string
   path: string
   roles: StaffRole[]
-  countKey?: QueueCountKey
   description?: string
 }
 
+/**
+ * Three ways in, nothing more: the day's cases, a new request, and settings.
+ * Inbox, Review, Decisions, and Oversight still open from their links (Today
+ * points to whatever in them needs a person); they are no longer menu stops.
+ */
 export const PRIMARY_NAV: NavItem[] = [
-  // One work surface, not two. My Work and Inbox split the same casework
-  // between screens that were each incomplete: the Inbox listed messages an
-  // officer could not act on, and My Work read empty for anyone with nothing
-  // personally assigned. Inbox now carries both, grouped by decision.
-  //
-  // Cases was the second half of that same split. It listed requests while the
-  // Inbox listed work, so an officer needing "every case, open and closed" had
-  // to leave the surface they work in. It is now the "All cases" view here,
-  // and reviewers reach the Inbox for that view alone -- the server scopes
-  // which cases they see and blanks requester identity for them, so this is a
-  // way in rather than a way around.
+  { label: 'Today', path: '/today', roles: WORKFLOW_ROLES },
   {
-    label: 'Inbox',
-    path: '/inbox',
-    roles: ['records_officer', 'liaison', 'admin', 'reviewer'],
-    countKey: 'inbox',
-  },
-  {
-    label: 'Review',
-    path: '/review',
-    roles: ['records_officer', 'reviewer'],
-    countKey: 'review',
-  },
-  {
-    // Batches an agent or colleague proposed (#43), approved or rejected here.
-    label: 'Decisions',
-    path: '/decisions',
-    roles: ['records_officer', 'reviewer'],
-  },
-  {
-    label: 'Staff Intake',
+    label: 'New request',
     path: '/staff-intake',
     roles: ['records_officer', 'intake_clerk'],
   },
-  {
-    label: 'Oversight',
-    path: '/oversight',
-    roles: ['records_officer', 'reviewer', 'admin'],
-  },
-  { label: 'Configuration', path: '/configuration', roles: ALL_ROLES },
+  { label: 'Settings', path: '/configuration', roles: ALL_ROLES },
+]
+
+/** Pages reached from Today or Settings rather than the menu. */
+const LINKED_ROUTES: [string, StaffRole[]][] = [
+  ['/inbox', ['records_officer', 'liaison', 'admin', 'reviewer']],
+  ['/review', ['records_officer', 'reviewer']],
+  ['/decisions', ['records_officer', 'reviewer']],
+  ['/oversight', ['records_officer', 'reviewer', 'admin']],
 ]
 
 export const CONFIGURATION_NAV: NavItem[] = [
@@ -204,6 +181,7 @@ export const OVERSIGHT_NAV: NavItem[] = [
 
 const ROUTE_ROLES = new Map<string, StaffRole[]>([
   ...PRIMARY_NAV.map((item) => [item.path, item.roles] as const),
+  ...LINKED_ROUTES,
   ...CONFIGURATION_NAV.map((item) => [item.path, item.roles] as const),
   ...OVERSIGHT_NAV.map((item) => [item.path, item.roles] as const),
   ['/requests', WORKFLOW_ROLES],
@@ -235,8 +213,7 @@ export function routeIsAuthorized(path: string, roles: StaffRole[]): boolean {
 }
 
 export function defaultLanding(roles: StaffRole[]): string {
-  if (roles.includes('records_officer') || roles.includes('liaison')) return '/inbox'
-  if (roles.includes('reviewer')) return '/review'
+  if (WORKFLOW_ROLES.some((role) => roles.includes(role) && role !== 'admin')) return '/today'
   if (roles.includes('intake_clerk')) return '/staff-intake'
   if (roles.includes('admin')) return '/configuration'
   return '/'

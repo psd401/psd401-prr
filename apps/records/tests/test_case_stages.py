@@ -7,6 +7,7 @@ blocked, with the reason. A closed case is done throughout.
 """
 
 import hashlib
+from collections import Counter
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -19,7 +20,7 @@ from apps.records.models import (
     Requester,
     RequestStatus,
 )
-from apps.records.stages import STAGE_IDS, case_stages
+from apps.records.stages import STAGE_IDS, case_stages, current_stages
 
 
 class CaseStagesTests(TestCase):
@@ -145,7 +146,7 @@ class CaseStagesTests(TestCase):
     def test_pending_redaction_proposals_make_redact_current(self):
         task = self._task(CollectionTask.State.COMPLETE)
         self._record(task, RecordItem.ReviewState.RESPONSIVE)
-        with patch("apps.records.stages.pending_proposal_count", return_value=3):
+        with patch("apps.records.stages._pending_proposals", return_value=Counter({self.prr.pk: 3})):
             states = self._states()
             redact = self._stage("redact")
         self.assertEqual(states["redact"], "current")
@@ -162,7 +163,7 @@ class CaseStagesTests(TestCase):
     def test_an_open_deposit_blocks_release(self):
         task = self._task(CollectionTask.State.COMPLETE)
         self._record(task, RecordItem.ReviewState.RESPONSIVE)
-        with patch("apps.records.stages._open_deposit_gates", return_value=1):
+        with patch("apps.records.stages._open_deposit_gates", return_value=Counter({self.prr.pk: 1})):
             release = self._stage("release")
         self.assertEqual(release["state"], "blocked")
         self.assertIn("deposit", release["reason"])
@@ -179,6 +180,67 @@ class CaseStagesTests(TestCase):
         self.prr.status = RequestStatus.CLOSED_WITHDRAWN
         self.prr.save(update_fields=["status"])
         self.assertEqual(set(self._states().values()), {"done"})
+
+    def test_current_stages_match_each_case_rail(self):
+        # The Today list reads one stage per case for a whole page; it must
+        # be the same stage the case's own rail calls current.
+        received = PublicRecordsRequest.objects.create(
+            requester=Requester.objects.create(email="received@example.org"),
+            description="A new request.",
+            channel="portal",
+            status=RequestStatus.RECEIVED,
+        )
+        reviewing = PublicRecordsRequest.objects.create(
+            requester=Requester.objects.create(email="review@example.org"),
+            description="A request in review.",
+            channel="portal",
+            status=RequestStatus.ACKNOWLEDGED,
+        )
+        task = CollectionTask.objects.create(
+            request=reviewing, kind=CollectionTask.Kind.VAULT_MAIL,
+            state=CollectionTask.State.COMPLETE,
+        )
+        RecordItem.objects.create(
+            request=reviewing, collection_task=task,
+            original_filename="One.pdf", storage_key="records/x/one.pdf",
+            content_length=10, content_type="application/pdf",
+            sha256=hashlib.sha256(b"one").hexdigest(),
+        )
+        closed = PublicRecordsRequest.objects.create(
+            requester=Requester.objects.create(email="closed@example.org"),
+            description="A finished request.",
+            channel="portal",
+            status=RequestStatus.CLOSED_WITHDRAWN,
+        )
+        cases = [self.prr, received, reviewing, closed]
+
+        current = current_stages(cases)
+
+        for case in cases:
+            with self.subTest(case=case.number):
+                rail = case_stages(case)
+                expected = next(
+                    (s for s in rail if s["state"] in {"current", "blocked"}),
+                    rail[-1],
+                )
+                self.assertEqual(current[case.pk], expected)
+        self.assertEqual(current[reviewing.pk]["summary"], "1 record to review")
+        self.assertEqual(current[closed.pk]["state"], "done")
+
+    def test_current_stages_cost_the_same_for_one_case_or_many(self):
+        others = [
+            PublicRecordsRequest.objects.create(
+                requester=Requester.objects.create(email=f"many{i}@example.org"),
+                description="Another request.",
+                channel="portal",
+                status=RequestStatus.ACKNOWLEDGED,
+            )
+            for i in range(4)
+        ]
+        with self.assertNumQueries(6):
+            current_stages([self.prr])
+        with self.assertNumQueries(6):
+            current_stages([self.prr, *others])
 
     def test_every_stage_has_a_label_and_reason_key(self):
         for stage in case_stages(self.prr):

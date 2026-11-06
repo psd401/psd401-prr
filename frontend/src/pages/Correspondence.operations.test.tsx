@@ -41,7 +41,7 @@ describe('Message operations — Application Admin access', () => {
     const configurationLabels = visibleNav(CONFIGURATION_NAV, ['admin'])
       .map((item) => item.label)
 
-    expect(primaryLabels).toContain('Configuration')
+    expect(primaryLabels).toContain('Settings')
     expect(configurationLabels).toContain('Message operations')
   })
 
