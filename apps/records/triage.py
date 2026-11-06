@@ -306,15 +306,19 @@ def triage_footage(prr: PublicRecordsRequest) -> FootagePreservation | None:
     if dates:
         window_start, window_end = calendar_day_window(dates)
         note = f"Dates parsed from request: {', '.join(map(str, dates))}"
-        cap = dt.timedelta(days=runtime.get("CAMERA_HOLD_MAX_SPAN_DAYS"))
-        if window_end - window_start > cap:
+        # Count calendar days, not elapsed time: a DST day is 23 or 25 hours.
+        cap = runtime.get("CAMERA_HOLD_MAX_SPAN_DAYS")
+        first, last = dates[0], dates[-1]
+        if (last - first).days + 1 > cap:
             requested = _date_range(window_start, window_end)
-            window_start = window_end - cap
+            window_start, window_end = calendar_day_window(
+                [last - dt.timedelta(days=cap - 1), last],
+            )
             held = _date_range(window_start, window_end)
-            note = f"{note}. Span clipped to the most recent {cap.days} days: {held}."
+            note = f"{note}. Span clipped to the most recent {cap} days: {held}."
             narrowed.append(
                 f"The request's dates span {requested}, longer than the "
-                f"{cap.days}-day automatic hold limit, so only {held} is held. "
+                f"{cap}-day automatic hold limit, so only {held} is held. "
                 "A human must refine the window and hold any earlier footage "
                 "the request covers."
             )

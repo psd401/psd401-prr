@@ -946,6 +946,29 @@ class HoldSpanCapTests(TestCase):
         self.assertEqual(fp.window_start, dt.datetime(2026, 9, 1, 7, tzinfo=dt.UTC))
         narrowed.assert_not_called()
 
+    def test_exactly_the_cap_in_calendar_days_is_not_clipped_across_fall_dst(self):
+        # 31 calendar days, but 31 days + 1 hour of elapsed time (Nov 1).
+        prr = make_request("Video in the gym on 2026-10-10 and 2026-11-09.")
+        with aware(), mock.patch(NARROWED) as narrowed:
+            fp = preserve(prr)
+
+        self.assertEqual(fp.window_start, dt.datetime(2026, 10, 10, 7, tzinfo=dt.UTC))
+        self.assertEqual(fp.window_end, dt.datetime(2026, 11, 10, 8, tzinfo=dt.UTC))
+        narrowed.assert_not_called()
+
+    def test_a_clipped_span_across_spring_dst_starts_at_local_midnight(self):
+        # 32 calendar days crossing 2026-03-08: hold 2026-02-21..2026-03-23.
+        prr = make_request("Video in the gym on 2026-02-20 and 2026-03-23.")
+        with aware(), mock.patch(NARROWED) as narrowed:
+            fp = preserve(prr)
+
+        self.assertEqual(fp.window_start, dt.datetime(2026, 2, 21, 8, tzinfo=dt.UTC))
+        self.assertEqual(fp.window_end, dt.datetime(2026, 3, 24, 7, tzinfo=dt.UTC))
+        self.assertIn("2026-02-21..2026-03-23", fp.detected_dates_note)
+        reasons = " ".join(narrowed.call_args.kwargs["reasons"])
+        self.assertIn("2026-02-20..2026-03-23", reasons)
+        self.assertIn("only 2026-02-21..2026-03-23 is held", reasons)
+
     def test_the_no_date_window_is_unchanged(self):
         prr = make_request("I want the surveillance video of the incident at the gym")
         with aware(), mock.patch(NARROWED) as narrowed:
