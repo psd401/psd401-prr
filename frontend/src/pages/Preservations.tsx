@@ -1,10 +1,11 @@
 // ABOUTME: Footage preservation holds screen — the retention race dashboard.
 // ABOUTME: Cards per Aware bookmark hold: cameras, exclusions, confirmation, release.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router'
 import { api, unwrap, type Page } from '../api/client'
 import type { StaffRole } from '../api/auth'
+import { preservationStateLabel, preservationStateTone } from '../preservationStatus'
 import {
   Badge,
   Button,
@@ -12,6 +13,7 @@ import {
   EmptyState,
   ErrorNote,
   Field,
+  MIN_REASON_LENGTH,
   Modal,
   Spinner,
   Table,
@@ -50,6 +52,11 @@ interface Preservation {
   camera_holds: CameraHold[]
   confirmation_text: string | null
   request_closed: boolean
+  /** Server-computed: closed, not a merged target, and held/partial — or
+   * released with cameras whose bookmark delete failed (a retry). */
+  releasable: boolean
+  /** Server-computed: narrowed to specific sites and not released. */
+  widenable: boolean
   released_at: string | null
   released_by: string | null
   release_reason: string
@@ -65,43 +72,38 @@ const PRESERVATION_STATES = [
   'released',
 ] as const
 
-const RELEASABLE_STATES = new Set(['held', 'partial'])
+/** Release, widen and exclude reasons are capped at 500 on the server. */
+const MAX_REASON_LENGTH = 500
 
-const STATE_TONES: Record<string, 'green' | 'amber' | 'red' | 'neutral'> = {
-  pending: 'amber',
-  held: 'green',
-  partial: 'amber',
-  manual: 'amber',
-  no_cameras: 'amber',
-  expired: 'red',
-  released: 'neutral',
-  excluded: 'neutral',
-  error: 'red',
-  failed: 'red',
-  gap: 'amber',
-  not_retained: 'neutral',
+// Exclusion narrows a live hold. A released hold has nothing left to narrow,
+// and an expired one never bookmarked anything; the server does not check
+// this, so the UI must not offer it.
+const FINISHED_PRESERVATION_STATES = new Set(['released', 'expired'])
+const FINISHED_CAMERA_STATES = new Set(['released', 'release_failed'])
+
+function excludable(preservation: Preservation, hold: CameraHold) {
+  return !hold.excluded_at
+    && !FINISHED_CAMERA_STATES.has(hold.state)
+    && !FINISHED_PRESERVATION_STATES.has(preservation.state)
 }
 
-const STATE_LABELS: Record<string, string> = {
-  pending: 'Pending — hold executing',
-  held: 'Held',
-  partial: 'Partly held — gaps or failures need review',
-  manual: 'Manual hold required',
-  no_cameras: 'No cameras in Aware at the requested site',
-  expired: 'Window outside retention',
-  released: 'Released',
-  // Camera-level states
-  gap: 'Footage gap',
-  not_retained: 'No retained footage',
-  failed: 'Failed',
+/** A release already ran but some Aware bookmarks may still exist. */
+function hasReleaseFailures(preservation: Preservation) {
+  return preservation.camera_holds.some((h) => h.state === 'release_failed')
+}
+
+/** Filter buttons use the badge label up to its "— detail" suffix. */
+function filterLabel(state: string) {
+  return preservationStateLabel(state).split(' — ')[0]
 }
 
 function StateBadge({ state }: { state: string }) {
-  return <Badge tone={STATE_TONES[state] ?? 'neutral'}>{STATE_LABELS[state] ?? state}</Badge>
+  return <Badge tone={preservationStateTone(state)}>{preservationStateLabel(state)}</Badge>
 }
 
 interface ExcludeTarget {
   preservationId: number
+  requestNumber: string
   hold: CameraHold
 }
 
@@ -109,10 +111,19 @@ function coverageLabel(fraction: number | null) {
   return fraction === null ? '—' : `${Math.round(fraction * 100)}%`
 }
 
+/** How long the "Copied" note stays before the live region clears. */
+const COPIED_RESET_MS = 3000
+
 /** Text a Records Officer may paste into a letter. Copy only: never sent. */
 function ConfirmationText({ text }: { text: string }) {
   const toast = useToast()
   const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), COPIED_RESET_MS)
+    return () => window.clearTimeout(timer)
+  }, [copied])
 
   async function copy() {
     try {
@@ -128,19 +139,261 @@ function ConfirmationText({ text }: { text: string }) {
     <div className="mb-4 rounded-md border border-line bg-surface-sunken px-3 py-2">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="text-sm text-ink">{text}</p>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={copy}
-          aria-label={copied ? 'Copied' : 'Copy confirmation'}
-        >
-          {copied ? 'Copied' : 'Copy'}
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Always mounted so screen readers hear the change. */}
+          <span role="status" aria-live="polite" className="text-xs text-ink-muted">
+            {copied ? 'Copied' : ''}
+          </span>
+          <Button type="button" variant="ghost" onClick={copy} aria-label="Copy confirmation">
+            Copy
+          </Button>
+        </div>
       </div>
       <p className="mt-1 text-xs text-ink-muted">
         For correspondence you write. This text is never sent automatically.
       </p>
     </div>
+  )
+}
+
+/** Records Officer controls in a preservation card's header. */
+function HoldActions({
+  preservation,
+  onRelease,
+  onWiden,
+}: {
+  preservation: Preservation
+  onRelease: () => void
+  onWiden: () => void
+}) {
+  // Accessible names carry the request number: the all-preservations list
+  // shows many cards, and identical names make the buttons indistinguishable.
+  const releaseLabel = hasReleaseFailures(preservation) ? 'Retry release' : 'Release hold'
+  return (
+    <>
+      {preservation.widenable && (
+        <Button
+          variant="ghost"
+          onClick={onWiden}
+          aria-label={`Widen to district-wide — ${preservation.request_number}`}
+        >
+          Widen to district-wide
+        </Button>
+      )}
+      {preservation.releasable && (
+        <Button
+          variant="ghost"
+          onClick={onRelease}
+          aria-label={`${releaseLabel} — ${preservation.request_number}`}
+        >
+          {releaseLabel}
+        </Button>
+      )}
+    </>
+  )
+}
+
+/**
+ * Widen a site-narrowed hold to every camera in the district. Used when the
+ * site the requester named turns out to be wrong or unknown.
+ */
+function WidenDialog({
+  preservation,
+  pending,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  preservation: Preservation
+  pending: boolean
+  error: unknown
+  onClose: () => void
+  onSubmit: (reason: string) => void
+}) {
+  const [reason, setReason] = useState('')
+
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    if (pending || reasonTooShort(reason)) return
+    onSubmit(reason)
+  }
+
+  return (
+    <Modal
+      open
+      title={`Widen preservation for ${preservation.request_number}`}
+      onClose={onClose}
+      dismissible={!pending}
+    >
+      <form onSubmit={submit} className="space-y-4">
+        <p className="text-sm text-ink-muted">
+          This hold covers only the sites named in the request. Widening it
+          bookmarks every camera in the district for the same window.
+        </p>
+        <Field
+          label="Reason"
+          hint={reasonHint('say why the named sites may not cover the footage')}
+        >
+          <Textarea
+            rows={3}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            minLength={MIN_REASON_LENGTH}
+            maxLength={MAX_REASON_LENGTH}
+            required
+          />
+        </Field>
+        {reasonShortfall(reason) && (
+          <p aria-live="polite" className="text-sm text-ink-muted">{reasonShortfall(reason)}</p>
+        )}
+        {error != null && <ErrorNote error={error} />}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={pending || reasonTooShort(reason)}>
+            {pending ? 'Widening…' : 'Widen hold'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+/** Drop one camera from a live hold. A human reason lands in the audit trail. */
+function ExcludeDialog({
+  hold,
+  pending,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  hold: CameraHold
+  pending: boolean
+  error: unknown
+  onClose: () => void
+  onSubmit: (reason: string) => void
+}) {
+  const [reason, setReason] = useState('')
+
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    if (pending || reasonTooShort(reason)) return
+    onSubmit(reason)
+  }
+
+  return (
+    <Modal open title={`Exclude ${hold.camera_name}`} onClose={onClose} dismissible={!pending}>
+      <form onSubmit={submit} className="space-y-4">
+        <p className="text-sm text-ink-muted">
+          Camera <span className="font-heading font-bold">{hold.camera_name}</span> at{' '}
+          {hold.site} will be excluded from this preservation hold.
+        </p>
+        <Field label="Reason" hint={reasonHint('recorded in the audit trail')}>
+          <Textarea
+            rows={3}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            minLength={MIN_REASON_LENGTH}
+            maxLength={MAX_REASON_LENGTH}
+            required
+          />
+        </Field>
+        {reasonShortfall(reason) && (
+          <p aria-live="polite" className="text-sm text-ink-muted">{reasonShortfall(reason)}</p>
+        )}
+        {error != null && <ErrorNote error={error} />}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={pending || reasonTooShort(reason)}>
+            {pending ? 'Excluding…' : 'Exclude camera'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+/**
+ * Release a closed request's hold, deleting its Aware bookmarks. Also retries
+ * the deletes that failed on an earlier release.
+ */
+function ReleaseDialog({
+  preservation,
+  pending,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  preservation: Preservation
+  pending: boolean
+  error: unknown
+  onClose: () => void
+  onSubmit: (reason: string) => void
+}) {
+  const [reason, setReason] = useState('')
+  const [attested, setAttested] = useState(false)
+  const action = hasReleaseFailures(preservation) ? 'Retry release' : 'Release preservation'
+
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    if (reasonTooShort(reason) || !attested) return
+    onSubmit(reason)
+  }
+
+  return (
+    <Modal
+      open
+      title={`${action} for ${preservation.request_number}`}
+      onClose={onClose}
+      dismissible={!pending}
+    >
+      <form onSubmit={submit} className="space-y-4">
+        <p className="text-sm text-ink-muted">
+          Releasing deletes every Aware bookmark on this hold. The footage then
+          ages out on each camera's normal schedule and cannot be recovered.
+        </p>
+        <Field
+          label="Reason"
+          hint={reasonHint('say why the footage no longer needs to be kept')}
+        >
+          <Textarea
+            rows={3}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            minLength={MIN_REASON_LENGTH}
+            maxLength={MAX_REASON_LENGTH}
+            required
+          />
+        </Field>
+        {reasonShortfall(reason) && (
+          <p className="text-sm text-ink-muted">{reasonShortfall(reason)}</p>
+        )}
+        <label className="flex items-start gap-2 text-sm text-ink">
+          <input
+            type="checkbox"
+            checked={attested}
+            onChange={(e) => setAttested(e.target.checked)}
+            required
+          />
+          <span>
+            I attest that no litigation hold, pending lawsuit, or reasonably
+            anticipated litigation covers this footage.
+          </span>
+        </label>
+        {error != null && <ErrorNote error={error} />}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={pending || reasonTooShort(reason) || !attested}>
+            {pending ? 'Releasing…' : 'Release and delete bookmarks'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
@@ -156,11 +409,10 @@ export function Preservations({
   const canExclude = roles.includes('records_officer')
   const toast = useToast()
   const activeStateFilter = searchParams.get('preservation_state') ?? ''
+  // Only Records Officer buttons set these, so a set target implies canExclude.
   const [excluding, setExcluding] = useState<ExcludeTarget | null>(null)
-  const [reason, setReason] = useState('')
   const [releasing, setReleasing] = useState<Preservation | null>(null)
-  const [releaseReason, setReleaseReason] = useState('')
-  const [attested, setAttested] = useState(false)
+  const [widening, setWidening] = useState<Preservation | null>(null)
 
   const list = useQuery({
     queryKey: ['preservations', requestNumber ?? 'all', activeStateFilter],
@@ -177,68 +429,80 @@ export function Preservations({
     },
   })
 
+  // The request detail card shows the hold state and confirmation text too;
+  // leaving it cached would keep saying "Held" after a release.
+  function refreshAfterChange(requestNumber: string) {
+    qc.invalidateQueries({ queryKey: ['preservations'] })
+    qc.invalidateQueries({ queryKey: ['request', requestNumber] })
+  }
+
   const exclude = useMutation({
-    mutationFn: ({ preservationId, holdId, reason }: { preservationId: number; holdId: number; reason: string }) =>
+    mutationFn: ({ preservationId, holdId, reason }: { preservationId: number; requestNumber: string; holdId: number; reason: string }) =>
       api<CameraHold>(`/api/staff/preservations/${preservationId}/exclude-camera/`, {
         method: 'POST',
         body: { camera_hold_id: holdId, reason },
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['preservations'] })
+    onSuccess: (_hold, { requestNumber }) => {
+      refreshAfterChange(requestNumber)
       toast('success', 'Camera excluded from preservation hold.')
       closeExclude()
     },
   })
 
   const release = useMutation({
-    mutationFn: ({ preservationId, reason }: { preservationId: number; reason: string }) =>
+    mutationFn: ({ preservationId, reason }: { preservationId: number; requestNumber: string; reason: string }) =>
       api<Preservation>(`/api/staff/preservations/${preservationId}/release/`, {
         method: 'POST',
         body: { reason, attest_no_litigation_hold: true },
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['preservations'] })
+    onSuccess: (_preservation, { requestNumber }) => {
+      refreshAfterChange(requestNumber)
       toast('success', 'Preservation hold released; Aware bookmarks are being deleted.')
       closeRelease()
     },
   })
 
+  const widen = useMutation({
+    mutationFn: ({ preservationId, reason }: { preservationId: number; requestNumber: string; reason: string }) =>
+      api<Preservation>(`/api/staff/preservations/${preservationId}/widen/`, {
+        method: 'POST',
+        body: { reason },
+      }),
+    onSuccess: (_preservation, { requestNumber }) => {
+      refreshAfterChange(requestNumber)
+      toast('success', 'Preservation hold widened to district-wide.')
+      closeWiden()
+    },
+  })
+
+  function openWiden(preservation: Preservation) {
+    widen.reset()
+    setWidening(preservation)
+  }
+
+  function closeWiden() {
+    setWidening(null)
+    widen.reset()
+  }
+
   function openRelease(preservation: Preservation) {
-    setReleasing(preservation)
-    setReleaseReason('')
-    setAttested(false)
     release.reset()
+    setReleasing(preservation)
   }
 
   function closeRelease() {
     setReleasing(null)
-    setReleaseReason('')
-    setAttested(false)
     release.reset()
   }
 
-  function submitRelease(e: FormEvent) {
-    e.preventDefault()
-    if (!releasing || reasonTooShort(releaseReason) || !attested) return
-    release.mutate({ preservationId: releasing.id, reason: releaseReason })
-  }
-
-  function openExclude(preservationId: number, hold: CameraHold) {
-    setExcluding({ preservationId, hold })
-    setReason('')
+  function openExclude(preservationId: number, requestNumber: string, hold: CameraHold) {
     exclude.reset()
+    setExcluding({ preservationId, requestNumber, hold })
   }
 
   function closeExclude() {
     setExcluding(null)
-    setReason('')
     exclude.reset()
-  }
-
-  function submitExclude(e: FormEvent) {
-    e.preventDefault()
-    if (!excluding || !reason.trim()) return
-    exclude.mutate({ preservationId: excluding.preservationId, holdId: excluding.hold.id, reason })
   }
 
   function changeStateFilter(value: string) {
@@ -274,11 +538,10 @@ export function Preservations({
           <Button
             key={s}
             variant={activeStateFilter === s ? 'primary' : 'ghost'}
-            className="capitalize"
             onClick={() => changeStateFilter(s)}
             aria-pressed={activeStateFilter === s}
           >
-            {s.replace('_', ' ')}
+            {filterLabel(s)}
           </Button>
         ))}
       </div>
@@ -303,10 +566,12 @@ export function Preservations({
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <StateBadge state={p.state} />
-                  {canExclude && p.request_closed && RELEASABLE_STATES.has(p.state) && (
-                    <Button variant="ghost" onClick={() => openRelease(p)}>
-                      Release hold
-                    </Button>
+                  {canExclude && (
+                    <HoldActions
+                      preservation={p}
+                      onRelease={() => openRelease(p)}
+                      onWiden={() => openWiden(p)}
+                    />
                   )}
                 </div>
               </div>
@@ -382,8 +647,8 @@ export function Preservations({
                       header: '',
                       align: 'right',
                       cell: (h: CameraHold) =>
-                        h.excluded_at || h.state === 'released' || !canExclude ? null : (
-                          <Button variant="ghost" onClick={() => openExclude(p.id, h)}>
+                        !canExclude || !excludable(p, h) ? null : (
+                          <Button variant="ghost" onClick={() => openExclude(p.id, p.request_number, h)}>
                             Exclude
                           </Button>
                         ),
@@ -402,85 +667,54 @@ export function Preservations({
         </div>
       )}
 
-      <Modal
-        open={canExclude && excluding !== null}
-        title={excluding ? `Exclude ${excluding.hold.camera_name}` : ''}
-        onClose={closeExclude}
-      >
-        {excluding && (
-          <form onSubmit={submitExclude} className="space-y-4">
-            <p className="text-sm text-ink-muted">
-              Camera <span className="font-heading font-bold">{excluding.hold.camera_name}</span> at{' '}
-              {excluding.hold.site} will be excluded from this preservation hold.
-            </p>
-            <Field label="Reason" hint="Required — recorded in the audit trail.">
-              <Textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} required />
-            </Field>
-            {exclude.isError && <ErrorNote error={exclude.error} />}
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={closeExclude}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={exclude.isPending || !reason.trim()}>
-                {exclude.isPending ? 'Excluding…' : 'Exclude camera'}
-              </Button>
-            </div>
-          </form>
-        )}
-      </Modal>
+      {excluding && (
+        <ExcludeDialog
+          hold={excluding.hold}
+          pending={exclude.isPending}
+          error={exclude.error}
+          onClose={closeExclude}
+          onSubmit={(excludeReason) =>
+            exclude.mutate({
+              preservationId: excluding.preservationId,
+              requestNumber: excluding.requestNumber,
+              holdId: excluding.hold.id,
+              reason: excludeReason,
+            })
+          }
+        />
+      )}
 
-      <Modal
-        open={canExclude && releasing !== null}
-        title={releasing ? `Release preservation for ${releasing.request_number}` : ''}
-        onClose={closeRelease}
-      >
-        {releasing && (
-          <form onSubmit={submitRelease} className="space-y-4">
-            <p className="text-sm text-ink-muted">
-              Releasing deletes every Aware bookmark on this hold. The footage then
-              ages out on each camera's normal schedule and cannot be recovered.
-            </p>
-            <Field
-              label="Reason"
-              hint={reasonHint('say why the footage no longer needs to be kept')}
-            >
-              <Textarea
-                rows={3}
-                value={releaseReason}
-                onChange={(e) => setReleaseReason(e.target.value)}
-                required
-              />
-            </Field>
-            {reasonShortfall(releaseReason) && (
-              <p className="text-sm text-ink-muted">{reasonShortfall(releaseReason)}</p>
-            )}
-            <label className="flex items-start gap-2 text-sm text-ink">
-              <input
-                type="checkbox"
-                checked={attested}
-                onChange={(e) => setAttested(e.target.checked)}
-                required
-              />
-              <span>
-                I attest that no litigation hold, pending lawsuit, or reasonably
-                anticipated litigation covers this footage.
-              </span>
-            </label>
-            {release.isError && <ErrorNote error={release.error} />}
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={closeRelease}>
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={release.isPending || reasonTooShort(releaseReason) || !attested}
-              >
-                {release.isPending ? 'Releasing…' : 'Release and delete bookmarks'}
-              </Button>
-            </div>
-          </form>
-        )}
-      </Modal>
+      {releasing && (
+        <ReleaseDialog
+          preservation={releasing}
+          pending={release.isPending}
+          error={release.error}
+          onClose={closeRelease}
+          onSubmit={(releaseReason) =>
+            release.mutate({
+              preservationId: releasing.id,
+              requestNumber: releasing.request_number,
+              reason: releaseReason,
+            })
+          }
+        />
+      )}
+
+      {widening && (
+        <WidenDialog
+          preservation={widening}
+          pending={widen.isPending}
+          error={widen.error}
+          onClose={closeWiden}
+          onSubmit={(widenReason) =>
+            widen.mutate({
+              preservationId: widening.id,
+              requestNumber: widening.request_number,
+              reason: widenReason,
+            })
+          }
+        />
+      )}
     </>
   )
 }
