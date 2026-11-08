@@ -281,6 +281,21 @@ SETTINGS: tuple[SettingSpec, ...] = (
         requires=("PRR_AI_ADVISORY_ENABLED",),
     ),
     SettingSpec(
+        key="PRR_AI_AUTOMATIC_SCOPE_LETTER_ENABLED",
+        type=values.BOOLEAN,
+        default=False,
+        category=CATEGORY_ADVISORY_AI,
+        label="Draft scope letters automatically",
+        consequence=(
+            "On, when a Gmail count finishes and nothing has been pulled yet, "
+            "the system drafts the informational letter telling the requester "
+            "how many items matched and how they could narrow it. A person "
+            "approves and sends it; the system never sends it. Off, staff "
+            "write each one."
+        ),
+        requires=("PRR_AI_ADVISORY_ENABLED",),
+    ),
+    SettingSpec(
         key="PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED",
         type=values.BOOLEAN,
         default=False,

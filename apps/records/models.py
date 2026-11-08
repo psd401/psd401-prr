@@ -794,6 +794,9 @@ class VaultCountRun(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    #: When the system drafted a scope letter covering this count, so a draft
+    #: a person deletes is not drafted again for the same count.
+    scope_letter_prepared_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]

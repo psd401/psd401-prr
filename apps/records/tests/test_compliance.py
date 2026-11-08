@@ -931,12 +931,74 @@ class EstimateRevisionTests(TestCase):
         )
         self.assertEqual(
             correspondence_services.SYSTEM_PREPARED_DRAFT_KINDS,
-            frozenset({Correspondence.Kind.INTERPRETATION_ESTIMATE}),
+            frozenset(
+                {
+                    Correspondence.Kind.INTERPRETATION_ESTIMATE,
+                    Correspondence.Kind.SCOPE_CLARIFICATION,
+                }
+            ),
         )
         self.assertTrue(
             correspondence_services.SYSTEM_PREPARED_DRAFT_KINDS.isdisjoint(
                 correspondence_services.AUTOMATED_CORRESPONDENCE_KINDS
             )
+        )
+
+    def test_a_system_scope_letter_is_drafted_never_sent_or_clock_stopping(self):
+        """scope-letter-ast-guard (CIO decision, 2026-11-08).
+
+        The system may draft the scope letter after a count, but the drafting
+        path calls no approval, queue, send, state-change, estimate, or fee
+        function, and it can only produce the informational form: the
+        clarification form tolls the response period on delivery, so it stays
+        a person's choice. The officer-authored create_scope_clarification_draft
+        is still never called by it.
+        """
+        import ast
+        import inspect
+
+        from apps.records import scope_letters
+
+        source = (
+            inspect.getsource(scope_letters)
+            + inspect.getsource(tasks.prepare_scope_letters)
+            + inspect.getsource(correspondence_services.create_system_scope_letter_draft)
+        )
+        tree = ast.parse(source)
+        calls = {
+            (
+                node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else getattr(node.func, "id", "")
+            )
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+        }
+        self.assertTrue(
+            calls.isdisjoint(
+                {
+                    "approve_draft",
+                    "approve_and_send",
+                    "batch_approve_and_send",
+                    "queue_approved",
+                    "queue_automated_acknowledgment",
+                    "transition",
+                    "record_acknowledgment",
+                    "revise_estimate",
+                    "apply_deposit_gate",
+                    "create_fee_estimate_draft",
+                    "create_scope_clarification_draft",
+                }
+            ),
+            calls,
+        )
+        self.assertNotIn('"clarification"', source)
+        self.assertNotIn("'clarification'", source)
+        self.assertNotIn(
+            "form",
+            inspect.signature(
+                correspondence_services.create_system_scope_letter_draft
+            ).parameters,
         )
 
     def test_a_case_title_cannot_reach_a_requester_a_status_or_vault(self):

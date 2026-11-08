@@ -64,19 +64,30 @@ Automated estimate-kicking is a Yousoufian penalty aggravator. Never invert this
 acknowledgment/estimate asymmetry.
 
 The `scope_clarification` letter ("your request matched N items, here are three
-narrower options") is human-only for the same reason, AST-guarded by
-`scope-ast-guard` in `test_compliance`: its clarification form tolls the
-RCW 42.56.520(3) clock on delivery and its informational form explicitly does
-not, and choosing between them is a judgment with an accountable name on it.
-Only that clarification form and the original `clarification_request` may open
-the tolled CLARIFICATION status.
+narrower options") is *sent* only by a person. Since the CIO's decision of
+2026-11-08 the system may *draft* it, in its informational form only:
+`apps/records/scope_letters.prepare_scope_letters`
+(`PRR_AI_AUTOMATIC_SCOPE_LETTER_ENABLED`, an in-app setting, off by default)
+drafts it as a system-prepared draft once a Vault count has finished and
+before any records are pulled, from the latest count and the AI's reading of
+the request. `create_system_scope_letter_draft` has no `form` argument and
+always writes the informational form, which leaves the RCW 42.56.520(3) clock
+running; the clarification form tolls it on delivery, so choosing it remains a
+judgment with an accountable name on it (`create_scope_clarification_draft`,
+which no task may call: `scope-ast-guard`). `scope-letter-ast-guard` in
+`test_compliance` forbids the drafting path from calling any approve, queue,
+send, state-change, estimate, or fee function. A draft a person deletes is not
+redrafted for the same count (`VaultCountRun.scope_letter_prepared_at`). Only
+the clarification form and the original `clarification_request` may open the
+tolled CLARIFICATION status.
 
 The interpretation-and-estimate letter (#42) is drafted by the system and sent
 only by a person. `apps/records/estimate_letters.prepare_estimate_letters`
 (`PRR_AI_AUTOMATIC_ESTIMATE_LETTER_ENABLED`, an in-app setting, off by default)
 computes a `RecordsEstimate` and drafts the letter as a *system-prepared*
 draft: no author, never `automated`, and never approved, queued, or sent by the
-system. `SYSTEM_PREPARED_DRAFT_KINDS` holds only that kind, the database
+system. `SYSTEM_PREPARED_DRAFT_KINDS` holds only that kind and the
+informational scope letter above, the database
 constraint `correspondence_system_prepared_kind_allowed` holds the same line,
 and `estimate-letter-ast-guard` in `test_compliance` forbids the drafting path
 from calling any approve, queue, send, transition, estimate-revision, or

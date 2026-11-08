@@ -306,12 +306,17 @@ AUTOMATED_CORRESPONDENCE_KINDS = frozenset(
     }
 )
 
-#: The only kind the system may *draft* without an author (#42). Unlike an
-#: automated kind it is never approved or queued by the system: a Records
-#: Officer approves and sends it, and the database constraint
+#: The kinds the system may *draft* without an author: the
+#: interpretation-and-estimate letter (#42) and, since the CIO's decision of
+#: 2026-11-08, the informational scope letter after a count. Unlike an
+#: automated kind neither is ever approved or queued by the system: a person
+#: approves and sends it, and the database constraint
 #: ``correspondence_system_prepared_kind_allowed`` holds the same line.
 SYSTEM_PREPARED_DRAFT_KINDS = frozenset(
-    {Correspondence.Kind.INTERPRETATION_ESTIMATE}
+    {
+        Correspondence.Kind.INTERPRETATION_ESTIMATE,
+        Correspondence.Kind.SCOPE_CLARIFICATION,
+    }
 )
 
 REQUEST_LIFECYCLE_EFFECT_KINDS = frozenset(
@@ -711,8 +716,8 @@ def _create_draft(
     if system_prepared:
         if kind not in SYSTEM_PREPARED_DRAFT_KINDS or actor is not None or automated:
             raise PermissionDenied(
-                "Only an interpretation-and-estimate letter may be drafted by "
-                "the system, and it is never automated."
+                "Only an interpretation-and-estimate or scope letter may be "
+                "drafted by the system, and neither is ever automated."
             )
     elif automated:
         if kind not in AUTOMATED_CORRESPONDENCE_KINDS or actor is not None:
@@ -1275,6 +1280,38 @@ def create_scope_clarification_draft(
         context=_scope_clarification_context(metadata),
         metadata=metadata,
         actor=actor,
+    )
+
+
+def create_system_scope_letter_draft(
+    prr: PublicRecordsRequest,
+    *,
+    match_count: int,
+    query_summary: str,
+    narrowing_options,
+    response_by: dt.date,
+) -> Correspondence:
+    """Draft the scope letter with no author, in its informational form.
+
+    The system may draft it (CIO decision, 2026-11-08) but never send it,
+    and never in the clarification form: that form tolls the response period
+    on delivery, so choosing it stays a person's call. There is deliberately
+    no ``form`` argument. A person approves and sends the draft.
+    """
+    metadata = _validated_scope_clarification(
+        form="informational",
+        match_count=match_count,
+        query_summary=query_summary,
+        narrowing_options=narrowing_options,
+        response_by=response_by,
+    )
+    return _render_template_draft(
+        prr,
+        kind=Correspondence.Kind.SCOPE_CLARIFICATION,
+        context=_scope_clarification_context(metadata),
+        metadata=metadata,
+        actor=None,
+        system_prepared=True,
     )
 
 

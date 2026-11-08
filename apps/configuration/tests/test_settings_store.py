@@ -98,6 +98,7 @@ class RegistryTests(TestCase):
             "PRR_AI_AUTOMATIC_CASE_TITLES_ENABLED",
             "PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED",
             "PRR_AI_AUTOMATIC_ESTIMATE_LETTER_ENABLED",
+            "PRR_AI_AUTOMATIC_SCOPE_LETTER_ENABLED",
         ):
             self.assertIn("PRR_AI_ADVISORY_ENABLED", SETTINGS_BY_KEY[key].requires)
         self.assertEqual(
@@ -113,6 +114,8 @@ class RegistryTests(TestCase):
                 "PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED",
                 # Drafts a letter for an officer to approve; sends nothing.
                 "PRR_AI_AUTOMATIC_ESTIMATE_LETTER_ENABLED",
+                # Likewise: drafts the scope letter for a person to send.
+                "PRR_AI_AUTOMATIC_SCOPE_LETTER_ENABLED",
             },
         )
 
