@@ -48,3 +48,24 @@ test('reviewer-redact-workspace', async ({ page }) => {
     fullPage: false,
   })
 })
+
+// On a laptop-width window the basis form sits beside the page, not under it,
+// so choosing a basis never means scrolling past the page.
+test('reviewer-redact-workspace-laptop', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 800 })
+  await login(page, 'e2e-reviewer', 'e2e-reviewer-local-only')
+  await page.goto(`/requests/${caseNumber}/redact`)
+
+  const surface = page.getByLabel('Draw redactions on page 1')
+  await expect(surface.getByRole('img')).toBeVisible()
+  const basis = page.getByLabel('Legal basis')
+  const pageBox = await surface.boundingBox()
+  const basisBox = await basis.boundingBox()
+  if (!pageBox || !basisBox) throw new Error('The page or the basis form has no size.')
+  expect(basisBox.x).toBeGreaterThan(pageBox.x + pageBox.width - 1)
+  expect(basisBox.y).toBeLessThan(pageBox.y + pageBox.height)
+  await page.screenshot({
+    path: path.resolve('../.verification/reviewer-redact-workspace-laptop.png'),
+    fullPage: false,
+  })
+})

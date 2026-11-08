@@ -348,12 +348,14 @@ export function RedactWorkspace({ number }: { number: string }) {
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[15rem_minmax(0,1fr)_20rem]">
-      <nav aria-label="Responsive records" className="min-w-0">
+    // Page and form side by side from laptop width; the records sit in a strip
+    // above them until the window is wide enough for a third column.
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[15rem_minmax(0,1fr)_20rem]">
+      <nav aria-label="Responsive records" className="min-w-0 lg:col-span-2 xl:col-span-1">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
           {records.length} responsive {records.length === 1 ? 'record' : 'records'}
         </p>
-        <ul role="listbox" aria-label="Records to redact" className="max-h-[78vh] space-y-1 overflow-y-auto">
+        <ul role="listbox" aria-label="Records to redact" className="flex gap-2 overflow-x-auto pb-1 xl:block xl:max-h-[78vh] xl:space-y-1 xl:overflow-x-visible xl:overflow-y-auto xl:pb-0">
           {records.map((row, rowIndex) => (
             <li
               key={row.id}
@@ -361,7 +363,7 @@ export function RedactWorkspace({ number }: { number: string }) {
               aria-selected={rowIndex === index}
               tabIndex={-1}
               onClick={() => select(rowIndex)}
-              className={`cursor-pointer rounded-lg border px-3 py-2 text-sm ${
+              className={`w-56 shrink-0 cursor-pointer rounded-lg border px-3 py-2 text-sm xl:w-auto ${
                 rowIndex === index
                   ? 'border-flow bg-flow-soft text-ink'
                   : 'border-transparent text-ink hover:border-line'
@@ -460,7 +462,7 @@ export function RedactWorkspace({ number }: { number: string }) {
         )}
       </section>
 
-      <aside className="space-y-4">
+      <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
         {drawable && (
           <section className="space-y-3 rounded-xl border border-line bg-surface-raised p-4">
             <h3 className="font-heading text-base font-bold text-ink">
