@@ -1315,6 +1315,32 @@ def request_record_redaction_advisory(record_item_id, *, actor) -> AdvisoryRun:
     )
 
 
+def first_pass_progress(prr) -> dict:
+    """How far the automatic first pass has read this case's records.
+
+    A record counts as read once its responsiveness proposal is complete.
+    Superseded records are out of review and are not counted. Counts only;
+    no record or model text is returned.
+    """
+    from .models import AdvisoryRun, RecordItem
+
+    in_review = RecordItem.objects.filter(request=prr).exclude(
+        review_state=RecordItem.ReviewState.SUPERSEDED,
+    )
+    read = in_review.filter(
+        advisory_runs__kind=AdvisoryRun.Kind.RECORD_RESPONSIVENESS,
+        advisory_runs__state=AdvisoryRun.State.COMPLETE,
+    ).distinct().count()
+    return {
+        "enabled": bool(
+            runtime.get("PRR_AI_ADVISORY_ENABLED")
+            and runtime.get("PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED")
+        ),
+        "read": read,
+        "total": in_review.count(),
+    }
+
+
 def request_automatic_record_advisory(
     record_item_id,
     *,

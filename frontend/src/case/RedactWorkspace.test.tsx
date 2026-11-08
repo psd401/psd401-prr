@@ -311,3 +311,28 @@ it('does not count a remembered basis that is no longer active', async () => {
   await drawBox()
   expect(await screen.findByRole('button', { name: 'Add redaction' })).toBeDisabled()
 })
+
+it('opens on the first AI suggestion so Enter accepts it', async () => {
+  const { posts, user } = setup({ proposals: [PROPOSAL] })
+  expect(await screen.findByRole('button', { name: 'Accept suggestion' })).toBeInTheDocument()
+  ;(document.activeElement as HTMLElement | null)?.blur()
+  await user.keyboard('{Enter}')
+  await waitFor(() => expect(posts.at(-1)?.url).toBe('/api/staff/redaction-proposals/prop-1/accept/'))
+})
+
+it('x goes to the reason for dismissing the suggestion', async () => {
+  const { user } = setup({ proposals: [PROPOSAL] })
+  await screen.findByRole('button', { name: 'Accept suggestion' })
+  ;(document.activeElement as HTMLElement | null)?.blur()
+  await user.keyboard('x')
+  expect(screen.getByLabelText(/Why dismiss it/)).toHaveFocus()
+})
+
+it('Esc sets a suggestion aside instead of loading it again', async () => {
+  const { user } = setup({ proposals: [PROPOSAL] })
+  await screen.findByRole('button', { name: 'Accept suggestion' })
+  ;(document.activeElement as HTMLElement | null)?.blur()
+  await user.keyboard('{Escape}')
+  expect(screen.getByRole('button', { name: 'Add redaction' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Accept suggestion' })).not.toBeInTheDocument()
+})

@@ -268,7 +268,9 @@ SETTINGS: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED",
         type=values.BOOLEAN,
-        default=False,
+        # On by default (CIO decision, 2026-11-08): the first pass is how
+        # review and redaction start. It still applies nothing.
+        default=True,
         category=CATEGORY_ADVISORY_AI,
         label="Prepare record proposals automatically",
         consequence=(

@@ -196,6 +196,7 @@ class CaseWorkspaceReadModelTests(TestCase):
                 "matter_kind",
                 "next_due",
                 "next_due_basis",
+                "ai_first_pass",
             },
         )
         # The stage rail (#45) is server-derived: seven stages in order, each
@@ -283,6 +284,62 @@ class CaseWorkspaceReadModelTests(TestCase):
         self.assertEqual(liaison["summary"], "Immutable request for board records.")
         self.prr.refresh_from_db()
         self.assertEqual(self.prr.description, "Immutable request for board records.")
+
+    @override_settings(
+        PRR_AI_ADVISORY_ENABLED=True,
+        PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED=True,
+    )
+    def test_summary_counts_how_many_records_the_ai_has_read(self):
+        case = PublicRecordsRequest.objects.create(
+            requester=self.requester,
+            description="Every email about the bus route.",
+            status=RequestStatus.GATHERING,
+        )
+
+        def record(name, **extra):
+            return RecordItem.objects.create(
+                request=case,
+                source_system="google_vault_gmail",
+                original_filename=name,
+                storage_key=f"records/{name}",
+                content_length=100,
+                content_type="application/pdf",
+                sha256=name[0] * 64,
+                **extra,
+            )
+
+        read = record("a.pdf")
+        waiting = record("b.pdf")
+        record("c.pdf", review_state=RecordItem.ReviewState.SUPERSEDED)
+        for item, state in (
+            (read, AdvisoryRun.State.COMPLETE),
+            (waiting, AdvisoryRun.State.PENDING),
+        ):
+            AdvisoryRun.objects.create(
+                kind=AdvisoryRun.Kind.RECORD_RESPONSIVENESS,
+                trigger=AdvisoryRun.Trigger.AUTOMATIC,
+                request=case,
+                record_item=item,
+                model_identifier="district-approved-model-v1",
+                input_sha256="0" * 64,
+                state=state,
+            )
+        self.client.force_login(self.reviewer)
+
+        payload = self.client.get(
+            f"/api/staff/requests/{case.number}/workspace-summary/"
+        ).json()
+
+        # Superseded records are out of review, so they are not counted.
+        self.assertEqual(payload["ai_first_pass"], {"enabled": True, "read": 1, "total": 2})
+
+    @override_settings(PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED=False)
+    def test_summary_says_when_the_ai_first_pass_is_off(self):
+        self.client.force_login(self.officer)
+
+        payload = self.get_as(self.officer, "workspace-summary").json()
+
+        self.assertFalse(payload["ai_first_pass"]["enabled"])
 
     def test_summary_without_a_model_answer_is_the_opening_of_the_request(self):
         long_text = "Every email about the bus route change. " * 20

@@ -87,6 +87,9 @@ export function RedactWorkspace({ number }: { number: string }) {
   const [rejectReason, setRejectReason] = useState('')
   const [removeTarget, setRemoveTarget] = useState<number | null>(null)
   const [removeReason, setRemoveReason] = useState('')
+  // Suggestions already accepted, dismissed, or set aside with Esc on this
+  // record, so the next one opens instead of the same one again.
+  const [passed, setPassed] = useState<string[]>([])
 
   const list = useQuery({
     queryKey: ['record-items', 'redact', number],
@@ -134,14 +137,16 @@ export function RedactWorkspace({ number }: { number: string }) {
     (row) => row.page_number === pageNumber && row.id !== proposalId,
   )
   const secondReviewDone = !record?.second_review_required || Boolean(record.second_reviewed_at)
+  const nextSuggestion = suggestions.find((row) => !passed.includes(row.id))
 
-  function clearDraft() {
+  const clearDraft = useCallback(() => {
+    if (proposalId) setPassed((ids) => (ids.includes(proposalId) ? ids : [...ids, proposalId]))
     setDraftBox(null)
     setDragStart(null)
     setProposalId(null)
     setRejectReason('')
     setExplanation('')
-  }
+  }, [proposalId])
 
   const select = useCallback((nextIndex: number) => {
     const next = records[nextIndex]
@@ -156,6 +161,7 @@ export function RedactWorkspace({ number }: { number: string }) {
     setRejectReason('')
     setExplanation('')
     setRemoveTarget(null)
+    setPassed([])
   }, [params, records, setParams])
 
   function refresh() {
@@ -280,6 +286,8 @@ export function RedactWorkspace({ number }: { number: string }) {
         setPageNumber((value) => value - 1)
         setDraftBox(null)
         setProposalId(null)
+      } else if (event.key === 'x' && proposalId) {
+        document.getElementById('dismiss-reason')?.focus()
       } else if (event.key === 'Escape') {
         clearDraft()
       } else {
@@ -289,7 +297,14 @@ export function RedactWorkspace({ number }: { number: string }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [canAdd, index, pageCount, pageNumber, records.length, select, submit])
+  }, [canAdd, clearDraft, index, pageCount, pageNumber, proposalId, records.length, select, submit])
+
+  // The AI's boxes come first: with nothing in hand, the next suggestion
+  // opens on its page, ready for Enter (accept) or x (dismiss with a reason).
+  useEffect(() => {
+    if (proposalId || draftBox || dragStart || !nextSuggestion) return
+    takeSuggestion(nextSuggestion)
+  }, [draftBox, dragStart, nextSuggestion, proposalId])
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     // Captured so a release outside the page still ends the drag here.
@@ -500,6 +515,7 @@ export function RedactWorkspace({ number }: { number: string }) {
               <div className="space-y-2 border-t border-line pt-3">
                 <Field label="Why dismiss it" hint={reasonHint('why this suggestion is wrong')}>
                   <Textarea
+                    id="dismiss-reason"
                     rows={2}
                     minLength={MIN_REASON_LENGTH}
                     value={rejectReason}
