@@ -54,6 +54,16 @@ IAM_SCOPE: Final = "https://www.googleapis.com/auth/cloud-platform"
 IMPERSONATION_LIFETIME_SECONDS: Final = 3600
 
 
+def is_rate_limited(exc: BaseException) -> bool:
+    """Vault refused because requests came faster than its quota (HTTP 429).
+
+    Production, 2026-11-08: the third and fourth exports created within a
+    minute came back 429 "Quota exceeded ... Export Writes". That is a reason
+    to wait, not evidence the work cannot be done.
+    """
+    return getattr(getattr(exc, "resp", None), "status", None) == 429
+
+
 class VaultUnavailable(RuntimeError):
     """Sanitized Vault authentication or provider configuration failure."""
 

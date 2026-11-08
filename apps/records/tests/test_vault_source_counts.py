@@ -12,12 +12,13 @@ reason, and the run completes only when every source has.
 
 import datetime as dt
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from celery import Task
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from googleapiclient.errors import HttpError
 
 from apps.audit.models import AuditLog
 from apps.records import tasks as record_tasks
@@ -26,6 +27,7 @@ from apps.records.vault_counts import (
     advance_vault_count,
     fail_vault_count,
     request_vault_count,
+    runs_waiting_on_sources,
     source_count_summary,
     start_vault_count,
 )
@@ -36,6 +38,13 @@ VAULT = {
     "PRR_VAULT_IMPERSONATION_TARGET": "prr-vault@psd401-prr-identity.iam.gserviceaccount.com",
     "PRR_GOOGLE_HOSTED_DOMAIN": "psd401.net",
 }
+
+
+def rate_limited():
+    """Vault's answer when exports are created faster than its quota allows."""
+    resp = MagicMock(status=429, reason="Too Many Requests")
+    return HttpError(resp, b"Quota exceeded for quota metric 'Export Writes'")
+
 
 MAIL_DONE = {
     "name": "operations/mail",
@@ -383,3 +392,134 @@ class SummaryTests(_Fixture):
         )
         self.assertEqual(source_count_summary(run)[0]["state"], "unavailable")
         self.assertEqual(source_count_summary(run)[0]["reason"], "Google Vault could not complete.")
+
+
+@patch("apps.records.vault_counts.vault.delete_export")
+@patch("apps.records.vault_counts.vault.get_export")
+@patch("apps.records.vault_counts.vault.ensure_count_export")
+class RateLimitTests(_Fixture):
+    """Vault limits how fast exports are created (HTTP 429, production
+    2026-11-08: the third and fourth count-only exports in a minute were
+    refused). A refused source waits and is retried; it is not unavailable."""
+
+    def waiting_run(self, started_at=None):
+        return self.make_run(
+            state=VaultCountRun.State.RUNNING,
+            vault_matter_id="matter-1",
+            operation_name="operations/mail",
+            source_counts={
+                "mail": {"state": "counted", "count": 40},
+                "drive": {"state": "counted", "count": 7, "method": "export",
+                          "export_id": "count-export-0", "export_deleted": True},
+                "chat": {"state": "counting", "method": "export", "export_id": None,
+                         "waiting": "rate_limited", "attempts": 1,
+                         "started_at": (started_at or timezone.now()).isoformat()},
+            },
+        )
+
+    @patch("apps.records.tasks.execute_vault_count.delay")
+    @patch("apps.records.vault_counts.vault.ensure_matter", return_value="matter-1")
+    @patch("apps.records.vault_counts.vault.start_mail_count", return_value=MAIL_DONE)
+    def test_a_rate_limited_source_waits_instead_of_being_unavailable(
+        self, _mail, _matter, _delay, ensure_export, _get, _delete,
+    ):
+        ensure_export.side_effect = lambda source, *a, **k: (
+            "count-drive" if source == "drive" else (_ for _ in ()).throw(rate_limited())
+        )
+        run = self.make_run()
+
+        self.assertFalse(start_vault_count(run.pk))
+
+        run.refresh_from_db()
+        self.assertEqual(run.state, VaultCountRun.State.RUNNING)
+        chat = run.source_counts["chat"]
+        self.assertEqual((chat["state"], chat["export_id"], chat["waiting"]),
+                         ("counting", None, "rate_limited"))
+        self.assertNotIn("export_deleted", chat)
+        summary = {row["source"]: row for row in source_count_summary(run)}
+        self.assertEqual(summary["chat"]["state"], "counting")
+        self.assertIn(run.pk, list(runs_waiting_on_sources()))
+
+    def test_the_next_check_starts_the_waiting_export(self, ensure_export, get_export, _delete):
+        ensure_export.return_value = "count-export-1"
+        run = self.waiting_run()
+
+        self.assertFalse(advance_vault_count(run.pk))
+
+        run.refresh_from_db()
+        chat = run.source_counts["chat"]
+        self.assertEqual((chat["state"], chat["export_id"]), ("counting", "count-export-1"))
+        self.assertNotIn("waiting", chat)
+        get_export.assert_not_called()
+        self.assertEqual(ensure_export.call_args.args[0], "chat")
+
+    def test_still_rate_limited_keeps_waiting_and_counts_the_attempt(
+        self, ensure_export, _get, _delete,
+    ):
+        ensure_export.side_effect = rate_limited()
+        run = self.waiting_run()
+
+        self.assertFalse(advance_vault_count(run.pk))
+
+        run.refresh_from_db()
+        self.assertEqual(run.source_counts["chat"]["attempts"], 2)
+        self.assertEqual(run.state, VaultCountRun.State.RUNNING)
+
+    def test_waiting_past_the_timeout_is_unavailable(self, ensure_export, _get, delete_export):
+        ensure_export.side_effect = rate_limited()
+        run = self.waiting_run(started_at=timezone.now() - dt.timedelta(hours=4))
+
+        self.assertTrue(advance_vault_count(run.pk))
+
+        run.refresh_from_db()
+        self.assertEqual(run.state, VaultCountRun.State.COMPLETE)
+        self.assertEqual(
+            run.source_counts["chat"]["reason"],
+            "Google Vault was too busy to count Chat messages; count again later.",
+        )
+        delete_export.assert_not_called()
+
+    @patch("apps.records.tasks.execute_vault_count.delay")
+    @patch("apps.records.vault_counts.vault.ensure_matter", return_value="matter-1")
+    @patch("apps.records.vault_counts.vault.start_mail_count", return_value=MAIL_DONE)
+    def test_any_other_refusal_is_still_unavailable(
+        self, _mail, _matter, _delay, ensure_export, _get, _delete,
+    ):
+        resp = MagicMock(status=403, reason="Forbidden")
+        ensure_export.side_effect = HttpError(resp, b"denied")
+        run = self.make_run()
+        self.assertTrue(start_vault_count(run.pk))
+        run.refresh_from_db()
+        self.assertEqual(run.source_counts["chat"]["state"], "unavailable")
+
+
+class CollectionRateLimitTests(TestCase):
+    """A pull starts Gmail, Drive, and Chat exports together, so Vault's
+    export-creation quota can refuse one. That refusal gets its own, longer
+    retry budget; any other provider fault keeps the short one."""
+
+    def run_task(self, error):
+        task = cast(Task, record_tasks.execute_vault_collection)
+        with patch(
+            "apps.records.vault_collections.start_vault_collection", side_effect=error,
+        ) as start, patch("apps.records.vault_collections.fail_vault_collection") as fail:
+            task.apply(args=[41])
+        return start.call_count, fail
+
+    def test_a_rate_limited_pull_keeps_trying_much_longer(self):
+        attempts, fail = self.run_task(rate_limited())
+        self.assertEqual(attempts, record_tasks.VAULT_RATE_LIMIT_RETRIES + 1)
+        fail.assert_called_once()
+
+    def test_any_other_fault_keeps_the_short_budget(self):
+        attempts, fail = self.run_task(RuntimeError("provider down"))
+        self.assertEqual(attempts, record_tasks.VAULT_FAULT_RETRIES + 1)
+        fail.assert_called_once()
+
+    def test_rate_limit_waits_do_not_use_up_the_fault_budget(self):
+        # Five refusals, then a different fault: that fault still gets its
+        # full short budget rather than failing the pull at once.
+        errors = [rate_limited() for _ in range(5)] + [RuntimeError("503")] * 10
+        attempts, fail = self.run_task(errors)
+        self.assertEqual(attempts, 5 + record_tasks.VAULT_FAULT_RETRIES + 1)
+        fail.assert_called_once()

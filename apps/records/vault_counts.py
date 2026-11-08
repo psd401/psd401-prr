@@ -544,6 +544,8 @@ def _could_not_count(source: str) -> dict:
     return _unavailable(f"Google Vault could not count {_ITEM_NOUNS[source]}.")
 
 
+
+
 def _start_other_sources(run: VaultCountRun) -> None:
     counts = dict(run.source_counts or {})
     for source in run_sources(run):
@@ -569,7 +571,12 @@ def _count_export_name(run: VaultCountRun, source: str) -> str:
     return f"{run.request.number} — count-only {run.pk} {vault.SOURCE_LABELS[source]}"
 
 
-def _start_count_export(run: VaultCountRun, source: str) -> dict:
+def _start_count_export(run: VaultCountRun, source: str, waiting: dict | None = None) -> dict:
+    """Start one count-only export, or wait if Vault is rate limiting.
+
+    ``waiting`` is the source's earlier rate-limited entry, if any: its first
+    attempt time bounds how long the source may wait (COUNT_EXPORT_TIMEOUT).
+    """
     try:
         export_id = vault.ensure_count_export(
             source,
@@ -579,7 +586,18 @@ def _start_count_export(run: VaultCountRun, source: str) -> dict:
             name=_count_export_name(run, source),
             **_search_kwargs(run),
         )
-    except Exception:  # noqa: BLE001 - a source that cannot count is reported unavailable
+    except Exception as exc:  # noqa: BLE001 - a source that cannot count is reported unavailable
+        if vault.is_rate_limited(exc):
+            # No export exists yet, so there is nothing to delete; the next
+            # check (the export poller) tries again.
+            return {
+                "state": COUNTING,
+                "method": "export",
+                "export_id": None,
+                "waiting": "rate_limited",
+                "attempts": int((waiting or {}).get("attempts") or 0) + 1,
+                "started_at": (waiting or {}).get("started_at") or timezone.now().isoformat(),
+            }
         # Includes a permission refusal: the identity may lack Drive or Chat
         # export rights. Provider text can echo the query: never log it.
         logger.warning(
@@ -627,6 +645,12 @@ def _advance_source(run: VaultCountRun, source: str, entry: dict) -> dict:
     if entry.get("state") != COUNTING:
         # Settled; only a delete that failed earlier is left to do.
         return _delete_count_export(run, entry)
+    if entry.get("waiting") == "rate_limited":
+        if _timed_out(entry, COUNT_EXPORT_TIMEOUT):
+            return {**entry, **_unavailable(
+                f"Google Vault was too busy to count {_ITEM_NOUNS[source]}; count again later."
+            )}
+        return _start_count_export(run, source, waiting=entry)
     late = _unavailable(
         f"Google Vault did not finish counting {_ITEM_NOUNS[source]} in time."
     )
