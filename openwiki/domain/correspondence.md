@@ -3,7 +3,7 @@ type: Domain
 title: Requester Correspondence
 description: Requester correspondence for PSD401 PRR - immutable outbound and inbound records, delivery jobs and attempts, in-process Gmail transport with polling and reconciliation, forwarded-mail attribution to the original sender, MIME parsing and quarantine, the officer inbound review queues with human-only manual match and rematch, template versions, the matter-kind send guard, the non-statutory submission receipt, and capped batch drafting and sending of closure notices.
 tags: [domain, correspondence, legal-records, transport, mime]
-timestamp: 2026-10-07T22:37:58-07:00
+timestamp: 2026-11-08T00:00:00Z
 ---
 
 # Requester Correspondence
@@ -278,12 +278,47 @@ effect. `SCOPE_CLARIFICATION_FORMS` in `apps/correspondence/services.py` allows 
   delivery evidence. An informational scope letter is refused at that gate, so it can never
   toll the clock.
 
-Drafting is human-only. `create_scope_clarification_draft()` is restricted to Records
-Officers, and the staff endpoint `drafts/scope-clarification` returns a
+Drafting of the clarification form is human-only. `create_scope_clarification_draft()` is
+restricted to Records Officers, and the staff endpoint `drafts/scope-clarification` returns a
 `human_only_handoff` for agents. The capability `correspondence.draft_scope_clarification`
 is registered in [agent parity](../architecture/agent-parity.md). The
 [compliance](compliance.md#human-only-actions-and-ast-guards) guard table lists the
 letter as an accountable judgment.
+
+The system may draft only the informational form, and only as a system-prepared draft.
+`apps/records/scope_letters.py` (`prepare_scope_letters`, scheduled as `prepare-scope-letters`
+every ten minutes in [background jobs](../architecture/background-jobs.md#beat-schedule))
+selects open `public_records` requests that have a completed request-intent run, a finished
+Vault count not yet covered by a letter, no running scoping session, no Vault collection task,
+and no unsent scope letter. For each one it calls `create_system_scope_letter_draft()` in
+`apps/correspondence/services.py`. That function has no `form` parameter and always writes the
+informational form, with no author. A person approves and sends the draft; the system never
+does. The switch is `PRR_AI_AUTOMATIC_SCOPE_LETTER_ENABLED`, which is off by default and
+requires `PRR_AI_ADVISORY_ENABLED` (see [advisory AI](advisory-ai.md#automatic-runs)). A draft
+that a person deletes is not drafted again for the same count; the count is marked with
+`VaultCountRun.scope_letter_prepared_at`. The database constraint
+`correspondence_system_prepared_kind_allowed` (migration `0031_system_prepared_scope_letter`)
+allows a system-prepared draft only for `interpretation_estimate` and `scope_clarification`, and
+only when it is outbound and not automated.
+
+```mermaid
+flowchart TD
+    A["prepare-scope-letters beat, every 10 minutes"] --> B{"Advisory and scope-letter switches on"}
+    B -->|no| Z["Draft nothing"]
+    B -->|yes| C["ready_requests: public_records, intent run complete, unlettered finished count, no running scoping, no Vault collection, no unsent scope letter"]
+    C --> D["Lock the request and re-check readiness"]
+    D --> E["create_system_scope_letter_draft: informational form, system-prepared, no author"]
+    E --> F["Mark finished counts with scope_letter_prepared_at"]
+```
+
+*The automatic scope-letter path. It stops at a draft; approval and sending stay with a person.*
+
+Focused tests: `apps/correspondence/tests/test_scope_letter_draft.py` covers one draft per
+finished count (`test_a_finished_count_gets_one_informational_draft_and_only_one`), a deleted
+draft staying deleted (`test_a_deleted_draft_stays_deleted_until_a_new_count_finishes`),
+no draft while scoping or collection is running, and the switch being off. The compliance guard
+`test_a_system_scope_letter_is_drafted_never_sent_or_clock_stopping` in
+`apps/records/tests/test_compliance.py` checks the drafting path for approve, send, and state calls.
 
 The input contract is validated before any text is rendered. The request must give a
 non-negative whole-number count and a plain-language summary of 10 to 500 characters. It may

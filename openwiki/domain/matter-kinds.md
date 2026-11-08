@@ -87,6 +87,8 @@ acknowledgment, clarification request, scope clarification, estimate revision,
 interpretation and estimate, fee estimate, no-records closure, nonpayment closure,
 third-party notice, and denial. The interpretation-and-estimate letter is drafted by
 the system and approved by a Records Officer, as described in [estimates](estimates.md).
+The informational scope letter is drafted by the system for `public_records` cases only
+and is likewise approved by a person ([correspondence](correspondence.md#scope-conversation-letter)).
 A FERPA matter may still send letters that make no RCW assertion.
 
 ## Enforcement status

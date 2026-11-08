@@ -3,11 +3,11 @@ type: Domain
 title: Advisory AI Proposals
 description: The advisory-only Amazon Bedrock features - request intent, case titles, intake classification (new request, follow-up, duplicate, related, non-request, spam), record responsiveness, and grounded redaction candidates - their proposal-only boundary, persistence (AdvisoryRun, AdvisoryFeedback, and RedactionProposal), switches, per-kind models, prerequisites, and what they may never change. Start here before touching any advisory or model-facing code.
 tags: [domain, advisory-ai, bedrock, redaction, responsiveness, intake-classification, safety]
-timestamp: 2026-11-04T00:00:00Z
+timestamp: 2026-11-08T00:00:00Z
 openwiki:
   roles: [domain, integration, architecture]
   change_kinds: [advisory-ai, model-provider, redaction-proposal, automatic-run, intake-classification]
-  source_paths: [apps/records/advisory_ai.py, apps/records/redaction_ai.py, apps/records/models.py, apps/records/intake.py, apps/records/tasks.py, apps/records/agreement.py, apps/records/review.py, apps/api/advisory.py, apps/api/resources/requests.py, apps/api/resources/advisory_agreement.py, apps/configuration/registry.py, apps/configuration/prerequisites.py, infra/cdk/lib/advisory-bedrock.ts, frontend/src/case/IntakeClassificationCard.tsx, frontend/src/pages/AiAgreement.tsx, apps/records/review_batches.py, docs/advisory-ai.md]
+  source_paths: [apps/records/advisory_ai.py, apps/records/redaction_ai.py, apps/records/models.py, apps/records/intake.py, apps/records/tasks.py, apps/records/agreement.py, apps/records/review.py, apps/records/scope_letters.py, apps/api/advisory.py, apps/api/resources/requests.py, apps/api/resources/advisory_agreement.py, apps/configuration/registry.py, apps/configuration/prerequisites.py, infra/cdk/lib/advisory-bedrock.ts, frontend/src/case/IntakeClassificationCard.tsx, frontend/src/pages/AiAgreement.tsx, apps/records/review_batches.py, docs/advisory-ai.md]
   symbols: [AdvisoryRun, AdvisoryFeedback, RedactionProposal, RedactionProposalDecision, ReviewDecision, request_request_intent_advisory, request_case_title_advisory, request_intake_classification, defer_automatic_intake_classification, request_record_responsiveness_advisory, request_record_redaction_advisory, request_automatic_record_advisory, defer_automatic_record_advisory, execute_advisory_run, invoke_advisory_model, prepare_record_review_advisories, INTAKE_LABELS, advisory_intake, agreement_report, latest_suggestion_runs, annotate_latest_suggestion, confidence_band, AdvisoryAgreementViewSet]
   test_paths: [apps/records/tests/test_advisory_ai.py, apps/records/tests/test_automatic_record_advisory.py, apps/records/tests/test_redaction_ai.py, apps/records/tests/test_case_titles.py, apps/records/tests/test_intake_classification.py, apps/records/tests/test_scope_conversation.py, apps/records/tests/test_verify_advisory_command.py, apps/records/tests/test_review_agreement.py, apps/api/tests/test_advisory_ai.py, apps/api/tests/test_redaction_ai.py]
   invariants:
@@ -195,8 +195,24 @@ and each requires `PRR_AI_ADVISORY_ENABLED`:
   `defer_automatic_intake_classification()`, which queues nothing unless this
   switch and `PRR_AI_ADVISORY_ENABLED` are both on. A failure to queue is logged
   without request text, and the case simply has no label.
+- `PRR_AI_AUTOMATIC_SCOPE_LETTER_ENABLED`. After a Vault count finishes and before any
+  records are pulled, the system may draft the informational scope letter. It drafts only.
+  The drafting path is in [correspondence](correspondence.md#scope-conversation-letter)
+  (`apps/records/scope_letters.py`), and it uses this proposal's narrowing options. It does not
+  queue or send anything, and it never writes the clarification form.
 
-Every switch defaults off. None is an environment variable. The Application
+Every switch defaults off except `PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED`. That switch is the
+AI's first pass on every record, and it ships on (CIO decision, 2026-11-08). The registry
+(`apps/configuration/registry.py`) sets its default to `True`, and
+`apps/configuration/tests/test_settings_store.py` asserts it is the only default-on boolean.
+Staff see the first pass as "AI has read N of M records" in the case workspace summary
+(`ai_first_pass`, built by `first_pass_progress()` in `apps/records/advisory_ai.py` and shaped by
+`CaseWorkspaceFirstPassSerializer` in `apps/api/resources/requests.py`; `apps/api/tests/test_case_workspace.py` asserts the
+enabled, read, and total values and the off state). The first pass applies nothing. A
+deployment that already stored the old "off" value keeps it until an Application Admin
+changes it.
+
+None of the switches is an environment variable. The Application
 Admin sets it on Configuration > District settings with a written reason, and the
 change takes effect without a redeploy.
 
@@ -294,3 +310,4 @@ catalogued as human-confirmation or human-only), [Case workspace](case-workspace
 (where the title and the Next due column appear). The intent advisory's district
 input comes from the [District knowledge pack](knowledge-pack.md), and candidate models
 for these kinds are scored offline in [advisory model comparison](advisory-evaluation.md).
+.
