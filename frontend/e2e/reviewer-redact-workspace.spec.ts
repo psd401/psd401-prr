@@ -64,6 +64,14 @@ test('reviewer-redact-workspace-laptop', async ({ page }) => {
   if (!pageBox || !basisBox) throw new Error('The page or the basis form has no size.')
   expect(basisBox.x).toBeGreaterThan(pageBox.x + pageBox.width - 1)
   expect(basisBox.y).toBeLessThan(pageBox.y + pageBox.height)
+  // The records are a strip above the page here, not a column beside it.
+  const stripBox = await page.getByRole('navigation', { name: 'Responsive records' }).boundingBox()
+  if (!stripBox) throw new Error('The records strip has no size.')
+  expect(stripBox.y + stripBox.height).toBeLessThanOrEqual(pageBox.y)
+  // The sticky form never runs past the bottom of the window.
+  const formBox = await page.getByRole('complementary', { name: 'Redaction tools' }).boundingBox()
+  if (!formBox) throw new Error('The form column has no size.')
+  expect(formBox.height).toBeLessThanOrEqual(800)
   await page.screenshot({
     path: path.resolve('../.verification/reviewer-redact-workspace-laptop.png'),
     fullPage: false,

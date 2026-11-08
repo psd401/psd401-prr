@@ -347,9 +347,9 @@ export function RedactWorkspace({ number }: { number: string }) {
     )
   }
 
+  // Page and form side by side from laptop width; the records sit in a strip
+  // above them until the window is wide enough for a third column.
   return (
-    // Page and form side by side from laptop width; the records sit in a strip
-    // above them until the window is wide enough for a third column.
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[15rem_minmax(0,1fr)_20rem]">
       <nav aria-label="Responsive records" className="min-w-0 lg:col-span-2 xl:col-span-1">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
@@ -462,7 +462,7 @@ export function RedactWorkspace({ number }: { number: string }) {
         )}
       </section>
 
-      <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+      <aside aria-label="Redaction tools" className="space-y-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
         {drawable && (
           <section className="space-y-3 rounded-xl border border-line bg-surface-raised p-4">
             <h3 className="font-heading text-base font-bold text-ink">
