@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('records', '0060_intake_auto_application'),
+        ('records', '0061_vaultcountrun_scope_letter_prepared_at'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

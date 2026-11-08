@@ -81,7 +81,7 @@ def _ready():
             Exists(
                 CollectionTask.objects.filter(
                     request=OuterRef("pk"),
-                    kind__in=[CollectionTask.Kind.VAULT_MAIL, CollectionTask.Kind.VAULT_DRIVE],
+                    kind__in=CollectionTask.VAULT_KINDS,
                 )
             )
         )
