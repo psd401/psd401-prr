@@ -48,3 +48,34 @@ test('reviewer-redact-workspace', async ({ page }) => {
     fullPage: false,
   })
 })
+
+// On a laptop-width window the basis form sits beside the page, not under it,
+// so choosing a basis never means scrolling past the page.
+test('reviewer-redact-workspace-laptop', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 800 })
+  await login(page, 'e2e-reviewer', 'e2e-reviewer-local-only')
+  await page.goto(`/requests/${caseNumber}/redact`)
+
+  const surface = page.getByLabel('Draw redactions on page 1')
+  await expect(surface.getByRole('img')).toBeVisible()
+  const basis = page.getByLabel('Legal basis')
+  const pageBox = await surface.boundingBox()
+  const basisBox = await basis.boundingBox()
+  if (!pageBox || !basisBox) throw new Error('The page or the basis form has no size.')
+  expect(basisBox.x).toBeGreaterThan(pageBox.x + pageBox.width - 1)
+  expect(basisBox.y).toBeLessThan(pageBox.y + pageBox.height)
+  // The records are a strip above the page here, not a column beside it.
+  const stripBox = await page.getByRole('navigation', { name: 'Responsive records' }).boundingBox()
+  if (!stripBox) throw new Error('The records strip has no size.')
+  expect(stripBox.y + stripBox.height).toBeLessThanOrEqual(pageBox.y)
+  // On a short window the sticky tools column is taller than the window would
+  // allow, so it scrolls inside itself rather than running off the bottom.
+  await page.setViewportSize({ width: 1200, height: 500 })
+  const tools = page.getByRole('complementary', { name: 'Redaction tools' })
+  await expect.poll(async () => (await tools.boundingBox())?.height ?? 0).toBeLessThanOrEqual(500)
+  expect(await tools.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true)
+  await page.screenshot({
+    path: path.resolve('../.verification/reviewer-redact-workspace-laptop.png'),
+    fullPage: false,
+  })
+})
