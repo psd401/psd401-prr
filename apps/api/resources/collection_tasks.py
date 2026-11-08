@@ -48,6 +48,7 @@ class VaultIngestProgressSerializer(serializers.ModelSerializer):
 SOURCE_LABELS = {
     CollectionTask.Kind.VAULT_MAIL: "Google Workspace (Gmail)",
     CollectionTask.Kind.VAULT_DRIVE: "Google Workspace (Drive)",
+    CollectionTask.Kind.VAULT_CHAT: "Google Workspace (Chat)",
     CollectionTask.Kind.MANUAL: "Manual / department",
 }
 
@@ -154,10 +155,7 @@ class CollectionTaskSerializer(serializers.ModelSerializer):
                 {"state": "Ingesting is managed by the Vault export poller."}
             )
         instance = self.instance
-        vault_kinds = {
-            CollectionTask.Kind.VAULT_MAIL,
-            CollectionTask.Kind.VAULT_DRIVE,
-        }
+        vault_kinds = set(CollectionTask.VAULT_KINDS)
         kind = attrs.get("kind", instance.kind if instance else CollectionTask.Kind.MANUAL)
         if instance is None and kind in vault_kinds:
             raise serializers.ValidationError(

@@ -6,6 +6,7 @@ import { useSearchParams } from 'react-router'
 import { api, unwrap, type Page } from '../api/client'
 import type { StaffRole } from '../api/auth'
 import { pacificDateString } from '../date'
+import { isVaultKind } from '../vaultSources'
 import {
   Badge,
   Button,
@@ -123,6 +124,7 @@ const STATE_TABS = [{ value: '', label: 'All' }, ...STATES]
 const KIND_LABELS: Record<string, string> = {
   vault_mail: 'Vault — Gmail',
   vault_drive: 'Vault — Drive',
+  vault_chat: 'Vault — Chat',
   manual: 'Manual / Department',
 }
 
@@ -132,7 +134,7 @@ function isPastDue(dueDate: string | null, state: string): boolean {
 }
 
 function isVaultTask(task: CollectionTask): boolean {
-  return task.kind === 'vault_mail' || task.kind === 'vault_drive'
+  return isVaultKind(task.kind)
 }
 
 export function Tasks({
@@ -643,7 +645,7 @@ export function Tasks({
               </section>
             )}
 
-            {canManageTask && selected.kind === 'vault_mail' && selected.state === 'complete' && (
+            {canManageTask && isVaultKind(selected.kind) && selected.state === 'complete' && (
               <section className="rounded-xl border border-line p-4">
                 <p className="font-heading text-sm font-bold text-ink">
                   Supersede this collection

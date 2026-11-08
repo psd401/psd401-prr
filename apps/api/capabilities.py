@@ -99,15 +99,19 @@ AGENT_CONSTRAINT_DEFINITIONS = {
         "an empty custodian list never silently widens a search."
     ),
     "no_export_or_hold": (
-        "The operation may create a Vault matter container and count operation, but no hold, export, saved query, collection task, or legal outcome."
+        "The operation may create a Vault matter container, a Gmail count operation, and, for Drive and Chat "
+        "(which Vault's count operation does not support), a count-only export that is never downloaded and is "
+        "deleted once its count is read; but no hold, collection export, saved query, collection task, record, "
+        "or legal outcome."
     ),
     "reviewed_vault_count": (
         "Collection must use the exact completed count input digest the "
         "Records Officer reviewed and confirmed."
     ),
     "targeted_hold_before_export": (
-        "Named-account Gmail collection places or reuses the targeted Vault "
-        "hold before starting the export; an all-account export is explicit "
+        "Named-account collection places or reuses the targeted Vault hold "
+        "before starting each export: Gmail always, Drive and Chat when a "
+        "person started the collection; an all-account export is explicit "
         "and does not claim an organization-wide hold."
     ),
     "append_only_audit": (
@@ -584,7 +588,7 @@ CAPABILITIES = (
     ),
     _capability(
         "requests.vault_counts.read",
-        "Read the latest human-scoped Google Vault Gmail count and its provenance.",
+        "Read the latest human-scoped Google Vault count, with a total per source (Gmail, Drive, Chat) and overall, and its provenance.",
         "GET",
         "/api/staff/requests/{number}/vault-counts/",
         ["/requests/:number/scope"],
@@ -592,7 +596,7 @@ CAPABILITIES = (
     ),
     _capability(
         "requests.vault_counts.request",
-        "Count possible Gmail messages for human-approved terms, an explicit district-account scope, and dates without exporting or applying a workflow outcome.",
+        "Count possible Gmail messages, Drive files, and Chat messages for human-approved terms, an explicit district-account scope, and dates without collecting or applying a workflow outcome.",
         "POST",
         "/api/staff/requests/{number}/vault-counts/",
         ["/requests/:number/scope"],
@@ -610,7 +614,7 @@ CAPABILITIES = (
     ),
     _capability(
         "requests.vault_collection.start",
-        "Create a durable Vault Gmail collection task from the exact reviewed count, then hold named custodians and export into the review queue.",
+        "Create durable Vault collection tasks (one each for Gmail, Drive, and Chat) from the exact reviewed count, then hold named custodians and export into the review queue.",
         "POST",
         "/api/staff/requests/{number}/vault-collection/",
         ["/requests/:number/scope"],

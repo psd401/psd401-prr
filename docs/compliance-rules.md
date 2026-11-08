@@ -203,13 +203,31 @@ re-scope, case merge, and non-request closure -- now answer 403
 The one unattended Vault action is authorized by district decision
 (2026-09-23): with the in-app `PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED` setting
 on, a completed automatic intent proposal that maps a request to an active
-Vault-backed system runs Gmail *counts* with the proposed query, no accountable
-actor, and `trigger=automatic`: the first across the entire organization, or
-only the district mailboxes the proposal names (#36); then, under iterative
-scoping (`apps/records/scoping.py`), at most `PRR_INTENT_MAX_COUNT_ITERATIONS`
-(in-app, default 4, 1 turns refinement off) counts in all, each a tighter query
-the agent proposed after reading the previous total and custodian breakdown.
-Every one is still a count.
+Vault-backed system runs *counts* of Gmail, Drive, and Chat with the proposed
+query, no accountable actor, and `trigger=automatic`: the first across the
+entire organization (Drive and Chat across the in-app staff organizational
+unit, `PRR_VAULT_STAFF_ORG_UNIT_ID`, since Vault searches only Gmail
+organization-wide), or only the district mailboxes the proposal names (#36);
+then, under iterative scoping (`apps/records/scoping.py`), at most
+`PRR_INTENT_MAX_COUNT_ITERATIONS` (in-app, default 4, 1 turns refinement off)
+counts in all, each a tighter query the agent proposed after reading the
+previous total and custodian breakdown. Every one is still a count.
+
+Each source has its own count method. Gmail uses `matters.count`. Vault's
+`matters.count` rejects Drive and Chat (HTTP 400 "Corpus type ... is not
+supported", production probe of 2026-11-08), so those two are counted with a
+count-only export, never downloaded, deleted once its count is read: its
+`stats.totalArtifactCount` is read when Vault reports it COMPLETED, then
+`matters.exports.delete` removes it. A refusal (for example, an identity
+without Drive or Chat export rights) shows that source as unavailable with a
+plain reason. The district accepted this, on the automatic count path too (CIO decision,
+2026-11-08). A count-only export never holds, never becomes a `RecordItem`,
+and never starts a collection; `count-export-ast-guard`
+(`test_compliance.test_a_vault_count_never_downloads_holds_collects_or_makes_records`)
+pins that the count path cannot call a download, a hold, a collection export,
+or `RecordItem`, and that only the count path creates or deletes a count-only
+export. Each source ends counted with a number or unavailable with a plain
+reason, never silently skipped.
 
 Collection from the approved scope (#37, rule 11 amendment, district decision
 of the epic #27 plan). A Records Officer approves the proposed scope and
@@ -219,15 +237,17 @@ set to `auto` (default `suggest`), the export also starts unattended -- and
 only then: from the final completed count of a finished *automatic* scoping
 session, on a request with no Vault collection yet, with no actor and
 `CollectionTask.trigger=automatic`, which the Collect stage shows. It is the
-same collection an officer would start: the same deposit gate, the same
-targeted hold for named district mailboxes and no organization-wide hold, the
-same export into review. An officer's re-run never collects by itself;
+same collection an officer would start -- one export each for Gmail, Drive,
+and Chat -- with the same deposit gate, the same Gmail targeted hold for named
+district mailboxes and no organization-wide hold, and the same export into
+review. Drive and Chat holds are placed only when a person starts the
+collection; the automatic collection adds none (holds unchanged). An officer's re-run never collects by itself;
 re-scoping (`requests.rescope`) is an officer's approval with a reason that
 collects the new scope and supersedes the previous finished collection's
 unreviewed records. `test_compliance` pins the only caller of the automatic
 path. It may create the count's
-Vault matter; it never holds, exports, collects, changes status, or reaches the
-requester. It has no volume cap of its own, also by district decision: web-form
+Vault matter and a count-only export as described above; it never holds,
+collects, changes status, or reaches the requester. It has no volume cap of its own, also by district decision: web-form
 requests are bounded only by the public-intake throttles, and emailed requests
 by nothing beyond one request per Gmail message and the blocked-sender-domain
 list. Do not widen it to any other Vault operation.

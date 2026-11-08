@@ -1,4 +1,19 @@
-"""Human-scoped, count-only Google Vault searches."""
+"""Human-scoped, count-only Google Vault searches.
+
+One count covers every Google Workspace source the district collects from:
+Gmail, Drive, and Chat, each with its own count method (``COUNT_METHODS``).
+Gmail uses ``matters.count``, and its result fills the run's own columns, as
+it always has. Vault's ``matters.count`` rejects Drive and Chat outright
+("Corpus type DRIVE is not supported", production probe 2026-11-08), so those
+two sources are counted with a count-only export: its
+``stats.totalArtifactCount`` is read once the export is COMPLETED, and the
+export is then deleted. A count-only export is never downloaded and never
+becomes a record (AGENTS.md rule 11; pinned by ``test_compliance``).
+
+Each source ends ``counted`` with a number or ``unavailable`` with a plain
+reason, never silently skipped. The run completes once every source has, and
+its ``total_count`` is the sum of the counted sources.
+"""
 
 from __future__ import annotations
 
@@ -12,8 +27,9 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
-from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_date, parse_datetime
 
 from apps.audit.models import audit
 from apps.configuration import runtime
@@ -27,6 +43,25 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
+
+COUNTING = "counting"
+COUNTED = "counted"
+UNAVAILABLE = "unavailable"
+_SETTLED = {COUNTED, UNAVAILABLE}
+
+#: How each source is counted. ``matters.count`` returns HTTP 400 "not
+#: supported" for DRIVE and HANGOUTS_CHAT, so those use a count-only export.
+COUNT_METHODS = {"mail": "count", "drive": "export", "chat": "export"}
+#: How long a count-only export may run before its source is reported
+#: unavailable. The request accepts no new count while one is running, so
+#: this is also the longest an officer waits to count again.
+COUNT_EXPORT_TIMEOUT = dt.timedelta(hours=3)
+
+_ITEM_NOUNS = {
+    "mail": "Gmail messages",
+    "drive": "Drive files",
+    "chat": "Chat messages",
+}
 
 
 class VaultCountAlreadyRunning(RuntimeError):
@@ -116,11 +151,22 @@ def _normalize_scope(
     return search_scope, normalized_terms, normalized_accounts, start, end
 
 
-def _input_sha256(request_id, search_scope, terms, accounts, start, end) -> str:
+def _input_sha256(
+    request_id,
+    search_scope,
+    terms,
+    accounts,
+    start,
+    end,
+    *,
+    sources=("mail",),
+    org_unit_id="",
+) -> str:
     payload = {
-        "version": 2,
+        "version": 3,
         "request_id": str(request_id),
-        "corpus": "MAIL",
+        "sources": list(sources),
+        "org_unit_id": org_unit_id,
         "search_scope": search_scope,
         "terms": terms,
         "custodian_emails": accounts,
@@ -245,6 +291,13 @@ def request_vault_count(
         date_range_end=date_range_end,
     )
 
+    sources = list(vault.SOURCES)
+    org_unit_id = (
+        str(runtime.get("PRR_VAULT_STAFF_ORG_UNIT_ID") or "").strip()
+        if search_scope == VaultCountRun.SearchScope.ENTIRE_ORG
+        else ""
+    )
+
     with transaction.atomic():
         prr = PublicRecordsRequest.objects.select_for_update().get(pk=request_id)
         if prr.vault_count_runs.filter(
@@ -262,6 +315,8 @@ def request_vault_count(
             custodian_emails=accounts,
             date_range_start=start,
             date_range_end=end,
+            sources=sources,
+            org_unit_id=org_unit_id,
             input_sha256=_input_sha256(
                 prr.pk,
                 search_scope,
@@ -269,6 +324,8 @@ def request_vault_count(
                 accounts,
                 start,
                 end,
+                sources=sources,
+                org_unit_id=org_unit_id,
             ),
         )
 
@@ -453,10 +510,249 @@ def start_vault_count(run_id) -> bool:
         run_id=str(run.pk),
         input_sha256=run.input_sha256,
         search_scope=run.search_scope,
+        sources=run_sources(run),
     )
+    _start_other_sources(run)
     if operation.get("done"):
         return _apply_operation(run, operation)
     return False
+
+
+# ------------------------------------------------------------ Drive and Chat
+
+
+def run_sources(run: VaultCountRun) -> list[str]:
+    """The sources a run searched, in display order. Empty means Gmail only."""
+    chosen = set(run.sources or ["mail"])
+    return [source for source in vault.SOURCES if source in chosen]
+
+
+def _search_kwargs(run: VaultCountRun) -> dict:
+    return {
+        "start_time": _rfc3339_boundary(run.date_range_start),
+        "end_time": _rfc3339_boundary(run.date_range_end, following_day=True),
+        "entire_org": run.search_scope == VaultCountRun.SearchScope.ENTIRE_ORG,
+        "org_unit_id": run.org_unit_id,
+    }
+
+
+def _unavailable(reason: str) -> dict:
+    return {"state": UNAVAILABLE, "count": None, "reason": reason}
+
+
+def _could_not_count(source: str) -> dict:
+    return _unavailable(f"Google Vault could not count {_ITEM_NOUNS[source]}.")
+
+
+def _start_other_sources(run: VaultCountRun) -> None:
+    counts = dict(run.source_counts or {})
+    for source in run_sources(run):
+        # Gmail's matters.count is started by start_vault_count itself.
+        if COUNT_METHODS[source] != "export" or source in counts:
+            continue
+        counts[source] = _start_source_count(run, source)
+    run.source_counts = counts
+    run.save(update_fields=["source_counts"])
+
+
+def _start_source_count(run: VaultCountRun, source: str) -> dict:
+    if (
+        run.search_scope == VaultCountRun.SearchScope.ENTIRE_ORG
+        and not run.org_unit_id
+    ):
+        # ENTIRE_ORG is Gmail-only in Vault; say so rather than skip.
+        return _unavailable("Staff organizational unit not set.")
+    return _start_count_export(run, source)
+
+
+def _count_export_name(run: VaultCountRun, source: str) -> str:
+    return f"{run.request.number} — count-only {run.pk} {vault.SOURCE_LABELS[source]}"
+
+
+def _start_count_export(run: VaultCountRun, source: str) -> dict:
+    try:
+        export_id = vault.ensure_count_export(
+            source,
+            run.vault_matter_id,
+            run.custodian_emails,
+            run.terms,
+            name=_count_export_name(run, source),
+            **_search_kwargs(run),
+        )
+    except Exception:  # noqa: BLE001 - a source that cannot count is reported unavailable
+        # Includes a permission refusal: the identity may lack Drive or Chat
+        # export rights. Provider text can echo the query: never log it.
+        logger.warning(
+            "Vault count-only export did not start; provider detail suppressed",
+            extra={"vault_count_run": str(run.pk), "source": source},
+        )
+        return _could_not_count(source)
+    audit(
+        "vault.count.export_started",
+        target=run.request.number,
+        actor=run.requested_by,
+        run_id=str(run.pk),
+        source=source,
+    )
+    return {
+        "state": COUNTING,
+        "method": "export",
+        "export_id": export_id,
+        "export_deleted": False,
+        "started_at": timezone.now().isoformat(),
+    }
+
+
+def _delete_count_export(run: VaultCountRun, entry: dict) -> dict:
+    """Delete a count-only export once its count is read. Never download it."""
+    if not entry.get("export_id") or entry.get("export_deleted"):
+        return entry
+    try:
+        vault.delete_export(run.vault_matter_id, entry["export_id"])
+    except Exception:  # noqa: BLE001 - a failed delete is retried on the next poll
+        logger.warning(
+            "Vault count-only export could not be deleted yet; it is retried",
+            extra={"vault_count_run": str(run.pk)},
+        )
+        return {**entry, "export_deleted": False}
+    return {**entry, "export_deleted": True}
+
+
+def _timed_out(entry: dict, limit: dt.timedelta) -> bool:
+    started = parse_datetime(str(entry.get("started_at") or ""))
+    return started is not None and timezone.now() - started > limit
+
+
+def _advance_source(run: VaultCountRun, source: str, entry: dict) -> dict:
+    if entry.get("state") != COUNTING:
+        # Settled; only a delete that failed earlier is left to do.
+        return _delete_count_export(run, entry)
+    late = _unavailable(
+        f"Google Vault did not finish counting {_ITEM_NOUNS[source]} in time."
+    )
+    try:
+        export = vault.get_export(run.vault_matter_id, entry["export_id"])
+    except Exception:  # noqa: BLE001 - a read hiccup is retried until the timeout
+        logger.warning(
+            "Vault count-only export could not be read; retried",
+            extra={"vault_count_run": str(run.pk), "source": source},
+        )
+        if _timed_out(entry, COUNT_EXPORT_TIMEOUT):
+            return _delete_count_export(run, {**entry, **late})
+        return entry
+    status = export.get("status")
+    if status == "COMPLETED":
+        # Only the export's own statistics are read; its files never are.
+        total = vault.export_artifact_total(export)
+        result = (
+            {"state": COUNTED, "count": total}
+            if total is not None
+            else _could_not_count(source)
+        )
+        return _delete_count_export(run, {**entry, **result})
+    if status == "FAILED":
+        return _delete_count_export(run, {**entry, **_could_not_count(source)})
+    if _timed_out(entry, COUNT_EXPORT_TIMEOUT):
+        return _delete_count_export(run, {**entry, **late})
+    return entry
+
+
+def _advance_other_sources(run: VaultCountRun) -> None:
+    counts = dict(run.source_counts or {})
+    changed = False
+    for source in run_sources(run):
+        if source == "mail" or source not in counts:
+            continue
+        updated = _advance_source(run, source, counts[source])
+        if updated != counts[source]:
+            counts[source] = updated
+            changed = True
+    if changed:
+        run.source_counts = counts
+        run.save(update_fields=["source_counts"])
+
+
+def _complete_if_settled(run: VaultCountRun) -> bool:
+    """Complete the run once every source is counted or unavailable."""
+    counts = run.source_counts or {}
+    sources = run_sources(run)
+    if any(counts.get(source, {}).get("state") not in _SETTLED for source in sources):
+        return False
+    per_source = {
+        source: counts[source].get("count")
+        if counts[source].get("state") == COUNTED
+        else None
+        for source in sources
+    }
+    total = sum(value or 0 for value in per_source.values())
+    now = timezone.now()
+    updated = (
+        VaultCountRun.objects.filter(pk=run.pk)
+        .exclude(state__in={VaultCountRun.State.COMPLETE, VaultCountRun.State.FAILED})
+        .update(state=VaultCountRun.State.COMPLETE, total_count=total, completed_at=now)
+    )
+    if not updated:
+        return True
+    run.state = VaultCountRun.State.COMPLETE
+    run.total_count = total
+    run.completed_at = now
+    audit(
+        "vault.count.completed",
+        target=run.request.number,
+        actor=run.requested_by,
+        run_id=str(run.pk),
+        input_sha256=run.input_sha256,
+        total_count=total,
+        queried_accounts_count=run.queried_accounts_count,
+        matching_accounts_count=run.matching_accounts_count,
+        source_counts=per_source,
+    )
+    _scoping_count_finished(run)
+    return True
+
+
+def source_count_summary(run: VaultCountRun) -> list[dict]:
+    """Per-source count state for staff: never provider identifiers."""
+    counts = run.source_counts or {}
+    rows = []
+    for source in run_sources(run):
+        entry = counts.get(source)
+        if source == "mail" and run.state == VaultCountRun.State.FAILED:
+            entry = _unavailable(run.failure_detail or "The count failed.")
+        elif source == "mail" and entry is None and run.state == VaultCountRun.State.COMPLETE:
+            entry = {"state": COUNTED, "count": run.total_count}
+        elif (
+            entry is not None
+            and entry.get("state") == COUNTING
+            and run.state == VaultCountRun.State.FAILED
+        ):
+            entry = _unavailable(f"The count stopped before {_ITEM_NOUNS[source]} were counted.")
+        state = (entry or {}).get("state") or COUNTING
+        rows.append({
+            "source": source,
+            "label": vault.SOURCE_LABELS[source],
+            "state": state,
+            "count": entry.get("count") if entry and state == COUNTED else None,
+            "reason": str(entry.get("reason") or "") if entry and state == UNAVAILABLE else "",
+        })
+    return rows
+
+
+def collectable_sources(run: VaultCountRun) -> list[str]:
+    """The sources a collection from this count exports.
+
+    Every source except one that counted exactly zero, and except Drive or
+    Chat on a district-wide count with no staff organizational unit, which
+    Vault cannot search. Unavailable or still-counting sources are collected:
+    a missing count is not evidence that nothing is there.
+    """
+    entire_org = run.search_scope == VaultCountRun.SearchScope.ENTIRE_ORG
+    return [
+        row["source"]
+        for row in source_count_summary(run)
+        if not (row["state"] == COUNTED and row["count"] == 0)
+        and not (row["source"] != "mail" and entire_org and not run.org_unit_id)
+    ]
 
 
 def _nonnegative_integer(value, field_name: str) -> int:
@@ -507,8 +803,6 @@ def _apply_operation(run: VaultCountRun, operation: dict) -> bool:
         )
         return True
 
-    run.state = VaultCountRun.State.COMPLETE
-    run.total_count = total_count
     run.queried_accounts_count = queried
     run.matching_accounts_count = matching
     run.non_queryable_accounts_count = len(
@@ -526,11 +820,12 @@ def _apply_operation(run: VaultCountRun, operation: dict) -> bool:
     )
     run.failure_code = ""
     run.failure_detail = ""
-    run.completed_at = timezone.now()
+    run.source_counts = {
+        **(run.source_counts or {}),
+        "mail": {"state": COUNTED, "count": total_count},
+    }
     run.save(
         update_fields=[
-            "state",
-            "total_count",
             "queried_accounts_count",
             "matching_accounts_count",
             "non_queryable_accounts_count",
@@ -538,21 +833,10 @@ def _apply_operation(run: VaultCountRun, operation: dict) -> bool:
             "account_counts",
             "failure_code",
             "failure_detail",
-            "completed_at",
+            "source_counts",
         ]
     )
-    audit(
-        "vault.count.completed",
-        target=run.request.number,
-        actor=run.requested_by,
-        run_id=str(run.pk),
-        input_sha256=run.input_sha256,
-        total_count=total_count,
-        queried_accounts_count=queried,
-        matching_accounts_count=matching,
-    )
-    _scoping_count_finished(run)
-    return True
+    return _complete_if_settled(run)
 
 
 def _scoping_count_finished(run: VaultCountRun) -> None:
@@ -603,16 +887,38 @@ def _account_counts(entries) -> list[dict]:
 
 
 def advance_vault_count(run_id) -> bool:
-    """Poll one provider operation. Return True on a terminal result."""
-    run = VaultCountRun.objects.select_related("request", "requested_by").get(pk=run_id)
-    if run.state in {VaultCountRun.State.COMPLETE, VaultCountRun.State.FAILED}:
-        return True
-    if not run.operation_name:
-        raise ValueError("The Vault count has no provider operation.")
-    operation = vault.get_operation(run.operation_name)
-    if not operation.get("done"):
-        return False
-    return _apply_operation(run, operation)
+    """Poll every source's provider work. Return True on a terminal result.
+
+    A settled run is still visited for one thing: a count-only export whose
+    delete failed earlier is deleted again.
+    """
+    with transaction.atomic():
+        run = VaultCountRun.objects.select_for_update().get(pk=run_id)
+        if run.state in {VaultCountRun.State.COMPLETE, VaultCountRun.State.FAILED}:
+            _advance_other_sources(run)
+            return True
+        if "mail" not in (run.source_counts or {}):
+            if not run.operation_name:
+                raise ValueError("The Vault count has no provider operation.")
+            operation = vault.get_operation(run.operation_name)
+            _advance_other_sources(run)
+            if not operation.get("done"):
+                return False
+            return _apply_operation(run, operation)
+        _advance_other_sources(run)
+        return _complete_if_settled(run)
+
+
+def runs_waiting_on_sources():
+    """Runs the export poller advances: Gmail done, Drive or Chat not yet,
+    or a count-only export still to delete."""
+    pending_delete = Q(source_counts__drive__export_deleted=False) | Q(
+        source_counts__chat__export_deleted=False
+    )
+    return VaultCountRun.objects.filter(
+        Q(state=VaultCountRun.State.RUNNING, source_counts__has_key="mail")
+        | pending_delete
+    ).values_list("pk", flat=True)
 
 
 def fail_vault_count(run_id, *, code: str, detail: str) -> None:
@@ -634,4 +940,10 @@ def fail_vault_count(run_id, *, code: str, detail: str) -> None:
         input_sha256=run.input_sha256,
         failure_code=run.failure_code,
     )
+    counts = run.source_counts or {}
+    if any(entry.get("export_id") for entry in counts.values()):
+        run.source_counts = {
+            source: _delete_count_export(run, entry) for source, entry in counts.items()
+        }
+        run.save(update_fields=["source_counts"])
     _scoping_count_finished(run)

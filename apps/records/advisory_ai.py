@@ -1785,9 +1785,11 @@ def _advisory_system_message(kind: str) -> str:
         )
     elif kind == SCOPE_REFINEMENT:
         output_contract = (
-            "You are refining a Google Vault Gmail count for a public records "
-            "request. iterations lists each query already counted, with its "
-            "total and the custodian accounts holding the most matches. Decide "
+            "You are refining a Google Vault count of Gmail, Drive, and Chat "
+            "for a public records request. iterations lists each query already "
+            "counted, with its total, source_totals per source (null where "
+            "Vault could not count that source), and the Gmail accounts "
+            "holding the most matches. Decide "
             "whether the last scope is reasonable. Return exactly: decision "
             "(stop or refine) and reason (string); when decision is refine, "
             "also required_search_terms (string array), search_terms (string "

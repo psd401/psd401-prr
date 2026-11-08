@@ -1996,6 +1996,27 @@ SETTINGS: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key="PRR_VAULT_STAFF_ORG_UNIT_ID",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        max_length=100,
+        pattern=r"id:[A-Za-z0-9_-]{1,96}",
+        format_message=(
+            "An organizational unit ID from the Google Admin console, such as "
+            "id:03ph8a2z1enx4lx."
+        ),
+        category=CATEGORY_GOOGLE_IDENTITY,
+        label="Staff organizational unit for district-wide Drive and Chat",
+        consequence=(
+            "Google Vault searches Gmail across the whole district, but Drive "
+            "and Chat only by account or organizational unit. A district-wide "
+            "count or collection searches Drive and Chat for everyone in this "
+            "unit. Blank means a district-wide search covers Gmail only, and "
+            "Drive and Chat show as not available."
+        ),
+    ),
+    SettingSpec(
         key="PRR_VAULT_CREDENTIALS_FILE",
         type=values.TEXT,
         default="",

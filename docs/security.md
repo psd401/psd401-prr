@@ -273,7 +273,14 @@ These are not hidden behind a claim of production readiness:
   `quarantine/vault-messages/`, verified and classified by ClamAV, and only a
   clean message is promoted into immutable `vault-messages/` evidence and the
   review queue. An infected or unclassified message stays quarantined and the
-  ingest run fails without conversion or review exposure. Files a Records
+  ingest run fails without conversion or review exposure. Chat messages take
+  that same message path. Drive files from a Vault Drive export are written
+  under the same `quarantine/vault-messages/` prefix, scanned on the exact
+  bytes, and only a clean file is copied to an immutable `records/` key and
+  becomes a `RecordItem`; the quarantine copy is deleted either way, and an
+  infected or oversized file is recorded as a failed artifact while the rest
+  of the export proceeds. A count-only Drive or Chat export (rule 11) is never
+  downloaded. Files a Records
   Officer uploads onto a case (`POST /api/staff/requests/{number}/record-uploads/`)
   and migrated NextRequest files share one path
   (`apps/records/scanned_records.py`): generated keys under
