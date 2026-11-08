@@ -68,10 +68,12 @@ test('reviewer-redact-workspace-laptop', async ({ page }) => {
   const stripBox = await page.getByRole('navigation', { name: 'Responsive records' }).boundingBox()
   if (!stripBox) throw new Error('The records strip has no size.')
   expect(stripBox.y + stripBox.height).toBeLessThanOrEqual(pageBox.y)
-  // The sticky form never runs past the bottom of the window.
-  const formBox = await page.getByRole('complementary', { name: 'Redaction tools' }).boundingBox()
-  if (!formBox) throw new Error('The form column has no size.')
-  expect(formBox.height).toBeLessThanOrEqual(800)
+  // On a short window the sticky tools column is taller than the window would
+  // allow, so it scrolls inside itself rather than running off the bottom.
+  await page.setViewportSize({ width: 1200, height: 500 })
+  const tools = page.getByRole('complementary', { name: 'Redaction tools' })
+  await expect.poll(async () => (await tools.boundingBox())?.height ?? 0).toBeLessThanOrEqual(500)
+  expect(await tools.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true)
   await page.screenshot({
     path: path.resolve('../.verification/reviewer-redact-workspace-laptop.png'),
     fullPage: false,
