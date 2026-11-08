@@ -89,14 +89,29 @@ class SystemScopeLetterTests(_LetterFixture):
         self.assertEqual(prepare_scope_letters(), 0)
 
     def test_nothing_is_drafted_once_records_are_being_pulled(self):
+        # Gmail, Drive, or Chat: any Vault collection means records are coming.
+        for kind in CollectionTask.VAULT_KINDS:
+            with self.subTest(kind=kind):
+                prr = PublicRecordsRequest.objects.create(
+                    requester=self.prr.requester,
+                    description=f"Synthetic request pulled from {kind}.",
+                )
+                self._reading(prr)
+                self._count(prr)
+                CollectionTask.objects.create(
+                    request=prr, kind=kind, state=CollectionTask.State.PENDING,
+                )
+        self.assertEqual(prepare_scope_letters(), 0)
+
+    def test_a_manual_department_task_does_not_hold_the_letter_back(self):
         self._reading()
         self._count()
         CollectionTask.objects.create(
             request=self.prr,
-            kind=CollectionTask.Kind.VAULT_MAIL,
+            kind=CollectionTask.Kind.MANUAL,
             state=CollectionTask.State.PENDING,
         )
-        self.assertEqual(prepare_scope_letters(), 0)
+        self.assertEqual(prepare_scope_letters(), 1)
 
     def test_a_deleted_draft_stays_deleted_until_a_new_count_finishes(self):
         self._reading()
