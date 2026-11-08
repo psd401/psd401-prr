@@ -226,19 +226,29 @@ class _VaultCollectionRetry(RuntimeError):
 #: created within a minute (production, 2026-11-08). A refused pull waits two
 #: minutes per try, about an hour in all, instead of the short fault budget.
 VAULT_RATE_LIMIT_RETRIES = 30
+#: Any other provider fault: the original short budget, counted on its own so
+#: earlier rate-limit waits never use it up.
+VAULT_FAULT_RETRIES = 4
 
 
-@shared_task(bind=True, max_retries=4)
-def execute_vault_collection(self, collection_task_id: int):
+@shared_task(bind=True, max_retries=VAULT_RATE_LIMIT_RETRIES + VAULT_FAULT_RETRIES)
+def execute_vault_collection(
+    self, collection_task_id: int, rate_limit_retries: int = 0, fault_retries: int = 0,
+):
     """Start one confirmed Vault hold/export with bounded safe retries."""
+    from apps.integrations.vault.client import is_rate_limited
+
     from .vault_collections import fail_vault_collection, start_vault_collection
 
     try:
         start_vault_collection(collection_task_id)
     except Exception as exc:  # noqa: BLE001 - a provider fault retries, then fails the collection
-        limited = getattr(getattr(exc, "resp", None), "status", None) == 429
-        budget = VAULT_RATE_LIMIT_RETRIES if limited else self.max_retries
-        if self.request.retries >= budget:
+        limited = is_rate_limited(exc)
+        if limited:
+            spent, budget = rate_limit_retries, VAULT_RATE_LIMIT_RETRIES
+        else:
+            spent, budget = fault_retries, VAULT_FAULT_RETRIES
+        if spent >= budget:
             fail_vault_collection(
                 collection_task_id,
                 code="provider_unavailable",
@@ -252,13 +262,16 @@ def execute_vault_collection(self, collection_task_id: int):
                 extra={"collection_task": collection_task_id},
             )
             return
-        countdown = 120 if limited else min(30 * (2 ** self.request.retries), 300)
+        countdown = 120 if limited else min(30 * (2 ** fault_retries), 300)
         raise self.retry(
             exc=_VaultCollectionRetry(
                 "Vault collection provider is temporarily unavailable."
             ),
             countdown=countdown,
-            max_retries=budget,
+            kwargs={
+                "rate_limit_retries": rate_limit_retries + int(limited),
+                "fault_retries": fault_retries + int(not limited),
+            },
         ) from None
 
 

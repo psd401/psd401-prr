@@ -544,14 +544,6 @@ def _could_not_count(source: str) -> dict:
     return _unavailable(f"Google Vault could not count {_ITEM_NOUNS[source]}.")
 
 
-def _rate_limited(exc: Exception) -> bool:
-    """Vault refused because exports were created faster than its quota.
-
-    Production, 2026-11-08: the third and fourth count-only exports created
-    within a minute came back HTTP 429 "Quota exceeded ... Export Writes".
-    That is a reason to wait, not evidence the source cannot be counted.
-    """
-    return getattr(getattr(exc, "resp", None), "status", None) == 429
 
 
 def _start_other_sources(run: VaultCountRun) -> None:
@@ -595,7 +587,7 @@ def _start_count_export(run: VaultCountRun, source: str, waiting: dict | None = 
             **_search_kwargs(run),
         )
     except Exception as exc:  # noqa: BLE001 - a source that cannot count is reported unavailable
-        if _rate_limited(exc):
+        if vault.is_rate_limited(exc):
             # No export exists yet, so there is nothing to delete; the next
             # check (the export poller) tries again.
             return {

@@ -39,6 +39,7 @@ VAULT = {
     "PRR_GOOGLE_HOSTED_DOMAIN": "psd401.net",
 }
 
+
 def rate_limited():
     """Vault's answer when exports are created faster than its quota allows."""
     resp = MagicMock(status=429, reason="Too Many Requests")
@@ -512,5 +513,13 @@ class CollectionRateLimitTests(TestCase):
 
     def test_any_other_fault_keeps_the_short_budget(self):
         attempts, fail = self.run_task(RuntimeError("provider down"))
-        self.assertEqual(attempts, 5)
+        self.assertEqual(attempts, record_tasks.VAULT_FAULT_RETRIES + 1)
+        fail.assert_called_once()
+
+    def test_rate_limit_waits_do_not_use_up_the_fault_budget(self):
+        # Five refusals, then a different fault: that fault still gets its
+        # full short budget rather than failing the pull at once.
+        errors = [rate_limited() for _ in range(5)] + [RuntimeError("503")] * 10
+        attempts, fail = self.run_task(errors)
+        self.assertEqual(attempts, 5 + record_tasks.VAULT_FAULT_RETRIES + 1)
         fail.assert_called_once()
