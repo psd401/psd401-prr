@@ -667,7 +667,11 @@ class CollectionTask(models.Model):
     class Kind(models.TextChoices):
         VAULT_MAIL = "vault_mail", "Vault – Gmail"
         VAULT_DRIVE = "vault_drive", "Vault – Drive"
+        VAULT_CHAT = "vault_chat", "Vault – Chat"
         MANUAL = "manual", "Manual / Department"
+
+    #: The Vault-backed kinds, one per Google Workspace source.
+    VAULT_KINDS = ("vault_mail", "vault_drive", "vault_chat")
 
     class State(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -693,12 +697,15 @@ class CollectionTask(models.Model):
     search_terms = models.CharField(max_length=1000, blank=True)
     date_range_start = models.DateField(null=True, blank=True)
     date_range_end = models.DateField(null=True, blank=True)
-    source_vault_count = models.OneToOneField(
+    #: The reviewed count this Vault collection exports. One count starts
+    #: one task per source it collects (Gmail, Drive, Chat), never two of
+    #: the same source.
+    source_vault_count = models.ForeignKey(
         "VaultCountRun",
         null=True,
         blank=True,
         on_delete=models.PROTECT,
-        related_name="collection_task",
+        related_name="collection_tasks",
     )
     assigned_to = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     due_date = models.DateField(null=True, blank=True)
@@ -711,6 +718,15 @@ class CollectionTask(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source_vault_count", "kind"],
+                condition=Q(source_vault_count__isnull=False),
+                name="records_one_vault_task_per_count_source",
+            ),
+        ]
 
 
 class VaultCountRun(models.Model):
@@ -758,6 +774,17 @@ class VaultCountRun(models.Model):
         default=State.PENDING,
     )
     corpus = models.CharField(max_length=20, default="MAIL", editable=False)
+    #: The Google Workspace sources this count searched: ``mail``, ``drive``,
+    #: ``chat``. Empty means Gmail only (every count before Drive and Chat).
+    sources = models.JSONField(default=list, blank=True)
+    #: Per-source count state for every source but Gmail, whose result lives
+    #: in the columns below: ``{"drive": {"state": "counting" | "counted" |
+    #: "unavailable", "count": n, "reason": "...", ...}}``. Provider ids kept
+    #: here for resumable polling are not exposed by the staff serializer.
+    source_counts = models.JSONField(default=dict, blank=True)
+    #: The staff organizational unit a district-wide Drive or Chat search
+    #: used, captured when the count was requested.
+    org_unit_id = models.CharField(max_length=255, blank=True)
     search_scope = models.CharField(
         max_length=20,
         choices=SearchScope.choices,

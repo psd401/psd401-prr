@@ -422,7 +422,7 @@ describe('RequestDetail', () => {
     await user.type(screen.getByLabelText('Start date'), '2026-01-01')
     await user.clear(screen.getByLabelText('End date'))
     await user.type(screen.getByLabelText('End date'), '2026-06-30')
-    await user.click(screen.getByRole('button', { name: 'Count possible messages' }))
+    await user.click(screen.getByRole('button', { name: 'Count possible items' }))
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/staff/requests/PRR-2026-0001/vault-counts/',
@@ -437,7 +437,7 @@ describe('RequestDetail', () => {
         }),
       }),
     )
-    expect(screen.getByText(/does not create an export, hold, collection task/i)).toBeInTheDocument()
+    expect(screen.getByText(/does not create a hold, collection task/i)).toBeInTheDocument()
   })
 
   it('fills the Vault dates and accounts from the AI reading of the request', async () => {
@@ -516,7 +516,7 @@ describe('RequestDetail', () => {
 
     await user.type(screen.getByLabelText('Vault search query'), 'contract')
     await user.type(screen.getByLabelText('Custodian accounts'), 'superintendent@psd401.net')
-    await user.click(screen.getByRole('button', { name: 'Count possible messages' }))
+    await user.click(screen.getByRole('button', { name: 'Count possible items' }))
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/staff/requests/PRR-2026-0001/vault-counts/',
@@ -585,7 +585,7 @@ describe('RequestDetail', () => {
     await user.clear(await screen.findByLabelText('End date'))
     await user.type(screen.getByLabelText('Vault search query'), 'contract')
     await user.type(screen.getByLabelText('Custodian accounts'), 'superintendent@psd401.net')
-    await user.click(screen.getByRole('button', { name: 'Count possible messages' }))
+    await user.click(screen.getByRole('button', { name: 'Count possible items' }))
 
     expect(screen.getByLabelText('End date')).toHaveValue('')
     expect(fetchMock).toHaveBeenCalledWith(
@@ -646,7 +646,7 @@ describe('RequestDetail', () => {
     renderScope()
     await screen.findByLabelText('Vault search query')
     await user.click(screen.getByRole('radio', { name: 'All district accounts' }))
-    const button = screen.getByRole('button', { name: 'Count possible messages' })
+    const button = screen.getByRole('button', { name: 'Count possible items' })
     expect(button).toBeEnabled()
     await user.click(button)
 
@@ -694,6 +694,94 @@ describe('RequestDetail', () => {
 
     expect(await screen.findByText('1,842 possible Gmail messages')).toBeInTheDocument()
     expect(screen.getAllByText(/not a responsiveness determination/i)).toHaveLength(2)
+  })
+
+  it('shows a total per source and offers collection when only Drive is uncounted', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url.endsWith('/vault-counts/')) {
+        return fakeResponse({
+          enabled: true, corpus: 'MAIL', sources: ['mail', 'drive', 'chat'], latest: {
+            id: 'count-3', state: 'complete', corpus: 'MAIL', terms: 'project',
+            sources: ['mail', 'drive', 'chat'],
+            source_counts: [
+              { source: 'mail', label: 'Gmail', state: 'counted', count: 0, reason: '' },
+              {
+                source: 'drive', label: 'Drive', state: 'unavailable', count: null,
+                reason: 'Google Vault could not count Drive files.',
+              },
+              { source: 'chat', label: 'Chat', state: 'counted', count: 0, reason: '' },
+            ],
+            collectable: true,
+            collection_tasks: [],
+            custodian_emails: ['superintendent@psd401.net'],
+            date_range_start: null, date_range_end: null,
+            input_sha256: 'f'.repeat(64), requested_by_username: 'officer',
+            collection_task_id: null, collection_task_state: null,
+            collection_task_retryable: false,
+            total_count: 0, queried_accounts_count: 1,
+            matching_accounts_count: 0, non_queryable_accounts_count: 0,
+            accounts_with_errors_count: 0, failure_code: '', failure_detail: '',
+            created_at: '2026-08-10T12:00:00Z',
+            started_at: '2026-08-10T12:00:01Z', completed_at: '2026-08-10T12:00:10Z',
+          },
+        })
+      }
+      if (url.endsWith('/advisory-intent/')) {
+        return fakeResponse({ enabled: true, latest: null })
+      }
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    }))
+
+    renderScope()
+
+    expect(
+      await screen.findByText('0 possible items across Gmail, Drive, and Chat'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('Not available: Google Vault could not count Drive files.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Start Vault collection' })).toBeInTheDocument()
+  })
+
+  it('shows each source while a count is still running', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url.endsWith('/vault-counts/')) {
+        return fakeResponse({
+          enabled: true, corpus: 'MAIL', latest: {
+            id: 'count-4', state: 'running', corpus: 'MAIL', terms: 'project',
+            sources: ['mail', 'drive', 'chat'],
+            source_counts: [
+              { source: 'mail', label: 'Gmail', state: 'counted', count: 12, reason: '' },
+              { source: 'drive', label: 'Drive', state: 'counting', count: null, reason: '' },
+              { source: 'chat', label: 'Chat', state: 'counting', count: null, reason: '' },
+            ],
+            collectable: false, collection_tasks: [],
+            custodian_emails: ['superintendent@psd401.net'],
+            date_range_start: null, date_range_end: null,
+            input_sha256: 'f'.repeat(64), requested_by_username: 'officer',
+            collection_task_id: null, collection_task_state: null,
+            collection_task_retryable: false,
+            total_count: null, queried_accounts_count: null,
+            matching_accounts_count: null, non_queryable_accounts_count: null,
+            accounts_with_errors_count: null, failure_code: '', failure_detail: '',
+            created_at: '2026-08-10T12:00:00Z', started_at: null, completed_at: null,
+          },
+        })
+      }
+      if (url.endsWith('/advisory-intent/')) {
+        return fakeResponse({ enabled: true, latest: null })
+      }
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    }))
+
+    renderScope()
+
+    expect(await screen.findByText('12 messages')).toBeInTheDocument()
+    expect(screen.getAllByText('Counting…')).toHaveLength(2)
   })
 
   it('requires explicit confirmation before turning the reviewed count into collection work', async () => {

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
 import { Badge, Button, Card, ErrorNote, Field, Textarea } from '../ui'
+import { sourceCountText, type VaultSourceCount } from '../vaultSources'
 
 interface Iteration {
   number: number
@@ -15,6 +16,8 @@ interface Iteration {
   custodians: string[]
   state: string
   total: number | null
+  /** Gmail, Drive, Chat; absent on a count from before Drive and Chat. */
+  source_counts?: VaultSourceCount[]
   top_accounts: { email: string; count: number }[]
   date_range_start: string | null
   date_range_end: string | null
@@ -34,12 +37,12 @@ interface Session {
 
 function scopeText(iteration: Iteration) {
   return iteration.search_scope === 'accounts'
-    ? `${iteration.custodians.length} named mailbox${iteration.custodians.length === 1 ? '' : 'es'}`
-    : 'all district mailboxes'
+    ? `${iteration.custodians.length} named account${iteration.custodians.length === 1 ? '' : 's'}`
+    : 'all district accounts'
 }
 
 function totalText(iteration: Iteration) {
-  if (iteration.total !== null) return `${iteration.total.toLocaleString()} messages`
+  if (iteration.total !== null) return `${iteration.total.toLocaleString()} items`
   return iteration.state === 'failed' ? 'count failed' : 'counting…'
 }
 
@@ -135,6 +138,13 @@ export function ScopingTrail({ number }: { number: string }) {
                 </div>
                 <p className="mt-1 text-sm text-ink">{iteration.reason}</p>
                 <code className="mt-1 block break-words text-xs text-ink-muted">{iteration.query}</code>
+                {iteration.source_counts && iteration.source_counts.length > 1 && (
+                  <p className="mt-1 text-xs text-ink-muted">
+                    {iteration.source_counts
+                      .map((row) => `${row.label}: ${sourceCountText(row)}`)
+                      .join(' · ')}
+                  </p>
+                )}
                 {iteration.top_accounts.length > 0 && (
                   <p className="mt-1 text-xs text-ink-muted">
                     Most matches: {iteration.top_accounts.map((a) => `${a.email} (${a.count})`).join(', ')}
@@ -160,7 +170,7 @@ export function ScopingTrail({ number }: { number: string }) {
               </Button>
               <p className="text-sm text-ink-muted">
                 Starts the Vault export of this scope in your name
-                {final.search_scope === 'accounts' ? ', with a hold on the named mailboxes' : ''}.
+                {final.search_scope === 'accounts' ? ', with a hold on the named accounts' : ''}.
               </p>
               {collect.isError && <ErrorNote error={collect.error} />}
             </div>
@@ -175,7 +185,7 @@ export function ScopingTrail({ number }: { number: string }) {
             <div className="mb-4 space-y-2 rounded-lg border border-line px-3 py-2">
               <p className="text-sm text-ink">
                 <span className="font-semibold">Re-scope:</span> the current collection has{' '}
-                {collection.total?.toLocaleString() ?? 'an unknown number of'} messages; the proposed scope
+                {collection.total?.toLocaleString() ?? 'an unknown number of'} items; the proposed scope
                 has {totalText(final)}.
                 {collection.state !== 'complete' && ' Re-scoping waits until the current collection finishes.'}
               </p>

@@ -52,7 +52,15 @@ PROPOSAL = {
 }
 
 
-def _complete(run, total, accounts=()):
+def _complete(run, total, accounts=(), *, drive=0, chat=0):
+    # Drive and Chat settle first, as their own counts would; Gmail's result
+    # then completes the run with the sum.
+    run.source_counts = {
+        **(run.source_counts or {}),
+        "drive": {"state": "counted", "count": drive},
+        "chat": {"state": "counted", "count": chat},
+    }
+    run.save(update_fields=["source_counts"])
     _apply_operation(run, {
         "done": True,
         "response": {
@@ -131,6 +139,10 @@ class ScopingTests(_ScopingFixture):
 
         payload = invoke.call_args.args[1]
         self.assertEqual(payload["iterations"][0]["total"], 900)
+        self.assertEqual(
+            payload["iterations"][0]["source_totals"],
+            {"Gmail": 900, "Drive": 0, "Chat": 0},
+        )
         self.assertEqual(payload["iterations"][0]["top_accounts"][0]["email"], "transportation@psd401.net")
         self.assertIn({"kind": "address", "value": "news@psd401.net"}, payload["noise_senders"])
         second = ScopeIteration.objects.filter(session=session).get(number=2)
@@ -262,6 +274,15 @@ class ScopingTests(_ScopingFixture):
         self.assertEqual(self.request.status, RequestStatus.RECEIVED)
         self.assertFalse(CollectionTask.objects.exists())
 
+    def test_automatic_counts_search_gmail_drive_and_chat(self, _delay):
+        session = start_scoping(self.request, PROPOSAL, trigger=ScopingSession.Trigger.AUTOMATIC)
+        run = ScopeIteration.objects.filter(session=session).get().count_run
+        self.assertEqual(run.sources, ["mail", "drive", "chat"])
+        _complete(run, 5, drive=3, chat=2)
+        run.refresh_from_db()
+        self.assertEqual(run.state, VaultCountRun.State.COMPLETE)
+        self.assertEqual(run.total_count, 10)
+
     def test_account_counts_keep_the_busiest_accounts_first(self, _delay):
         session = start_scoping(self.request, PROPOSAL, trigger=ScopingSession.Trigger.AUTOMATIC)
         run = ScopeIteration.objects.filter(session=session).get().count_run
@@ -298,6 +319,10 @@ class ScopingApiTests(_ScopingFixture):
         self.assertEqual(body["trigger"], "manual")
         self.assertEqual(body["reason"], "The custodian list changed.")
         self.assertEqual(body["final"]["total"], 77)
+        self.assertEqual(
+            [(row["label"], row["count"]) for row in body["final"]["source_counts"]],
+            [("Gmail", 77), ("Drive", 0), ("Chat", 0)],
+        )
         self.assertEqual(body["final"]["top_accounts"][0]["email"], "transportation@psd401.net")
 
     def test_a_reviewer_may_not(self, _delay):

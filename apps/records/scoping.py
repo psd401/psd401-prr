@@ -15,7 +15,9 @@ default 4), when the agent says stop, when a refinement is unusable or
 repeats an earlier scope, or when a count fails; the last completed count is
 the proposed scope.
 
-Counts only. Nothing here holds, exports, collects, writes a status, or
+Counts only. Each count covers Gmail, Drive, and Chat; a Drive or Chat count
+may use a count-only export that is never downloaded and is deleted once its
+count is read (rule 11). Nothing here holds, collects, writes a status, or
 reaches a requester. ``rerun_scoping`` lets an officer start again with a
 reason even when nothing changed.
 """
@@ -53,6 +55,7 @@ from .vault_counts import (
     _scoping_count_finished,
     proposal_date_range,
     request_vault_count,
+    source_count_summary,
     vault_count_enabled,
     vault_query_from_intent,
 )
@@ -258,8 +261,8 @@ def rescope(request, *, count_run_id, expected_input_sha256, actor, reason):
         raise ValidationError(
             f"Say why the scope is changing (at least {MIN_SUPERSESSION_REASON} characters)."
         )
-    current = _live_collections(request).order_by("-created_at").first()
-    if current is None or current.state != CollectionTask.State.COMPLETE:
+    group = _current_collection_tasks(request)
+    if not group or any(task.state != CollectionTask.State.COMPLETE for task in group):
         raise ValidationError(
             "Re-scoping replaces a finished Vault collection; approve and collect instead, "
             "or wait for the current collection to finish."
@@ -269,29 +272,48 @@ def rescope(request, *, count_run_id, expected_input_sha256, actor, reason):
     new = queue_vault_collection(
         count_run_id, actor=actor, expected_input_sha256=expected_input_sha256,
     ).task
-    if new.pk == current.pk:
+    if any(new.pk == task.pk for task in group):
         raise ValidationError("That count is already the current collection.")
-    result = supersede_collection(current.pk, actor=actor, reason=reason)
-    if not result.record_count:
-        # supersede_collection writes no row when nothing was unreviewed, but
-        # the re-scope still replaced this collection; record that, so it is
-        # never again the current collection.
-        CollectionSupersession.objects.create(
-            collection_task=current, actor=actor, reason=reason, record_count=0,
-        )
+    # One collection is a task per source (Gmail, Drive, Chat); every one of
+    # them is replaced.
+    for current in group:
+        result = supersede_collection(current.pk, actor=actor, reason=reason)
+        if not result.record_count:
+            # supersede_collection writes no row when nothing was unreviewed,
+            # but the re-scope still replaced this collection; record that,
+            # so it is never again the current collection.
+            CollectionSupersession.objects.create(
+                collection_task=current, actor=actor, reason=reason, record_count=0,
+            )
     audit(
         "vault.collection.rescoped",
         target=request.number,
         actor=actor,
-        previous_collection_task_id=current.pk,
+        previous_collection_task_id=group[0].pk,
+        previous_collection_task_ids=[task.pk for task in group],
         collection_task_id=new.pk,
         reason=reason,
     )
     return new
 
 
+def _current_collection_tasks(request) -> list:
+    """Every live task of the latest Vault collection, one per source."""
+    latest = _live_collections(request).order_by("-created_at", "-pk").first()
+    if latest is None:
+        return []
+    run = latest.source_vault_count
+    if run is None:
+        return [latest]
+    return list(
+        _live_collections(request)
+        .filter(source_vault_count=run)
+        .order_by("pk")
+    )
+
+
 def _live_collections(request):
-    """Vault mail collections that have neither failed nor been superseded.
+    """Vault collections (any source) that have neither failed nor been superseded.
 
     A failed export never finishes, and a superseded one was already replaced,
     so neither is the collection a re-scope replaces; with none left the
@@ -300,24 +322,24 @@ def _live_collections(request):
     from .models import CollectionTask
 
     return CollectionTask.objects.filter(
-        request=request, kind=CollectionTask.Kind.VAULT_MAIL, supersessions__isnull=True,
+        request=request, kind__in=CollectionTask.VAULT_KINDS, supersessions__isnull=True,
     ).exclude(state=CollectionTask.State.FAILED)
 
 
 def current_collection(request) -> dict | None:
     """The latest Vault collection on the request, for the re-scope diff."""
-    task = (
-        _live_collections(request)
-        .select_related("source_vault_count")
-        .order_by("-created_at")
-        .first()
-    )
-    if task is None:
+    from .models import CollectionTask
+
+    group = _current_collection_tasks(request)
+    if not group:
         return None
+    task = group[0]
     run = task.source_vault_count
+    unfinished = [t.state for t in group if t.state != CollectionTask.State.COMPLETE]
     return {
         "task_id": task.pk,
-        "state": task.state,
+        # Complete only once every source of the collection is.
+        "state": unfinished[0] if unfinished else CollectionTask.State.COMPLETE,
         "trigger": task.trigger,
         "count_run_id": str(run.pk) if run else None,
         "total": run.total_count if run else None,
@@ -350,6 +372,12 @@ def _refinement_payload(session, iterations) -> dict[str, Any]:
                 "scope": iteration.count_run.search_scope,
                 "custodians": iteration.custodians,
                 "total": iteration.count_run.total_count,
+                # Per source: Gmail, Drive, Chat. None is a source Vault
+                # could not count.
+                "source_totals": {
+                    row["label"]: row["count"]
+                    for row in source_count_summary(iteration.count_run)
+                },
                 "top_accounts": iteration.count_run.account_counts[:10],
                 "reason": iteration.reason,
             }

@@ -200,24 +200,35 @@ class CollectionTaskApiTests(TestCase):
         self.assertEqual(r.status_code, 400)
 
     def test_generic_create_cannot_bypass_reviewed_vault_collection_workflow(self):
-        response = self.client.post(
-            "/api/staff/collection-tasks/",
-            {
-                "request": str(self.request_obj.id),
-                "kind": CollectionTask.Kind.VAULT_MAIL,
-                "instructions": "Attempt to bypass the reviewed Vault count.",
-            },
-            content_type="application/json",
-        )
+        for kind in CollectionTask.VAULT_KINDS:
+            with self.subTest(kind=kind):
+                response = self.client.post(
+                    "/api/staff/collection-tasks/",
+                    {
+                        "request": str(self.request_obj.id),
+                        "kind": kind,
+                        "instructions": "Attempt to bypass the reviewed Vault count.",
+                    },
+                    content_type="application/json",
+                )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("kind", response.json())
-        self.assertFalse(
-            CollectionTask.objects.filter(
-                request=self.request_obj,
-                kind=CollectionTask.Kind.VAULT_MAIL,
-            ).exists()
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("kind", response.json())
+                self.assertFalse(
+                    CollectionTask.objects.filter(
+                        request=self.request_obj,
+                        kind=kind,
+                    ).exists()
+                )
+
+    def test_a_chat_collection_names_its_source(self):
+        task = CollectionTask.objects.create(
+            request=self.request_obj,
+            kind=CollectionTask.Kind.VAULT_CHAT,
+            instructions="Vault Chat task.",
         )
+        response = self.client.get(f"/api/staff/collection-tasks/{task.pk}/")
+        self.assertEqual(response.json()["source_label"], "Google Workspace (Chat)")
 
     def test_no_destroy(self):
         r = self.client.delete(f"/api/staff/collection-tasks/{self.task.id}/")
@@ -313,22 +324,24 @@ class CollectionTaskApiTests(TestCase):
         self.assertEqual(self.task.state, CollectionTask.State.PENDING)
 
     def test_patch_cannot_mark_vault_collection_complete_without_ingest_evidence(self):
-        vault_task = CollectionTask.objects.create(
-            request=self.request_obj,
-            kind=CollectionTask.Kind.VAULT_MAIL,
-            state=CollectionTask.State.RUNNING,
-            instructions="Vault task.",
-        )
+        for kind in CollectionTask.VAULT_KINDS:
+            with self.subTest(kind=kind):
+                vault_task = CollectionTask.objects.create(
+                    request=self.request_obj,
+                    kind=kind,
+                    state=CollectionTask.State.RUNNING,
+                    instructions="Vault task.",
+                )
 
-        response = self.client.patch(
-            f"/api/staff/collection-tasks/{vault_task.pk}/",
-            {"state": CollectionTask.State.COMPLETE},
-            content_type="application/json",
-        )
+                response = self.client.patch(
+                    f"/api/staff/collection-tasks/{vault_task.pk}/",
+                    {"state": CollectionTask.State.COMPLETE},
+                    content_type="application/json",
+                )
 
-        self.assertEqual(response.status_code, 400)
-        vault_task.refresh_from_db()
-        self.assertEqual(vault_task.state, CollectionTask.State.RUNNING)
+                self.assertEqual(response.status_code, 400)
+                vault_task.refresh_from_db()
+                self.assertEqual(vault_task.state, CollectionTask.State.RUNNING)
 
     def test_patch_assigned_to_by_id(self):
         officer2 = get_user_model().objects.create_user(

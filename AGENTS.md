@@ -71,13 +71,19 @@ and cited from code, tests, and ADRs; never renumber them.
     gated draft/proposal tools (the fifth proposes a `DecisionBatch`, which
     only a person approves in the staff UI; tokens are handed off on the
     endpoints a batch replaces). Never put tokens in source or `.env.example`.
-    Unattended Vault actions are exactly two: the automatic intent Gmail
-    *counts* (iterative scoping), which never hold, export, collect, change
-    status, or reach the requester; and, only with the in-app
-    `PRR_TRUST_SCOPE_MODE=auto`, the export of a finished automatic scoping
-    session's final count on a request with no Vault collection yet, recorded
-    `trigger=automatic` (`vault_collections.queue_automatic_vault_collection`,
-    holds unchanged) — do not widen either. Web-form files are scan-gated
+    Unattended Vault actions are exactly two: the automatic intent *counts*
+    of Gmail, Drive, and Chat (iterative scoping), which never hold, collect,
+    change status, or reach the requester — Drive and Chat, which Vault's
+    `matters.count` does not support, are counted with a count-only export,
+    never downloaded, deleted once its count is read (`count-export-ast-guard`);
+    and, only with the
+    in-app `PRR_TRUST_SCOPE_MODE=auto`, the export of a finished automatic
+    scoping session's final count on a request with no Vault collection yet,
+    recorded `trigger=automatic` (`vault_collections.queue_automatic_vault_collection`).
+    That export covers Gmail, Drive, and Chat — every source that counted above
+    zero or could not be counted (CIO decision, 2026-11-08) — and places
+    Gmail's targeted hold only, no Drive or Chat hold. Do not widen either
+    unattended action beyond this. Web-form files are scan-gated
     `IntakeAttachment`s, never `RecordItem`s; no unscanned file is downloadable.
 12. **Google group authorization stays keyless and read-only** — a dedicated
     group-reader service account plus named-user membership lookups. No private

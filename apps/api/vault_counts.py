@@ -1,8 +1,40 @@
 """Staff-safe serializers for count-only Google Vault searches."""
 
+from drf_spectacular.utils import extend_schema_field, inline_serializer
 from rest_framework import serializers
 
 from apps.records.models import CollectionTask, VaultCountRun
+from apps.records.vault_collections import KIND_SOURCES
+from apps.records.vault_counts import (
+    collectable_sources,
+    run_sources,
+    source_count_summary,
+)
+
+#: One source's count: ``counting``, ``counted`` with a number, or
+#: ``unavailable`` with a plain reason. Declared inline because ``source`` and
+#: ``label`` are attribute names on a DRF field.
+VAULT_SOURCE_COUNT_SCHEMA = inline_serializer(
+    name="VaultSourceCount",
+    fields={
+        "source": serializers.ChoiceField(choices=["mail", "drive", "chat"]),
+        "label": serializers.CharField(),
+        "state": serializers.ChoiceField(choices=["counting", "counted", "unavailable"]),
+        "count": serializers.IntegerField(allow_null=True),
+        "reason": serializers.CharField(allow_blank=True),
+    },
+    many=True,
+)
+VAULT_COLLECTION_TASK_SCHEMA = inline_serializer(
+    name="VaultCollectionTaskSummary",
+    fields={
+        "id": serializers.IntegerField(),
+        "kind": serializers.CharField(),
+        "source": serializers.CharField(),
+        "state": serializers.CharField(),
+    },
+    many=True,
+)
 
 
 class VaultCountRunSerializer(serializers.ModelSerializer):
@@ -15,28 +47,72 @@ class VaultCountRunSerializer(serializers.ModelSerializer):
     collection_task_id = serializers.SerializerMethodField()
     collection_task_state = serializers.SerializerMethodField()
     collection_task_retryable = serializers.SerializerMethodField()
+    collection_tasks = serializers.SerializerMethodField()
+    source_counts = serializers.SerializerMethodField()
+    collectable = serializers.SerializerMethodField()
+    sources = serializers.SerializerMethodField()
 
-    def _collection_task(self, obj):
-        try:
-            return obj.collection_task
-        except obj._meta.model.collection_task.RelatedObjectDoesNotExist:
-            return None
+    def get_sources(self, obj) -> list[str]:
+        """The sources searched; a count from before Drive and Chat is Gmail."""
+        return run_sources(obj)
+
+    def _collection_tasks(self, obj) -> list:
+        """One task per source, Gmail then Drive then Chat."""
+        order = {kind: index for index, kind in enumerate(CollectionTask.VAULT_KINDS)}
+        return sorted(
+            obj.collection_tasks.all(),
+            key=lambda task: (order.get(task.kind, len(order)), task.pk),
+        )
 
     def get_collection_task_id(self, obj) -> int | None:
-        task = self._collection_task(obj)
-        return task.pk if task is not None else None
+        tasks = self._collection_tasks(obj)
+        return tasks[0].pk if tasks else None
 
     def get_collection_task_state(self, obj) -> str | None:
-        task = self._collection_task(obj)
-        return task.state if task is not None else None
+        """The collection's state across its sources.
+
+        Failed if any source failed; complete once every source is; otherwise
+        the furthest-behind source still working.
+        """
+        states = [task.state for task in self._collection_tasks(obj)]
+        if not states:
+            return None
+        if CollectionTask.State.FAILED in states:
+            return CollectionTask.State.FAILED
+        for state in (
+            CollectionTask.State.PENDING,
+            CollectionTask.State.RUNNING,
+            CollectionTask.State.INGESTING,
+        ):
+            if state in states:
+                return state
+        return CollectionTask.State.COMPLETE
 
     def get_collection_task_retryable(self, obj) -> bool:
-        task = self._collection_task(obj)
-        return bool(
-            task is not None
-            and task.state == CollectionTask.State.FAILED
-            and not task.vault_export_id
+        return any(
+            task.state == CollectionTask.State.FAILED and not task.vault_export_id
+            for task in self._collection_tasks(obj)
         )
+
+    @extend_schema_field(VAULT_COLLECTION_TASK_SCHEMA)
+    def get_collection_tasks(self, obj) -> list[dict]:
+        return [
+            {
+                "id": task.pk,
+                "kind": task.kind,
+                "source": KIND_SOURCES[task.kind],
+                "state": task.state,
+            }
+            for task in self._collection_tasks(obj)
+            if task.kind in KIND_SOURCES
+        ]
+
+    @extend_schema_field(VAULT_SOURCE_COUNT_SCHEMA)
+    def get_source_counts(self, obj) -> list[dict]:
+        return source_count_summary(obj)
+
+    def get_collectable(self, obj) -> bool:
+        return obj.state == VaultCountRun.State.COMPLETE and bool(collectable_sources(obj))
 
     class Meta:
         model = VaultCountRun
@@ -55,6 +131,10 @@ class VaultCountRunSerializer(serializers.ModelSerializer):
             "collection_task_id",
             "collection_task_state",
             "collection_task_retryable",
+            "collection_tasks",
+            "sources",
+            "source_counts",
+            "collectable",
             "total_count",
             "queried_accounts_count",
             "matching_accounts_count",
@@ -111,6 +191,7 @@ class VaultCountRequestSerializer(serializers.Serializer):
 class VaultCountLatestSerializer(serializers.Serializer):
     enabled = serializers.BooleanField()
     corpus = serializers.CharField()
+    sources = serializers.ListField(child=serializers.CharField())
     latest = VaultCountRunSerializer(allow_null=True)
 
 

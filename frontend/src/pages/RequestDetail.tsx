@@ -11,6 +11,8 @@ import { IntakeClassificationCard } from '../case/IntakeClassificationCard'
 import { INTAKE_LABEL_TEXT, intakeAction, type IntakeLabel } from '../case/intakeLabels'
 import { CaseActivityFeed } from '../case/CaseActivityFeed'
 import { CaseNotesPanel } from '../case/CaseNotesPanel'
+import { VaultSourceCounts } from '../case/VaultSourceCounts'
+import { countHeadline, type VaultSource, type VaultSourceCount } from '../vaultSources'
 import {
   Badge,
   Button,
@@ -195,6 +197,11 @@ interface VaultCountRun {
   id: string
   state: 'pending' | 'running' | 'complete' | 'failed'
   corpus: 'MAIL'
+  /** Gmail, Drive, Chat; a count from before Drive and Chat is Gmail only. */
+  sources?: VaultSource[]
+  source_counts?: VaultSourceCount[]
+  /** Whether a collection may start from this count (any source to export). */
+  collectable?: boolean
   search_scope: 'accounts' | 'entire_org'
   terms: string
   custodian_emails: string[]
@@ -221,6 +228,7 @@ interface VaultCountRun {
 interface VaultCountLatest {
   enabled: boolean
   corpus: 'MAIL'
+  sources?: VaultSource[]
   latest: VaultCountRun | null
 }
 
@@ -267,6 +275,7 @@ const CHANNEL_LABELS: Record<string, string> = {
 const TASK_KIND_LABELS: Record<string, string> = {
   vault_mail: 'Vault – Gmail',
   vault_drive: 'Vault – Drive',
+  vault_chat: 'Vault – Chat',
   manual: 'Manual / Department',
 }
 
@@ -1273,14 +1282,17 @@ export function RequestDetail({
         {showScope && canManageRequest && (
           <Card title="Google Vault scope count" className="lg:col-span-2">
             <p className="text-sm text-ink-muted">
-              Count possible Gmail messages for human-reviewed terms, district
-              custodians, and an optional date range. This does not create an
-              export, hold, collection task, status change, or requester message.
-              The first count may create the request&apos;s empty Vault matter.
+              Count possible Gmail messages, Drive files, and Chat messages for
+              human-reviewed terms, district custodians, and an optional date
+              range. This does not create a hold, collection task, status change,
+              or requester message. The first count may create the request&apos;s
+              empty Vault matter.
             </p>
             <p className="mt-1 text-xs text-ink-muted">
-              Google does not provide this count operation for Drive. A count is
-              a scoping estimate, not a responsiveness determination.
+              Google cannot count Drive or Chat directly, so Vault counts them
+              with a short-lived export that is deleted as soon as it is counted
+              and is never downloaded; those counts can take longer. A count is a scoping estimate, not a
+              responsiveness determination.
             </p>
             {vaultCounts.isError && <ErrorNote error={vaultCounts.error} />}
             {vaultCounts.data && !vaultCounts.data.enabled && (
@@ -1400,12 +1412,15 @@ export function RequestDetail({
                   || ['pending', 'running'].includes(vaultCounts.data?.latest?.state ?? '')
                 }
               >
-                {requestVaultCount.isPending ? 'Queueing…' : 'Count possible messages'}
+                {requestVaultCount.isPending ? 'Queueing…' : 'Count possible items'}
               </Button>
             </form>
             {requestVaultCount.isError && <ErrorNote error={requestVaultCount.error} />}
             {['pending', 'running'].includes(vaultCounts.data?.latest?.state ?? '') && (
-              <p className="mt-4 text-sm text-ink-muted">Vault count in progress…</p>
+              <div className="mt-4">
+                <p className="text-sm text-ink-muted">Vault count in progress…</p>
+                <VaultSourceCounts rows={vaultCounts.data?.latest?.source_counts} />
+              </div>
             )}
             {vaultCounts.data?.latest?.state === 'failed' && (
               <p className="mt-4 text-sm text-danger-ink">
@@ -1416,8 +1431,9 @@ export function RequestDetail({
               <div className="mt-5 rounded-lg border border-flow bg-surface-sunken p-4">
                 <p className="font-heading text-2xl font-bold text-ink">
                   {new Intl.NumberFormat().format(vaultCounts.data.latest.total_count ?? 0)}{' '}
-                  possible Gmail messages
+                  {countHeadline(vaultCounts.data.latest.sources)}
                 </p>
+                <VaultSourceCounts rows={vaultCounts.data.latest.source_counts} />
                 <p className="mt-1 text-sm text-ink-muted">
                   This is a search-universe estimate, not a responsiveness determination.
                 </p>
@@ -1471,7 +1487,8 @@ export function RequestDetail({
                 >
                   Write the scope conversation
                 </Button>
-                {(vaultCounts.data.latest.total_count ?? 0) > 0
+                {(vaultCounts.data.latest.collectable
+                  ?? (vaultCounts.data.latest.total_count ?? 0) > 0)
                   && (vaultCollectionState == null || vaultCollectionRetryable) && (
                   <Button
                     className="mt-4"
@@ -2004,8 +2021,10 @@ export function RequestDetail({
           </p>
           <div className="rounded-lg border border-line bg-surface-sunken p-3 text-sm text-ink">
             <p className="font-semibold">
-              {new Intl.NumberFormat().format(latestVaultCount?.total_count ?? 0)} possible messages
+              {new Intl.NumberFormat().format(latestVaultCount?.total_count ?? 0)}{' '}
+              {countHeadline(latestVaultCount?.sources)} to export
             </p>
+            {vaultCollectionOpen && <VaultSourceCounts rows={latestVaultCount?.source_counts} />}
             <p className="mt-2 break-words"><span className="font-semibold">Query:</span> {latestVaultCount?.terms}</p>
             <p className="mt-1">
               <span className="font-semibold">Scope:</span>{' '}
@@ -2027,8 +2046,8 @@ export function RequestDetail({
             </p>
           ) : (
             <p className="text-sm text-ink-muted">
-              A targeted mail hold for the specified district accounts will be
-              verified or created before the export starts.
+              A targeted hold on the specified district accounts (Gmail, Drive,
+              and Chat) will be verified or created before each export starts.
             </p>
           )}
           <label className="flex items-start gap-2 text-sm text-ink">

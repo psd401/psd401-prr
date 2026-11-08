@@ -62,14 +62,15 @@ def supersede_collection(collection_task_id, *, actor, reason):
         .select_related("request")
         .get(pk=collection_task_id)
     )
-    # Only a finished Vault Gmail export: an export still ingesting would keep
-    # adding unreviewed records after this, and other tasks are not exports.
+    # Only a finished Vault export (Gmail, Drive, or Chat): an export still
+    # ingesting would keep adding unreviewed records after this, and other
+    # tasks are not exports.
     if (
-        task.kind != CollectionTask.Kind.VAULT_MAIL
+        task.kind not in CollectionTask.VAULT_KINDS
         or task.state != CollectionTask.State.COMPLETE
     ):
         raise ValidationError(
-            "Only a completed Vault Gmail collection can be superseded."
+            "Only a completed Vault collection can be superseded."
         )
     items = list(
         RecordItem.objects.select_for_update()

@@ -37,9 +37,32 @@ it('shows each count, why it changed, and the proposed scope', async () => {
     iterations: [first, second], final: second,
   })
   expect(await screen.findByText('Most hits were the district newsletter.')).toBeInTheDocument()
-  expect(screen.getByText('900 messages')).toBeInTheDocument()
-  expect(screen.getByRole('status')).toHaveTextContent('Proposed scope: count 2, 120 messages in 1 named mailbox. The scope is now specific.')
+  expect(screen.getByText('900 items')).toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent('Proposed scope: count 2, 120 items in 1 named account. The scope is now specific.')
   expect(screen.getAllByText(/Most matches: transportation@psd401.net/)).toHaveLength(2)
+})
+
+it('shows what each source counted', async () => {
+  const first = {
+    ...iteration(1, 30, 'Transportation holds route mail.'),
+    source_counts: [
+      { source: 'mail' as const, label: 'Gmail', state: 'counted' as const, count: 20, reason: '' },
+      { source: 'drive' as const, label: 'Drive', state: 'counted' as const, count: 10, reason: '' },
+      {
+        source: 'chat' as const, label: 'Chat', state: 'unavailable' as const, count: null,
+        reason: 'Staff organizational unit not set.',
+      },
+    ],
+  }
+  setup({
+    id: 1, trigger: 'automatic', actor: null, reason: '', state: 'complete',
+    stop_reason: 'Fine.', max_iterations: 4, iterations: [first], final: first,
+  })
+  expect(
+    await screen.findByText(
+      'Gmail: 20 messages · Drive: 10 files · Chat: Not available: Staff organizational unit not set.',
+    ),
+  ).toBeInTheDocument()
 })
 
 it('re-runs only with a reason, and shows a refusal', async () => {
@@ -89,7 +112,7 @@ const DONE = {
 it('approves the proposed scope and collects it in one action', async () => {
   const { posts, user } = setupWith({ session: DONE, current_collection: null })
   await user.click(await screen.findByRole('button', { name: 'Approve and collect' }))
-  expect(screen.getByText(/with a hold on the named mailboxes/)).toBeInTheDocument()
+  expect(screen.getByText(/with a hold on the named accounts/)).toBeInTheDocument()
   await waitFor(() => expect(posts).toEqual([{
     url: '/api/staff/requests/PRR-2026-0001/vault-collection/',
     body: { count_run_id: 'run-2', expected_input_sha256: 'h2', confirmed: true },
@@ -110,7 +133,7 @@ it('shows the re-scope diff and needs a reason to approve it', async () => {
     session: DONE,
     current_collection: { task_id: 7, state: 'complete', trigger: 'manual', count_run_id: 'run-1', total: 2340 },
   })
-  expect(await screen.findByText(/current collection has 2,340 messages; the proposed scope has 120 messages/)).toBeInTheDocument()
+  expect(await screen.findByText(/current collection has 2,340 items; the proposed scope has 120 items/)).toBeInTheDocument()
   const approve = screen.getByRole('button', { name: 'Approve re-scope' })
   expect(approve).toBeDisabled()
   await user.type(screen.getByLabelText(/Why change the scope/), 'The newsletter made up most of the old collection.')

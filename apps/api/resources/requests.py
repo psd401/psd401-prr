@@ -1488,6 +1488,7 @@ class RecordUploadResponseSerializer(serializers.Serializer):
 
 def _scoping_data(session) -> dict:
     from apps.records.models import ScopeIteration
+    from apps.records.vault_counts import source_count_summary
 
     iterations = list(
         ScopeIteration.objects.filter(session=session).select_related("count_run").order_by("number")
@@ -1508,6 +1509,8 @@ def _scoping_data(session) -> dict:
             "custodians": iteration.custodians,
             "state": run.state,
             "total": run.total_count,
+            # Per source: Gmail, Drive, Chat (counting, counted, unavailable).
+            "source_counts": source_count_summary(run),
             "top_accounts": run.account_counts[:5],
             "date_range_start": run.date_range_start,
             "date_range_end": run.date_range_end,
@@ -3304,13 +3307,16 @@ class RequestsViewSet(
         if request.method == "GET":
             latest = (
                 VaultCountRun.objects.filter(request=prr)
-                .select_related("requested_by", "collection_task")
+                .select_related("requested_by")
+                .prefetch_related("collection_tasks")
                 .first()
             )
             return Response(
                 {
                     "enabled": vault_count_enabled(),
                     "corpus": "MAIL",
+                    # Every count searches these Google Workspace sources.
+                    "sources": ["mail", "drive", "chat"],
                     "latest": (
                         VaultCountRunSerializer(latest).data
                         if latest is not None

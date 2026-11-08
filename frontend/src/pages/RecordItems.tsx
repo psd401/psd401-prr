@@ -48,6 +48,7 @@ import {
 } from '../ui'
 import type { Column } from '../ui/Table'
 import { formatDay } from '../date'
+import { sourceSystemLabel } from '../vaultSources'
 
 interface RecordItem {
   id: string
@@ -1070,7 +1071,7 @@ export function RecordItems({
         </span>
       ) : '—',
     },
-    { header: 'Source system', cell: (row) => row.source_system || '—' },
+    { header: 'Source system', cell: (row) => (row.source_system ? sourceSystemLabel(row.source_system) : '—') },
     {
       header: 'Custodians',
       // Every mailbox the message was found in. One message deduplicated

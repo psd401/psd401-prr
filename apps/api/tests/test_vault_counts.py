@@ -279,3 +279,127 @@ class VaultCountApiTests(APITestCase):
             format="json",
         )
         self.assertEqual(forbidden.status_code, 403)
+
+
+@override_settings(
+    PRR_VAULT_CREDENTIALS_FILE="",
+    PRR_VAULT_ADMIN_USER="vault-admin@example.org",
+    PRR_VAULT_IMPERSONATION_TARGET=(
+        "prr-vault@psd401-prr-identity.iam.gserviceaccount.com"
+    ),
+    PRR_GOOGLE_HOSTED_DOMAIN="psd401.net",
+)
+class VaultSourceCountApiTests(APITestCase):
+    """The count reads back per source (Gmail, Drive, Chat) and overall."""
+
+    def setUp(self):
+        self.officer = get_user_model().objects.create(
+            username="vault-source-officer", email="officer@psd401.net", is_staff=True
+        )
+        apply_staff_roles(self.officer, {StaffRole.RECORDS_OFFICER})
+        self.request = PublicRecordsRequest.objects.create(
+            requester=Requester.objects.create(email="sources-api@example.org"),
+            description="Records about a bus route.",
+        )
+        self.url = f"/api/staff/requests/{self.request.number}/vault-counts/"
+        self.client.force_authenticate(self.officer)
+
+    def run_with(self, source_counts, total, **overrides):
+        data = {
+            "request": self.request,
+            "requested_by": self.officer,
+            "state": VaultCountRun.State.COMPLETE,
+            "terms": '"bus route"',
+            "custodian_emails": ["transport@psd401.net"],
+            "input_sha256": "e" * 64,
+            "vault_matter_id": "matter-1",
+            "total_count": total,
+            "completed_at": "2026-08-11T16:00:00Z",
+            "sources": ["mail", "drive", "chat"],
+            "source_counts": source_counts,
+        }
+        data.update(overrides)
+        return VaultCountRun.objects.create(**data)
+
+    def test_the_latest_count_has_a_total_per_source(self):
+        self.run_with({
+            "mail": {"state": "counted", "count": 40},
+            "drive": {
+                "state": "counted", "count": 7, "method": "export",
+                "export_id": "secret-export", "export_deleted": True,
+            },
+            "chat": {"state": "unavailable", "count": None,
+                     "reason": "Google Vault could not count Chat messages."},
+        }, 47)
+
+        latest = self.client.get(self.url).data
+
+        self.assertEqual(latest["sources"], ["mail", "drive", "chat"])
+        body = latest["latest"]
+        self.assertEqual(body["total_count"], 47)
+        self.assertEqual(body["source_counts"], [
+            {"source": "mail", "label": "Gmail", "state": "counted", "count": 40, "reason": ""},
+            {"source": "drive", "label": "Drive", "state": "counted", "count": 7, "reason": ""},
+            {"source": "chat", "label": "Chat", "state": "unavailable", "count": None,
+             "reason": "Google Vault could not count Chat messages."},
+        ])
+        self.assertNotIn("secret-export", str(body))
+        self.assertTrue(body["collectable"])
+        self.assertEqual(body["collection_tasks"], [])
+
+    def test_a_zero_gmail_count_is_still_collectable_when_drive_is_unavailable(self):
+        self.run_with({
+            "mail": {"state": "counted", "count": 0},
+            "drive": {"state": "unavailable", "count": None, "reason": "x"},
+            "chat": {"state": "counted", "count": 0},
+        }, 0)
+        self.assertTrue(self.client.get(self.url).data["latest"]["collectable"])
+
+    def test_every_source_zero_is_not_collectable(self):
+        self.run_with({
+            "mail": {"state": "counted", "count": 0},
+            "drive": {"state": "counted", "count": 0},
+            "chat": {"state": "counted", "count": 0},
+        }, 0)
+        self.assertFalse(self.client.get(self.url).data["latest"]["collectable"])
+
+    def test_a_running_count_is_not_collectable(self):
+        self.run_with({}, None, state=VaultCountRun.State.RUNNING, completed_at=None)
+        body = self.client.get(self.url).data["latest"]
+        self.assertFalse(body["collectable"])
+        self.assertEqual({row["state"] for row in body["source_counts"]}, {"counting"})
+
+    @patch("apps.records.tasks.execute_vault_collection.delay")
+    def test_one_collection_reads_back_every_source_task(self, _delay):
+        run = self.run_with({
+            "mail": {"state": "counted", "count": 4},
+            "drive": {"state": "counted", "count": 2},
+            "chat": {"state": "counted", "count": 1},
+        }, 7)
+        response = self.client.post(
+            f"/api/staff/requests/{self.request.number}/vault-collection/",
+            {"count_run_id": str(run.pk), "expected_input_sha256": run.input_sha256,
+             "confirmed": True},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 202, response.data)
+        self.assertEqual(response.data["kind"], "vault_mail")
+
+        body = self.client.get(self.url).data["latest"]
+        self.assertEqual(
+            [(row["kind"], row["source"], row["state"]) for row in body["collection_tasks"]],
+            [("vault_mail", "mail", "pending"), ("vault_drive", "drive", "pending"),
+             ("vault_chat", "chat", "pending")],
+        )
+        self.assertEqual(body["collection_task_state"], "pending")
+
+        CollectionTask.objects.filter(kind="vault_drive").update(state="failed")
+        body = self.client.get(self.url).data["latest"]
+        self.assertEqual(body["collection_task_state"], "failed")
+        self.assertTrue(body["collection_task_retryable"])
+
+        CollectionTask.objects.update(state="complete")
+        self.assertEqual(self.client.get(self.url).data["latest"]["collection_task_state"], "complete")
+
+        CollectionTask.objects.filter(kind="vault_chat").update(state="ingesting")
+        self.assertEqual(self.client.get(self.url).data["latest"]["collection_task_state"], "ingesting")

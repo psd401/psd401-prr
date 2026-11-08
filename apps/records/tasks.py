@@ -271,6 +271,14 @@ def poll_vault_count(self, run_id: str):
         raise
     if not complete:
         if self.request.retries >= self.max_retries:
+            from .models import VaultCountRun
+
+            run = VaultCountRun.objects.only("source_counts").get(pk=run_id)
+            if "mail" in (run.source_counts or {}):
+                # Gmail is counted; a Drive or Chat count-only export can
+                # take longer than this fast poll. The export poller in
+                # poll_vault_exports finishes it, bounded by its own timeout.
+                return
             fail_vault_count(
                 run_id,
                 code="provider_timeout",
@@ -558,6 +566,22 @@ def poll_vault_exports():
             )
 
     _reconcile_stale_vault_ingest_claims()
+    _advance_vault_counts()
+
+
+def _advance_vault_counts():
+    """Finish Drive and Chat counts, and delete count-only exports."""
+    from .vault_counts import advance_vault_count, runs_waiting_on_sources
+
+    for run_id in list(runs_waiting_on_sources()):
+        try:
+            advance_vault_count(run_id)
+        except Exception:  # noqa: BLE001 - one run's provider fault must not stop the others
+            # Provider text can echo the query; keep the log to the run id.
+            logger.error(
+                "Vault count could not be advanced; provider detail suppressed",
+                extra={"vault_count_run": str(run_id)},
+            )
 
 
 @shared_task(bind=True, max_retries=5)

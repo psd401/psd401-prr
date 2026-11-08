@@ -315,10 +315,12 @@ class VaultClientRegressionTests(TestCase):
         before_count = AuditLog.objects.count()
 
         with patch.object(vault, "_vault_service", return_value=service):
-            vault.create_drive_export(
+            vault.create_source_export(
+                "drive",
                 "matter-1",
                 ["custodian@psd401.net"],
                 "board minutes",
+                name="PRR drive export",
             )
 
         service.matters.return_value.exports.return_value.create.assert_called_once_with(
@@ -331,9 +333,9 @@ class VaultClientRegressionTests(TestCase):
                     "method": "ACCOUNT",
                     "accountInfo": {"emails": ["custodian@psd401.net"]},
                     "terms": "board minutes",
-                    "driveOptions": {"includeSharedDrives": True},
+                    "driveOptions": {"sharedDrivesOption": "INCLUDED"},
                 },
-                "exportOptions": {"driveOptions": {}},
+                "exportOptions": {"driveOptions": {"includeAccessInfo": False}},
             },
         )
         self.assert_single_vault_audit(before_count, "drive-export-new")
@@ -443,10 +445,11 @@ class VaultPollingRegressionTests(TestCase):
         with patch.object(record_tasks.ingest_vault_export, "delay") as enqueue:
             # One query checks RUNNING exports, one reads the enqueue lease
             # from the settings store, and one SQL anti-join selects only
-            # stale claims without durable enqueue evidence. Historical
-            # published claims must not add an AuditLog.exists() per row --
-            # twelve tasks here, and the count must not move with it.
-            with self.assertNumQueries(3):
+            # stale claims without durable enqueue evidence, and one finds
+            # Vault counts waiting on a Drive or Chat count-only export.
+            # Historical published claims must not add an AuditLog.exists()
+            # per row -- twelve tasks here, and the count must not move with it.
+            with self.assertNumQueries(4):
                 record_tasks.poll_vault_exports()
 
         enqueue.assert_not_called()

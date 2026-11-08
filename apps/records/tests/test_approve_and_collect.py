@@ -167,6 +167,63 @@ class RescopeTests(_Fixture):
             RecordItem.objects.filter(collection_task=old, review_state=RecordItem.ReviewState.SUPERSEDED).count(), 2,
         )
 
+    def _two_source_collection(self, *, drive_state=CollectionTask.State.COMPLETE):
+        _session, run = self._session()
+        run.sources = ["mail", "drive", "chat"]
+        run.source_counts = {
+            "mail": {"state": "counted", "count": 30},
+            "drive": {"state": "counted", "count": 10},
+            "chat": {"state": "counted", "count": 0},
+        }
+        run.save(update_fields=["sources", "source_counts"])
+        tasks = queue_vault_collection(
+            run.pk, actor=self.officer, expected_input_sha256=run.input_sha256,
+        ).tasks
+        self.assertEqual([task.kind for task in tasks], ["vault_mail", "vault_drive"])
+        CollectionTask.objects.filter(pk=tasks[0].pk).update(state=CollectionTask.State.COMPLETE)
+        CollectionTask.objects.filter(pk=tasks[1].pk).update(state=drive_state)
+        for task in tasks:
+            RecordItem.objects.create(
+                request=self.request, collection_task=task, original_filename=f"{task.kind}.bin",
+                storage_key=f"records/{self.request.pk}/{task.kind}", content_length=1,
+                content_type="application/octet-stream",
+                sha256=hashlib.sha256(task.kind.encode()).hexdigest(),
+            )
+        return tasks
+
+    def test_rescope_supersedes_every_source_of_the_old_collection(self, delay):
+        mail, drive = self._two_source_collection()
+        _session, new_run = self._session(trigger=ScopingSession.Trigger.MANUAL, total=12)
+
+        rescope(
+            self.request, count_run_id=new_run.pk, expected_input_sha256=new_run.input_sha256,
+            actor=self.officer, reason="The new scope leaves out the newsletter.",
+        )
+
+        for task in (mail, drive):
+            self.assertTrue(CollectionSupersession.objects.filter(collection_task=task).exists())
+            self.assertEqual(
+                RecordItem.objects.get(collection_task=task).review_state,
+                RecordItem.ReviewState.SUPERSEDED,
+            )
+
+    def test_rescope_waits_for_every_source_to_finish(self, delay):
+        self._two_source_collection(drive_state=CollectionTask.State.INGESTING)
+        _session, new_run = self._session(trigger=ScopingSession.Trigger.MANUAL, total=12)
+        with self.assertRaises(ValidationError):
+            rescope(
+                self.request, count_run_id=new_run.pk, expected_input_sha256=new_run.input_sha256,
+                actor=self.officer, reason="The new scope leaves out the newsletter.",
+            )
+
+    @override_settings(PRR_TRUST_SCOPE_MODE="auto")
+    def test_auto_mode_counts_a_drive_task_as_an_existing_collection(self, delay):
+        self._two_source_collection()
+        session, _run = self._session()
+        with self.captureOnCommitCallbacks(execute=True):
+            continue_scoping(session.pk)
+        self.assertEqual(CollectionTask.objects.count(), 2)
+
     def test_rescope_needs_a_reason_and_a_finished_collection(self, delay):
         _session, run = self._session()
         with self.assertRaises(ValidationError):
