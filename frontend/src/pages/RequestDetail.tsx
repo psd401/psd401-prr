@@ -395,6 +395,10 @@ export function RequestDetail({
   const [vaultCustodians, setVaultCustodians] = useState('')
   const [vaultStartDate, setVaultStartDate] = useState('')
   const [vaultEndDate, setVaultEndDate] = useState('')
+  // Fields the officer has changed by hand. Defaults (the AI reading, the
+  // receipt date) fill only untouched fields, so an edit -- including
+  // clearing a field -- is never overwritten when a reading arrives later.
+  const vaultTouched = useRef({ start: false, end: false, custodians: false })
   const [vaultCollectionOpen, setVaultCollectionOpen] = useState(false)
   const [vaultCollectionConfirmed, setVaultCollectionConfirmed] = useState(false)
   const [vaultCollectionState, setVaultCollectionState] = useState<string | null>(null)
@@ -461,10 +465,10 @@ export function RequestDetail({
       // The AI's reading also names a date range and the accounts to search;
       // they fill only empty fields, so an officer's edit is never undone.
       const start = proposal.date_range?.start
-      if (start) setVaultStartDate((current) => current || start)
+      if (start && !vaultTouched.current.start) setVaultStartDate(start)
       const custodians = proposal.custodians ?? []
-      if (custodians.length > 0) {
-        setVaultCustodians((current) => current || custodians.join('\n'))
+      if (custodians.length > 0 && !vaultTouched.current.custodians) {
+        setVaultCustodians(custodians.join('\n'))
       }
     }
   }, [latestIntentAdvisory, latestVaultCount])
@@ -472,9 +476,9 @@ export function RequestDetail({
   // Responsive records are those in existence when the request was received,
   // so the receipt date is the end date the officer would otherwise retype on
   // every case. It is a starting point, not a rule the server enforces: a
-  // recorded count still wins, and the effect fills only an empty field, when
-  // the case record arrives, so an officer's edit -- including clearing the
-  // field -- is never overwritten afterwards.
+  // recorded count still wins, and the effect fills only a field the officer
+  // has not touched, so an edit -- including clearing the field -- is never
+  // overwritten afterwards.
   const receiptDate = detail.data?.received_at.slice(0, 10) ?? ''
   // The AI's proposed end date wins when it is earlier; nothing after receipt
   // can be responsive, so a later one is held to the receipt date.
@@ -482,9 +486,8 @@ export function RequestDetail({
     ? latestIntentAdvisory.proposal.date_range?.end ?? ''
     : ''
   useEffect(() => {
-    if (latestVaultCount || !receiptDate) return
-    const end = proposedEnd && proposedEnd < receiptDate ? proposedEnd : receiptDate
-    setVaultEndDate((current) => (!current || current === receiptDate ? end : current))
+    if (latestVaultCount || !receiptDate || vaultTouched.current.end) return
+    setVaultEndDate(proposedEnd && proposedEnd < receiptDate ? proposedEnd : receiptDate)
   }, [receiptDate, latestVaultCount, proposedEnd])
 
   const requestIntentAdvisory = useMutation({
@@ -1345,7 +1348,10 @@ export function RequestDetail({
                   aria-label="Custodian accounts"
                   rows={3}
                   value={vaultCustodians}
-                  onChange={(event) => setVaultCustodians(event.target.value)}
+                  onChange={(event) => {
+                    vaultTouched.current.custodians = true
+                    setVaultCustodians(event.target.value)
+                  }}
                   required={vaultSearchScope === 'accounts'}
                   disabled={vaultSearchScope === 'entire_org'}
                   placeholder="name@psd401.net"
@@ -1357,7 +1363,10 @@ export function RequestDetail({
                     aria-label="Start date"
                     type="date"
                     value={vaultStartDate}
-                    onChange={(event) => setVaultStartDate(event.target.value)}
+                    onChange={(event) => {
+                      vaultTouched.current.start = true
+                      setVaultStartDate(event.target.value)
+                    }}
                   />
                 </Field>
                 <Field
@@ -1374,7 +1383,10 @@ export function RequestDetail({
                     type="date"
                     value={vaultEndDate}
                     min={vaultStartDate || undefined}
-                    onChange={(event) => setVaultEndDate(event.target.value)}
+                    onChange={(event) => {
+                      vaultTouched.current.end = true
+                      setVaultEndDate(event.target.value)
+                    }}
                   />
                 </Field>
               </div>

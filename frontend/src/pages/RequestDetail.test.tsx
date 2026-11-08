@@ -533,6 +533,46 @@ describe('RequestDetail', () => {
     )
   })
 
+  it('never overwrites Vault fields the officer changed before the AI reading arrived', async () => {
+    let reads = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url.endsWith('/advisory-intent/')) {
+        reads += 1
+        const done = reads > 1
+        return fakeResponse({
+          enabled: true,
+          latest: {
+            id: 'advisory-4', state: done ? 'complete' : 'running', model_identifier: 'approved-model-v1',
+            input_sha256: 'e'.repeat(64), input_truncated: false, applied: false,
+            proposal: done
+              ? { required_search_terms: ['bus route'], search_terms: [],
+                  custodians: ['transport@psd401.net'],
+                  date_range: { start: '2026-01-01', end: '2026-03-31' } }
+              : {},
+            failure_detail: '',
+          },
+        })
+      }
+      if (url.endsWith('/vault-counts/')) return fakeResponse({ enabled: true, corpus: 'MAIL', latest: null })
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderScope()
+    await user.clear(await screen.findByLabelText('End date'))
+    await user.type(screen.getByLabelText('Start date'), '2025-09-01')
+    await user.type(screen.getByLabelText('Custodian accounts'), 'clerk@psd401.net')
+
+    await waitFor(() => expect(reads).toBeGreaterThan(1), { timeout: 4000 })
+    await waitFor(() => expect(screen.getByLabelText('Vault search query')).toHaveValue('"bus route"'))
+    expect(screen.getByLabelText('End date')).toHaveValue('')
+    expect(screen.getByLabelText('Start date')).toHaveValue('2025-09-01')
+    expect(screen.getByLabelText('Custodian accounts')).toHaveValue('clerk@psd401.net')
+  })
+
   it('keeps an officer-cleared Vault end date empty', async () => {
     const fetchMock = vaultCountFetchMock('count-3')
     vi.stubGlobal('fetch', fetchMock)
