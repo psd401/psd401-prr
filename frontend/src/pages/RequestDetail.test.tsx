@@ -440,6 +440,68 @@ describe('RequestDetail', () => {
     expect(screen.getByText(/does not create an export, hold, collection task/i)).toBeInTheDocument()
   })
 
+  it('fills the Vault dates and accounts from the AI reading of the request', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url.endsWith('/advisory-intent/')) {
+        return fakeResponse({
+          enabled: true,
+          latest: {
+            id: 'advisory-2', state: 'complete', model_identifier: 'approved-model-v1',
+            input_sha256: 'e'.repeat(64), input_truncated: false, applied: false,
+            proposal: {
+              required_search_terms: ['bus route'],
+              search_terms: [],
+              custodians: ['transport@psd401.net', 'principal@psd401.net'],
+              // An end past receipt is held to the receipt date.
+              date_range: { start: '2026-01-01', end: '2026-12-31' },
+            },
+            failure_detail: '',
+          },
+        })
+      }
+      if (url.endsWith('/vault-counts/')) return fakeResponse({ enabled: true, corpus: 'MAIL', latest: null })
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderScope()
+
+    await waitFor(() => expect(screen.getByLabelText('Start date')).toHaveValue('2026-01-01'))
+    expect(screen.getByLabelText('End date')).toHaveValue('2026-07-01')
+    expect(screen.getByLabelText('Custodian accounts')).toHaveValue(
+      'transport@psd401.net\nprincipal@psd401.net',
+    )
+  })
+
+  it('uses an AI end date that falls before the receipt date', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url.endsWith('/advisory-intent/')) {
+        return fakeResponse({
+          enabled: true,
+          latest: {
+            id: 'advisory-3', state: 'complete', model_identifier: 'approved-model-v1',
+            input_sha256: 'e'.repeat(64), input_truncated: false, applied: false,
+            proposal: { required_search_terms: ['bus route'], search_terms: [],
+              date_range: { start: null, end: '2026-03-31' } },
+            failure_detail: '',
+          },
+        })
+      }
+      if (url.endsWith('/vault-counts/')) return fakeResponse({ enabled: true, corpus: 'MAIL', latest: null })
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderScope()
+
+    await waitFor(() => expect(screen.getByLabelText('End date')).toHaveValue('2026-03-31'))
+    expect(screen.getByLabelText('Start date')).toHaveValue('')
+  })
+
   it('defaults the Vault end date to the receipt date and sends it unedited', async () => {
     const fetchMock = vaultCountFetchMock('count-2')
     vi.stubGlobal('fetch', fetchMock)
@@ -469,6 +531,46 @@ describe('RequestDetail', () => {
         }),
       }),
     )
+  })
+
+  it('never overwrites Vault fields the officer changed before the AI reading arrived', async () => {
+    let reads = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url.endsWith('/advisory-intent/')) {
+        reads += 1
+        const done = reads > 1
+        return fakeResponse({
+          enabled: true,
+          latest: {
+            id: 'advisory-4', state: done ? 'complete' : 'running', model_identifier: 'approved-model-v1',
+            input_sha256: 'e'.repeat(64), input_truncated: false, applied: false,
+            proposal: done
+              ? { required_search_terms: ['bus route'], search_terms: [],
+                  custodians: ['transport@psd401.net'],
+                  date_range: { start: '2026-01-01', end: '2026-03-31' } }
+              : {},
+            failure_detail: '',
+          },
+        })
+      }
+      if (url.endsWith('/vault-counts/')) return fakeResponse({ enabled: true, corpus: 'MAIL', latest: null })
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderScope()
+    await user.clear(await screen.findByLabelText('End date'))
+    await user.type(screen.getByLabelText('Start date'), '2025-09-01')
+    await user.type(screen.getByLabelText('Custodian accounts'), 'clerk@psd401.net')
+
+    await waitFor(() => expect(reads).toBeGreaterThan(1), { timeout: 4000 })
+    await waitFor(() => expect(screen.getByLabelText('Vault search query')).toHaveValue('"bus route"'))
+    expect(screen.getByLabelText('End date')).toHaveValue('')
+    expect(screen.getByLabelText('Start date')).toHaveValue('2025-09-01')
+    expect(screen.getByLabelText('Custodian accounts')).toHaveValue('clerk@psd401.net')
   })
 
   it('keeps an officer-cleared Vault end date empty', async () => {
