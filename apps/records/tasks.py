@@ -69,6 +69,17 @@ def prepare_estimate_letters(*, limit: int = 10) -> int:
 
 
 @shared_task
+def prepare_scope_letters(*, limit: int = 10) -> int:
+    """Draft the informational scope letter for cases with a finished count.
+
+    Drafts only: a person approves and sends each letter.
+    """
+    from .scope_letters import prepare_scope_letters as prepare
+
+    return prepare(limit=limit)
+
+
+@shared_task
 def prepare_record_review_advisories(*, limit: int = 25) -> int:
     """Recover missed automatic record analysis in small bounded batches."""
     if not (
