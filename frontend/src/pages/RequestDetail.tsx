@@ -180,6 +180,7 @@ interface AdvisoryRun {
     clarification_questions?: string[]
     complexity_flags?: string[]
     date_range?: { start: string | null; end: string | null }
+    custodians?: string[]
     narrowing_options?: { terms: string[]; rationale: string }[]
   }
   failure_detail: string
@@ -452,13 +453,19 @@ export function RequestDetail({
       return
     }
     if (latestIntentAdvisory?.state === 'complete') {
+      const proposal = latestIntentAdvisory.proposal
       setVaultTerms(
         (current) => current
-          || proposedVaultQuery(
-            latestIntentAdvisory.proposal.required_search_terms,
-            latestIntentAdvisory.proposal.search_terms,
-          ),
+          || proposedVaultQuery(proposal.required_search_terms, proposal.search_terms),
       )
+      // The AI's reading also names a date range and the accounts to search;
+      // they fill only empty fields, so an officer's edit is never undone.
+      const start = proposal.date_range?.start
+      if (start) setVaultStartDate((current) => current || start)
+      const custodians = proposal.custodians ?? []
+      if (custodians.length > 0) {
+        setVaultCustodians((current) => current || custodians.join('\n'))
+      }
     }
   }, [latestIntentAdvisory, latestVaultCount])
 
@@ -469,10 +476,16 @@ export function RequestDetail({
   // the case record arrives, so an officer's edit -- including clearing the
   // field -- is never overwritten afterwards.
   const receiptDate = detail.data?.received_at.slice(0, 10) ?? ''
+  // The AI's proposed end date wins when it is earlier; nothing after receipt
+  // can be responsive, so a later one is held to the receipt date.
+  const proposedEnd = latestIntentAdvisory?.state === 'complete'
+    ? latestIntentAdvisory.proposal.date_range?.end ?? ''
+    : ''
   useEffect(() => {
     if (latestVaultCount || !receiptDate) return
-    setVaultEndDate((current) => current || receiptDate)
-  }, [receiptDate, latestVaultCount])
+    const end = proposedEnd && proposedEnd < receiptDate ? proposedEnd : receiptDate
+    setVaultEndDate((current) => (!current || current === receiptDate ? end : current))
+  }, [receiptDate, latestVaultCount, proposedEnd])
 
   const requestIntentAdvisory = useMutation({
     mutationFn: () => api<AdvisoryRun>(
