@@ -75,6 +75,7 @@ function setup({
   records = [RECORD, SECOND],
   proposals = [] as unknown[],
   redactions = [] as unknown[],
+  advisoryGate = null as Promise<void> | null,
 } = {}) {
   const posts: { url: string; body: unknown }[] = []
   const gets: string[] = []
@@ -94,6 +95,7 @@ function setup({
     if (url.startsWith('/api/staff/exemptions/')) return response(page(EXEMPTIONS))
     if (url.startsWith('/api/staff/redactions/')) return response(page(redactions))
     if (url.includes('/advisory-redactions/')) {
+      if (advisoryGate) await advisoryGate
       return response({ enabled: true, latest: { state: 'complete' }, proposals })
     }
     if (url.includes('/redaction-batches/groups/')) {
@@ -356,5 +358,18 @@ it('a suggestion set aside stays aside after leaving and returning to the record
   await user.keyboard('k')
   expect(screen.getByRole('option', { name: /Board memo/ })).toHaveAttribute('aria-selected', 'true')
   expect(await screen.findByRole('button', { name: 'Add redaction' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Accept suggestion' })).not.toBeInTheDocument()
+})
+
+it('a box drawn before the AI loads keeps paging free of its suggestion', async () => {
+  let release = () => {}
+  const advisoryGate = new Promise<void>((resolve) => { release = resolve })
+  const { user } = setup({ proposals: [PROPOSAL], advisoryGate })
+  await drawBox()
+  release()
+  await waitFor(() => expect(screen.getByText('A student name.')).toBeInTheDocument())
+  ;(document.activeElement as HTMLElement | null)?.blur()
+  await user.keyboard('{ArrowRight}')
+  expect(await screen.findByLabelText('Draw redactions on page 2')).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Accept suggestion' })).not.toBeInTheDocument()
 })

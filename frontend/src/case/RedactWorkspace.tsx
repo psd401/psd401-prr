@@ -307,9 +307,12 @@ export function RedactWorkspace({ number }: { number: string }) {
   // The AI's boxes come first: with nothing in hand, the next suggestion
   // opens on its page, ready for Enter (accept) or x (dismiss with a reason).
   useEffect(() => {
-    if (!autoOpen || proposalId || draftBox || dragStart || !advisory.isSuccess) return
+    if (!autoOpen || !advisory.isSuccess) return
+    // Consumed even when a box is already in hand, so a later page turn or
+    // Esc never opens a suggestion the person did not come back for.
     setAutoOpen(false)
-    if (nextSuggestion) takeSuggestion(nextSuggestion)
+    if (proposalId || draftBox || dragStart || !nextSuggestion) return
+    takeSuggestion(nextSuggestion)
   }, [advisory.isSuccess, autoOpen, draftBox, dragStart, nextSuggestion, proposalId])
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
