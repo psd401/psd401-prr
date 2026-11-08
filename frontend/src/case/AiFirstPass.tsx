@@ -16,7 +16,7 @@ export function AiFirstPass({ progress }: { progress: FirstPassProgress }) {
     return (
       <p className="text-sm text-ink-muted">
         AI is not reading this case's records, so nothing is suggested until you ask.{' '}
-        <Link to="/configuration/district" className="font-semibold text-accent underline-offset-2 hover:underline">
+        <Link to="/configuration/settings" className="font-semibold text-accent underline-offset-2 hover:underline">
           Turn it on in Settings
         </Link>
       </p>

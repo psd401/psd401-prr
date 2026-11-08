@@ -336,3 +336,25 @@ it('Esc sets a suggestion aside instead of loading it again', async () => {
   expect(screen.getByRole('button', { name: 'Add redaction' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Accept suggestion' })).not.toBeInTheDocument()
 })
+
+it('turning the page leaves the AI box behind instead of snapping back', async () => {
+  const { user } = setup({ proposals: [PROPOSAL] })
+  await screen.findByRole('button', { name: 'Accept suggestion' })
+  ;(document.activeElement as HTMLElement | null)?.blur()
+  await user.keyboard('{ArrowRight}')
+  expect(await screen.findByLabelText('Draw redactions on page 2')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Next page' }))
+  expect(await screen.findByLabelText('Draw redactions on page 3')).toBeInTheDocument()
+})
+
+it('a suggestion set aside stays aside after leaving and returning to the record', async () => {
+  const { user } = setup({ proposals: [PROPOSAL] })
+  await screen.findByRole('button', { name: 'Accept suggestion' })
+  ;(document.activeElement as HTMLElement | null)?.blur()
+  await user.keyboard('{Escape}')
+  await user.keyboard('j')
+  await user.keyboard('k')
+  expect(screen.getByRole('option', { name: /Board memo/ })).toHaveAttribute('aria-selected', 'true')
+  expect(await screen.findByRole('button', { name: 'Add redaction' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Accept suggestion' })).not.toBeInTheDocument()
+})

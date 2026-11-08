@@ -25,7 +25,7 @@ it('says where to turn the first pass on when it is off', () => {
   show({ enabled: false, read: 0, total: 40 })
   expect(screen.getByText(/AI is not reading this case's records/)).toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'Turn it on in Settings' })).toHaveAttribute(
-    'href', '/configuration/district',
+    'href', '/configuration/settings',
   )
 })
 

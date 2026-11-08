@@ -90,6 +90,9 @@ export function RedactWorkspace({ number }: { number: string }) {
   // Suggestions already accepted, dismissed, or set aside with Esc on this
   // record, so the next one opens instead of the same one again.
   const [passed, setPassed] = useState<string[]>([])
+  // Open the next AI box only when a record is opened or a suggestion was just
+  // decided, never after paging, so the arrows never snap back to a box.
+  const [autoOpen, setAutoOpen] = useState(true)
 
   const list = useQuery({
     queryKey: ['record-items', 'redact', number],
@@ -161,7 +164,7 @@ export function RedactWorkspace({ number }: { number: string }) {
     setRejectReason('')
     setExplanation('')
     setRemoveTarget(null)
-    setPassed([])
+    setAutoOpen(true)
   }, [params, records, setParams])
 
   function refresh() {
@@ -199,6 +202,7 @@ export function RedactWorkspace({ number }: { number: string }) {
       refresh()
       qc.invalidateQueries({ queryKey: ['record-redaction-advisory', recordId] })
       clearDraft()
+      setAutoOpen(true)
       toast('success', 'Suggestion accepted.')
     },
     onError: (error) => toast('error', error.message),
@@ -212,6 +216,7 @@ export function RedactWorkspace({ number }: { number: string }) {
       qc.invalidateQueries({ queryKey: ['record-redaction-advisory', recordId] })
       qc.invalidateQueries({ queryKey: ['redaction-groups', number] })
       clearDraft()
+      setAutoOpen(true)
       toast('success', 'Suggestion dismissed.')
     },
     onError: (error) => toast('error', error.message),
@@ -302,9 +307,10 @@ export function RedactWorkspace({ number }: { number: string }) {
   // The AI's boxes come first: with nothing in hand, the next suggestion
   // opens on its page, ready for Enter (accept) or x (dismiss with a reason).
   useEffect(() => {
-    if (proposalId || draftBox || dragStart || !nextSuggestion) return
-    takeSuggestion(nextSuggestion)
-  }, [draftBox, dragStart, nextSuggestion, proposalId])
+    if (!autoOpen || proposalId || draftBox || dragStart || !advisory.isSuccess) return
+    setAutoOpen(false)
+    if (nextSuggestion) takeSuggestion(nextSuggestion)
+  }, [advisory.isSuccess, autoOpen, draftBox, dragStart, nextSuggestion, proposalId])
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     // Captured so a release outside the page still ends the drag here.
