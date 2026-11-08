@@ -348,14 +348,14 @@ export function RedactWorkspace({ number }: { number: string }) {
   }
 
   // Page and form side by side from laptop width; the records sit in a strip
-  // above them until the window is wide enough for a third column.
+  // above them until a large screen (1536px) has room for a third column.
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[15rem_minmax(0,1fr)_20rem]">
-      <nav aria-label="Responsive records" className="min-w-0 lg:col-span-2 xl:col-span-1">
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] 2xl:grid-cols-[15rem_minmax(0,1fr)_20rem]">
+      <nav aria-label="Responsive records" className="min-w-0 lg:col-span-2 2xl:col-span-1">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
           {records.length} responsive {records.length === 1 ? 'record' : 'records'}
         </p>
-        <ul role="listbox" aria-label="Records to redact" className="flex gap-2 overflow-x-auto pb-1 xl:block xl:max-h-[78vh] xl:space-y-1 xl:overflow-x-visible xl:overflow-y-auto xl:pb-0">
+        <ul role="listbox" aria-label="Records to redact" className="flex gap-2 overflow-x-auto pb-1 2xl:block 2xl:max-h-[78vh] 2xl:space-y-1 2xl:overflow-x-visible 2xl:overflow-y-auto 2xl:pb-0">
           {records.map((row, rowIndex) => (
             <li
               key={row.id}
@@ -363,7 +363,7 @@ export function RedactWorkspace({ number }: { number: string }) {
               aria-selected={rowIndex === index}
               tabIndex={-1}
               onClick={() => select(rowIndex)}
-              className={`w-56 shrink-0 cursor-pointer rounded-lg border px-3 py-2 text-sm xl:w-auto ${
+              className={`w-56 shrink-0 cursor-pointer rounded-lg border px-3 py-2 text-sm 2xl:w-auto ${
                 rowIndex === index
                   ? 'border-flow bg-flow-soft text-ink'
                   : 'border-transparent text-ink hover:border-line'
