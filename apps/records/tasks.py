@@ -222,6 +222,12 @@ class _VaultCollectionRetry(RuntimeError):
     """Content-free retry marker; provider errors never enter task evidence."""
 
 
+#: Vault's export-creation quota (HTTP 429) refuses the third or fourth export
+#: created within a minute (production, 2026-11-08). A refused pull waits two
+#: minutes per try, about an hour in all, instead of the short fault budget.
+VAULT_RATE_LIMIT_RETRIES = 30
+
+
 @shared_task(bind=True, max_retries=4)
 def execute_vault_collection(self, collection_task_id: int):
     """Start one confirmed Vault hold/export with bounded safe retries."""
@@ -229,8 +235,10 @@ def execute_vault_collection(self, collection_task_id: int):
 
     try:
         start_vault_collection(collection_task_id)
-    except Exception:  # noqa: BLE001 - a provider fault retries, then fails the collection
-        if self.request.retries >= self.max_retries:
+    except Exception as exc:  # noqa: BLE001 - a provider fault retries, then fails the collection
+        limited = getattr(getattr(exc, "resp", None), "status", None) == 429
+        budget = VAULT_RATE_LIMIT_RETRIES if limited else self.max_retries
+        if self.request.retries >= budget:
             fail_vault_collection(
                 collection_task_id,
                 code="provider_unavailable",
@@ -244,12 +252,13 @@ def execute_vault_collection(self, collection_task_id: int):
                 extra={"collection_task": collection_task_id},
             )
             return
-        countdown = min(30 * (2 ** self.request.retries), 300)
+        countdown = 120 if limited else min(30 * (2 ** self.request.retries), 300)
         raise self.retry(
             exc=_VaultCollectionRetry(
                 "Vault collection provider is temporarily unavailable."
             ),
             countdown=countdown,
+            max_retries=budget,
         ) from None
 
 
