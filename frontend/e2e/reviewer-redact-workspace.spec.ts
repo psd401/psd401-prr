@@ -18,6 +18,8 @@ test('reviewer-redact-workspace', async ({ page }) => {
   await expect(records.getByRole('option').first()).toHaveAttribute('aria-selected', 'true')
   const surface = page.getByLabel('Draw redactions on page 1')
   await expect(surface.getByRole('img')).toBeVisible()
+  // The page is large; bring its top into the window before dragging on it.
+  await surface.evaluate((node) => node.scrollIntoView({ block: 'start' }))
 
   const box = await surface.boundingBox()
   if (!box) throw new Error('The page preview has no size.')
@@ -78,4 +80,20 @@ test('reviewer-redact-workspace-laptop', async ({ page }) => {
     path: path.resolve('../.verification/reviewer-redact-workspace-laptop.png'),
     fullPage: false,
   })
+})
+
+// A common laptop window (1347px) keeps the records as a strip so the page
+// gets the width; the records only take their own column on a large screen.
+test('reviewer-redact-workspace-page-width', async ({ page }) => {
+  await page.setViewportSize({ width: 1347, height: 806 })
+  await login(page, 'e2e-reviewer', 'e2e-reviewer-local-only')
+  await page.goto(`/requests/${caseNumber}/redact`)
+
+  const surface = page.getByLabel('Draw redactions on page 1')
+  await expect(surface.getByRole('img')).toBeVisible()
+  const pageBox = await surface.boundingBox()
+  const stripBox = await page.getByRole('navigation', { name: 'Responsive records' }).boundingBox()
+  if (!pageBox || !stripBox) throw new Error('The page or the records strip has no size.')
+  expect(pageBox.width).toBeGreaterThan(600)
+  expect(stripBox.y + stripBox.height).toBeLessThanOrEqual(pageBox.y)
 })
