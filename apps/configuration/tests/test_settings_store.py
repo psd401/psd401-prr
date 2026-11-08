@@ -37,6 +37,9 @@ GMAIL_IDENTITY = override_settings(
     PRR_GMAIL_IMPERSONATION_TARGET="prr-gmail@example.iam.gserviceaccount.com"
 )
 
+#: Boolean switches that ship on. Every other switch ships off.
+DEFAULT_ON_SWITCHES = {"PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED"}
+
 PHASE_A_SWITCHES = {
     "PRR_AI_ADVISORY_ENABLED",
     "PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED",
@@ -57,13 +60,21 @@ class RegistryTests(TestCase):
         self.assertEqual(PHASE_A_SWITCHES - set(SETTING_KEYS), set())
 
     def test_every_boolean_switch_defaults_to_the_safe_value(self):
-        """Off, for every switch. A limit's safe default is a different
-        question -- it is the value the shipped configuration has always
-        used, asserted per key in ``test_registry_bounds``."""
+        """Off, for every switch but the record first pass. A limit's safe
+        default is a different question -- it is the value the shipped
+        configuration has always used, asserted per key in
+        ``test_registry_bounds``."""
         for spec in SETTINGS:
-            if spec.type != values.BOOLEAN:
+            if spec.type != values.BOOLEAN or spec.key in DEFAULT_ON_SWITCHES:
                 continue
             self.assertFalse(spec.default, spec.key)
+
+    def test_the_record_first_pass_is_on_by_default(self):
+        """The CIO's decision of 2026-11-08: the AI reads every record and
+        pre-marks redactions without anyone asking. It still applies
+        nothing; a named person decides every outcome."""
+        self.assertEqual(DEFAULT_ON_SWITCHES, {"PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED"})
+        self.assertTrue(SETTINGS_BY_KEY["PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED"].default)
 
     def test_every_switch_carries_consequence_text_and_a_known_category(self):
         for spec in SETTINGS:

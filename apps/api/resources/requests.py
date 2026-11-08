@@ -71,6 +71,7 @@ from apps.correspondence.models import (
 from apps.records import services
 from apps.records.advisory_ai import (
     INTAKE_LABELS,
+    first_pass_progress,
     request_intake_classification,
     request_request_intent_advisory,
 )
@@ -1260,6 +1261,12 @@ class CaseWorkspaceNextActionSerializer(serializers.Serializer):
     work_item_id = serializers.UUIDField()
 
 
+class CaseWorkspaceFirstPassSerializer(serializers.Serializer):
+    enabled = serializers.BooleanField()
+    read = serializers.IntegerField()
+    total = serializers.IntegerField()
+
+
 class CaseWorkspaceSummarySerializer(serializers.Serializer):
     number = serializers.CharField()
     legal_status = serializers.CharField()
@@ -1277,6 +1284,7 @@ class CaseWorkspaceSummarySerializer(serializers.Serializer):
     next_due_basis = serializers.ChoiceField(
         choices=list(DueBasis.CHOICES), allow_null=True,
     )
+    ai_first_pass = CaseWorkspaceFirstPassSerializer()
 
 
 class CaseActivityEntrySerializer(serializers.Serializer):
@@ -2022,6 +2030,7 @@ class RequestsViewSet(
                 else None
             ),
             "stages": case_stages(prr),
+            "ai_first_pass": first_pass_progress(prr),
         }
         return Response(CaseWorkspaceSummarySerializer(payload).data)
 

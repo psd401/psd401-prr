@@ -25,6 +25,7 @@ import { EstimateLetterCard } from './EstimateLetterCard'
 import { RecordUploadPanel } from './RecordUploadPanel'
 import { RedactionProposals } from './RedactionProposals'
 import { RedactWorkspace } from './RedactWorkspace'
+import { AiFirstPass, type FirstPassProgress } from './AiFirstPass'
 import { ReviewFlight } from './ReviewFlight'
 import { ScopingTrail } from './ScopingTrail'
 
@@ -72,6 +73,8 @@ interface CaseSummary {
   summary: string
   matter_kind: string
   next_due: string | null
+  /** How far the AI's automatic first pass has read this case's records. */
+  ai_first_pass?: FirstPassProgress
 }
 
 interface ClosureReadiness {
@@ -392,7 +395,15 @@ function ScopeStage({ number, roles }: { number: string; roles: StaffRole[] }) {
 }
 
 /** Review: the keyboard flight by default, or every record (`?view=records`). */
-function ReviewStage({ number, roles }: { number: string; roles: StaffRole[] }) {
+function ReviewStage({
+  number,
+  roles,
+  firstPass,
+}: {
+  number: string
+  roles: StaffRole[]
+  firstPass?: FirstPassProgress
+}) {
   const [params, setParams] = useSearchParams()
   const canFly = roles.includes('records_officer') || roles.includes('reviewer')
   const view = !canFly || params.get('view') === 'records' ? 'records' : 'flight'
@@ -404,6 +415,7 @@ function ReviewStage({ number, roles }: { number: string; roles: StaffRole[] }) 
   }
   return (
     <div className="space-y-4">
+      {firstPass && <AiFirstPass progress={firstPass} />}
       {canFly && (
         <div role="group" aria-label="Review view" className="flex gap-2">
           <button
@@ -435,10 +447,11 @@ function ReviewStage({ number, roles }: { number: string; roles: StaffRole[] }) 
   )
 }
 
-function RedactStage({ number }: { number: string }) {
+function RedactStage({ number, firstPass }: { number: string; firstPass?: FirstPassProgress }) {
   const [params, setParams] = useSearchParams()
   return (
     <div className="space-y-5">
+      {firstPass && <AiFirstPass progress={firstPass} />}
       <RedactionProposals
         request={number}
         onOpen={(id) => {
@@ -494,8 +507,10 @@ function TabContent({
       </div>
     )
   }
-  if (tab === 'review') return <ReviewStage number={number} roles={roles} />
-  if (tab === 'redact') return <RedactStage number={number} />
+  if (tab === 'review') {
+    return <ReviewStage number={number} roles={roles} firstPass={summary.ai_first_pass} />
+  }
+  if (tab === 'redact') return <RedactStage number={number} firstPass={summary.ai_first_pass} />
   if (tab === 'release') return <Installments key={number} roles={roles} requestNumber={number} />
   if (tab === 'close') {
     return (

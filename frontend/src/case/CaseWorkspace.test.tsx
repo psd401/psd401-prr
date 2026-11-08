@@ -861,6 +861,27 @@ describe('CaseWorkspace stage rail (#45)', () => {
       .toHaveAttribute('aria-current', 'page')
   })
 
+  it('tells Review and Redact how far the AI has read', async () => {
+    const reading = { ...SUMMARY, ai_first_pass: { enabled: true, read: 40, total: 120 } }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/workspace-summary/')) return fakeResponse(reading)
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    })
+    renderCase('/requests/PRR-2026-0001/review', ['records_officer'], fetchMock)
+    expect(await screen.findByText('AI has read 40 of 120 records.')).toBeInTheDocument()
+  })
+
+  it('tells Redact how far the AI has read', async () => {
+    const reading = { ...SUMMARY, ai_first_pass: { enabled: true, read: 120, total: 120 } }
+    renderCase('/requests/PRR-2026-0001/redact', ['records_officer'], vi.fn(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/workspace-summary/')) return fakeResponse(reading)
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    }))
+    expect(await screen.findByText('AI has read all 120 records.')).toBeInTheDocument()
+  })
+
   it('heads the stage with what it asks, and jumps to the work when already there', async () => {
     renderCase('/requests/PRR-2026-0001/collect', ['records_officer'], withCollections([VAULT_TASK]))
 

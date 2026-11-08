@@ -342,6 +342,15 @@ Automatic responsiveness runs (`PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED`) use
 the review model, `PRR_AI_MODEL_RESPONSIVENESS`, falling back to
 `PRR_AI_MODEL` when it is blank.
 
+That switch is the AI's first pass on every record, and it ships **on**
+(CIO decision, 2026-11-08); every other switch ships off. It still applies
+nothing. Review and Redact show how far it has read each case ("AI has read
+1,200 of 3,647 records"), from `workspace-summary`'s `ai_first_pass` counts,
+and Redact opens each responsive record on its next undecided AI box: Enter
+accepts it, x goes to the dismiss reason, Esc sets it aside. A deployment
+that already stored the old "off" value keeps it until an Application Admin
+changes it in Settings.
+
 ## Estimates from measured agreement
 
 `apps/records/estimates.estimate_request(request)` (#41) computes an estimate
