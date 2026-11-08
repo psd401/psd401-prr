@@ -113,7 +113,9 @@ when the backup does not complete. Only after that does the script run
 `release_manage migrate --noinput`. A migration-bearing release therefore always has a
 backup taken by the same release before its migration. The source contains no check that
 pins drill evidence or migration digests for the recurring deploy. `docs/backups.md`
-describes such a gate, and that conflicts with the source; see
+describes such a gate, including a 2026-08-25 status section that reports a retained
+isolated drill; that conflicts with the source, and the drill evidence it cites is not
+available to this wiki. See
 [open verification items](../quickstart.md#open-verification-items). The release
 mechanics are in [aws-deployment.md](aws-deployment.md).
 

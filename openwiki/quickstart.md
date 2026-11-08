@@ -209,7 +209,9 @@ them before a large merge, not for a one-file change.
   and no drill or migration-digest check was found in `infra/`. The restore verifier
   (`infra/aws/verify-app-backup-restore.sh`) is installed on the host as a command, but nothing in
   `infra/` invokes it during a release. `docs/project-status.md` says
-  the release-gate machinery was retired. Treat the drill as a manual procedure until the
+  the release-gate machinery was retired. The status section of `docs/backups.md` (verified
+  2026-08-25) also reports a retained isolated drill and a migration-digest check; the evidence
+  it cites is outside this wiki, and no such check exists in `infra/`. Treat the drill as a manual procedure until the
   owner confirms. See [backups](operations/backups.md#restore-verifier-and-the-release-ordering).
 
 ## Backlog
