@@ -12,7 +12,6 @@ import hashlib
 from django.test import override_settings
 from django.utils import timezone
 
-from apps.correspondence import services
 from apps.correspondence.models import Correspondence
 from apps.records.models import (
     AdvisoryRun,
