@@ -123,6 +123,11 @@ when the two differ, or when a count is still running. It never blocks sending, 
 the district chose to leave that judgment with the officer. Its test is
 `frontend/src/scopeCountNotice.test.ts`.
 
+A finished count can also trigger a system draft. With `PRR_AI_AUTOMATIC_SCOPE_LETTER_ENABLED` on, the
+`prepare-scope-letters` job drafts the informational scope letter from the latest count before any
+records are pulled. The draft is never sent, and collection still needs the human gate below. See
+[correspondence](correspondence.md#scope-conversation-letter).
+
 ### Collection
 
 `queue_vault_collection()` in
