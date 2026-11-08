@@ -238,7 +238,9 @@ only then: from the final completed count of a finished *automatic* scoping
 session, on a request with no Vault collection yet, with no actor and
 `CollectionTask.trigger=automatic`, which the Collect stage shows. It is the
 same collection an officer would start -- one export each for Gmail, Drive,
-and Chat -- with the same deposit gate, the same Gmail targeted hold for named
+and Chat, including a Drive or Chat source Vault could not count, since a
+missing count is not evidence that nothing is there (CIO decision,
+2026-11-08) -- with the same deposit gate, the same Gmail targeted hold for named
 district mailboxes and no organization-wide hold, and the same export into
 review. Drive and Chat holds are placed only when a person starts the
 collection; the automatic collection adds none (holds unchanged). An officer's re-run never collects by itself;

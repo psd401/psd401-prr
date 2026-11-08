@@ -228,3 +228,77 @@ class StandInSourceTests(SimpleTestCase):
                     client.ensure_source_hold(source, "m", ["a@psd401.net"], name="n")
                 )
         client.delete_export("m", "e")
+
+
+def _vault_schemas() -> dict:
+    """Google's own Vault v1 discovery document, shipped with the client."""
+    import json
+    from pathlib import Path
+
+    import googleapiclient
+
+    path = (
+        Path(googleapiclient.__file__).parent
+        / "discovery_cache" / "documents" / "vault.v1.json"
+    )
+    return json.loads(path.read_text())["schemas"]
+
+
+@patch("apps.integrations.vault.client.audit")
+class DiscoverySchemaTests(SimpleTestCase):
+    """Every body sent to Vault uses only fields Google publishes for it.
+
+    The shape tests above pin what the client builds; these check that what
+    it builds is valid Vault v1: each field exists on its schema, none is
+    deprecated, and each enum value is one the schema lists. A misspelt or
+    retired field (``includeSharedDrives``) fails here, not in production.
+    """
+
+    schemas = None
+
+    def check(self, value, schema_name, path=""):
+        schemas = self.schemas or _vault_schemas()
+        type(self).schemas = schemas
+        properties = schemas[schema_name]["properties"]
+        for key, item in value.items():
+            where = f"{path}.{key}" if path else key
+            self.assertIn(key, properties, f"{schema_name} has no field {where}")
+            spec = properties[key]
+            self.assertFalse(spec.get("deprecated", False), f"{where} is deprecated")
+            if "$ref" in spec:
+                self.check(item, spec["$ref"], where)
+            elif spec.get("type") == "array" and "$ref" in spec.get("items", {}):
+                for element in item:
+                    self.check(element, spec["items"]["$ref"], where)
+            elif "enum" in spec:
+                self.assertIn(item, spec["enum"], f"{where}={item!r} is not a {schema_name} value")
+
+    def test_count_only_and_collection_exports_are_valid_vault_exports(self, _audit):
+        for source in ("drive", "chat"):
+            for kwargs in ({}, {"entire_org": True, "org_unit_id": "id:02synthetic"}):
+                for build in (client.ensure_count_export, client.ensure_source_export):
+                    with self.subTest(source=source, build=build.__name__, **kwargs):
+                        svc = _service()
+                        with patch.object(client, "_vault_service", return_value=svc):
+                            build(
+                                source, "matter-1", ["a@psd401.net"], '"bus route"',
+                                name=f"n {source}",
+                                start_time="2026-01-01T08:00:00Z",
+                                end_time="2026-02-01T08:00:00Z",
+                                **kwargs,
+                            )
+                        _, call = svc.matters().exports().create.call_args
+                        self.check(call["body"], "Export")
+
+    def test_holds_are_valid_vault_holds(self, _audit):
+        for source in ("drive", "chat"):
+            with self.subTest(source=source):
+                svc = _service()
+                with patch.object(client, "_vault_service", return_value=svc):
+                    client.ensure_source_hold(source, "matter-1", ["a@psd401.net"], name="h")
+                _, call = svc.matters().holds().create.call_args
+                self.check(call["body"], "Hold")
+
+    def test_the_retired_drive_field_would_be_caught(self, _audit):
+        with self.assertRaises(AssertionError):
+            self.check({"driveOptions": {"includeSharedDrives": True}}, "Query")

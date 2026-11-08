@@ -324,22 +324,24 @@ class CollectionTaskApiTests(TestCase):
         self.assertEqual(self.task.state, CollectionTask.State.PENDING)
 
     def test_patch_cannot_mark_vault_collection_complete_without_ingest_evidence(self):
-        vault_task = CollectionTask.objects.create(
-            request=self.request_obj,
-            kind=CollectionTask.Kind.VAULT_CHAT,
-            state=CollectionTask.State.RUNNING,
-            instructions="Vault task.",
-        )
+        for kind in CollectionTask.VAULT_KINDS:
+            with self.subTest(kind=kind):
+                vault_task = CollectionTask.objects.create(
+                    request=self.request_obj,
+                    kind=kind,
+                    state=CollectionTask.State.RUNNING,
+                    instructions="Vault task.",
+                )
 
-        response = self.client.patch(
-            f"/api/staff/collection-tasks/{vault_task.pk}/",
-            {"state": CollectionTask.State.COMPLETE},
-            content_type="application/json",
-        )
+                response = self.client.patch(
+                    f"/api/staff/collection-tasks/{vault_task.pk}/",
+                    {"state": CollectionTask.State.COMPLETE},
+                    content_type="application/json",
+                )
 
-        self.assertEqual(response.status_code, 400)
-        vault_task.refresh_from_db()
-        self.assertEqual(vault_task.state, CollectionTask.State.RUNNING)
+                self.assertEqual(response.status_code, 400)
+                vault_task.refresh_from_db()
+                self.assertEqual(vault_task.state, CollectionTask.State.RUNNING)
 
     def test_patch_assigned_to_by_id(self):
         officer2 = get_user_model().objects.create_user(
