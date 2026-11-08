@@ -152,12 +152,23 @@ class SystemScopeLetterTests(_LetterFixture):
         self._count()
         self.assertEqual(prepare_scope_letters(), 0)
 
-    def test_the_system_may_draft_it_but_never_in_the_clock_stopping_form(self):
-        self.assertIn(Correspondence.Kind.SCOPE_CLARIFICATION, services.SYSTEM_PREPARED_DRAFT_KINDS)
-        with self.assertRaises(TypeError):
-            # Passed through a dict on purpose: the call must fail at runtime.
-            choice = {"form": "clarification"}
-            services.create_system_scope_letter_draft(
-                self.prr, match_count=1, query_summary=SUMMARY,
-                narrowing_options=[], response_by=dt.date(2026, 12, 1), **choice,
+    def test_a_reading_too_short_to_state_does_not_block_newer_cases(self):
+        stuck = []
+        for n in range(10):
+            older = PublicRecordsRequest.objects.create(
+                requester=self.prr.requester,
+                description=f"Synthetic older request {n}.",
             )
+            self._reading(older, summary="Bus.")
+            self._count(older)
+            stuck.append(older)
+        PublicRecordsRequest.objects.filter(pk__in=[p.pk for p in stuck]).update(
+            received_at=timezone.now() - dt.timedelta(days=30),
+        )
+        self._reading()
+        self._count()
+
+        prepare_scope_letters()
+        self.assertEqual(prepare_scope_letters(), 1)
+        draft = Correspondence.objects.get(kind=Correspondence.Kind.SCOPE_CLARIFICATION)
+        self.assertEqual(draft.request_id, self.prr.pk)

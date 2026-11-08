@@ -44,6 +44,10 @@ REPLY_BUSINESS_DAYS = 10
 
 def ready_requests(*, limit: int):
     """Open public records cases whose scope letter can be drafted now."""
+    return _ready().order_by("received_at", "pk")[:limit]
+
+
+def _ready():
     from apps.correspondence.models import Correspondence
 
     return (
@@ -95,7 +99,6 @@ def ready_requests(*, limit: int):
                 )
             )
         )
-        .order_by("received_at", "pk")[:limit]
     )
 
 
@@ -141,6 +144,10 @@ def prepare_scope_letters(*, limit: int = 10) -> int:
         summary = str(reading.proposal.get("summary") or "").strip()[:500]
         try:
             with transaction.atomic():
+                # Re-read under a lock so two overlapping runs cannot both draft.
+                PublicRecordsRequest.objects.select_for_update().get(pk=prr.pk)
+                if not _ready().filter(pk=prr.pk).exists():
+                    continue
                 create_system_scope_letter_draft(
                     prr,
                     match_count=int(count.total_count),
@@ -154,7 +161,12 @@ def prepare_scope_letters(*, limit: int = 10) -> int:
                 )
                 drafted += 1
         except ValidationError:
-            # A case that changed underneath, or a reading too short to state,
-            # is simply not drafted this time; staff can still write one.
+            # A reading too short to state, or a case that changed underneath,
+            # gets no automatic letter for these counts; staff can still write
+            # one. The counts are marked so the case does not hold a slot ahead
+            # of newer cases on every run.
+            finished.filter(scope_letter_prepared_at__isnull=True).update(
+                scope_letter_prepared_at=timezone.now(),
+            )
             logger.warning("Scope letter not drafted for %s.", prr.number, exc_info=True)
     return drafted

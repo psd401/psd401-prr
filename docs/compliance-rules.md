@@ -86,7 +86,8 @@ only by a person. `apps/records/estimate_letters.prepare_estimate_letters`
 (`PRR_AI_AUTOMATIC_ESTIMATE_LETTER_ENABLED`, an in-app setting, off by default)
 computes a `RecordsEstimate` and drafts the letter as a *system-prepared*
 draft: no author, never `automated`, and never approved, queued, or sent by the
-system. `SYSTEM_PREPARED_DRAFT_KINDS` holds only that kind and the informational scope letter above, the database
+system. `SYSTEM_PREPARED_DRAFT_KINDS` holds only that kind and the
+informational scope letter above, the database
 constraint `correspondence_system_prepared_kind_allowed` holds the same line,
 and `estimate-letter-ast-guard` in `test_compliance` forbids the drafting path
 from calling any approve, queue, send, transition, estimate-revision, or
