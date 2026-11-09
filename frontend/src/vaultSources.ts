@@ -4,7 +4,8 @@
  * Mirrors `source_count_summary()` in `apps/records/vault_counts.py` and the
  * Vault collection task kinds in `apps/records/models.py`. Each source is
  * counting, counted with a number, or unavailable with a plain reason; a
- * source is never silently left out.
+ * source is never silently left out. A counted source carries a reason only
+ * when its number is the total Google reported for a count that did not finish.
  */
 
 export type VaultSource = 'mail' | 'drive' | 'chat'
@@ -27,7 +28,8 @@ const ITEM_NOUNS: Record<VaultSource, [string, string]> = {
 export function sourceCountText(row: VaultSourceCount): string {
   if (row.state === 'counted' && row.count !== null) {
     const [one, many] = ITEM_NOUNS[row.source] ?? ['item', 'items']
-    return `${new Intl.NumberFormat().format(row.count)} ${row.count === 1 ? one : many}`
+    const text = `${new Intl.NumberFormat().format(row.count)} ${row.count === 1 ? one : many}`
+    return row.reason ? `${text} (${row.reason})` : text
   }
   if (row.state === 'unavailable') {
     return row.reason ? `Not available: ${row.reason}` : 'Not available'

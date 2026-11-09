@@ -29,6 +29,17 @@ describe('sourceCountText', () => {
     expect(sourceCountText({ ...drive, state: 'counted', count: 3 })).toBe('3 files')
   })
 
+  it('adds the note on a counted total that Google reported', () => {
+    expect(
+      sourceCountText({
+        ...drive,
+        state: 'counted',
+        count: 6057,
+        reason: "Google's reported total; its count did not finish.",
+      }),
+    ).toBe("6,057 files (Google's reported total; its count did not finish.)")
+  })
+
   it('says counting and not available plainly', () => {
     expect(sourceCountText(drive)).toBe('Counting…')
     expect(sourceCountText(chat)).toBe('Not available: Staff organizational unit not set.')
