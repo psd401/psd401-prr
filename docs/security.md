@@ -88,7 +88,7 @@ Never expose Gunicorn/Uvicorn or the internal service network directly to a
 district LAN or the internet.
 
 `config/asgi.py` is the single public application. Its top-level lifespan runs
-FastMCP's session manager, routes exact `/mcp` requests to the authenticated
+MCPServer's session manager, routes exact `/mcp` requests to the authenticated
 streamable-HTTP app, and delegates every other request to Django. Hosted MCP is
 stateless across the four workers. It performs staff reads and its five gated
 draft/proposal operations in-process through Django's URL, middleware,
@@ -99,7 +99,7 @@ For that internal request, it mirrors Django's explicitly configured
 operator enabled the documented trusted-proxy contract. This keeps the auth
 probe secure behind the separate Caddy container without trusting arbitrary
 client headers.
-FastMCP's DNS-rebinding allowlist is derived from Django's non-wildcard
+The MCP SDK's DNS-rebinding allowlist is derived from Django's non-wildcard
 `ALLOWED_HOSTS`; Caddy's existing catch-all proxy therefore needs no new route
 or public port.
 

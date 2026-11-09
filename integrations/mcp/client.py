@@ -314,6 +314,14 @@ def _without_record_filenames(batch):
     return batch
 
 
+class StaffAPIError(RuntimeError):
+    """A sanitized internal staff-API failure with no request credentials."""
+
+    def __init__(self, status_code):
+        super().__init__(f"Staff API returned HTTP {status_code}.")
+        self.status_code = status_code
+
+
 class PRRClient:
     """Thin wrapper over the PSD401 PRR staff API."""
 
