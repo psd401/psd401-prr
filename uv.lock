@@ -1435,7 +1435,7 @@ requires-dist = [
     { name = "gunicorn", specifier = ">=26.2.0" },
     { name = "holidays", specifier = ">=0.104" },
     { name = "httpx", specifier = ">=0.28.1,<1" },
-    { name = "mcp", specifier = ">=1.29.1,<3" },
+    { name = "mcp", specifier = ">=2.3.0,<3" },
     { name = "mozilla-django-oidc", specifier = ">=5.0.2,<6.0" },
     { name = "ocrmypdf", specifier = ">=17.12.1,<18" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6" },

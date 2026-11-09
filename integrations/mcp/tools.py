@@ -1,4 +1,4 @@
-# ABOUTME: FastMCP registry with shared reads and hosted-only gated write tools.
+# ABOUTME: MCPServer registry with shared reads and hosted-only gated write tools.
 # ABOUTME: Transport-specific code supplies a PRRClient for each tool request.
 from __future__ import annotations
 
@@ -7,10 +7,12 @@ from functools import partial
 from typing import Literal
 
 import anyio
-from mcp.server.fastmcp import Context, FastMCP
+import requests
+from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from .client import CONCISE, PRRClient
+from .client import CONCISE, PRRClient, StaffAPIError
 
 #: psd-dev-standards standards/07-mcp.md build standard 3 requires
 #: ``psd_<system>_<resource>_<verb>`` names. ``prr`` is this system's slug, so
@@ -122,10 +124,10 @@ def _read_annotations(title: str) -> ToolAnnotations:
     """
     return ToolAnnotations(
         title=title,
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=False,
+        read_only_hint=True,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
     )
 
 
@@ -141,10 +143,10 @@ def _proposal_annotations(title: str, *, idempotent: bool) -> ToolAnnotations:
     """
     return ToolAnnotations(
         title=title,
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=idempotent,
-        openWorldHint=False,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=idempotent,
+        open_world_hint=False,
     )
 
 READ_INSTRUCTIONS = (
@@ -170,22 +172,30 @@ HOSTED_INSTRUCTIONS = (
 
 ClientProvider = Callable[[Context], PRRClient]
 
+#: Failures a caller can act on: a rejected argument, a token without the
+#: right to write, or a staff-API refusal. Anything else is a crash and stays
+#: hidden behind the SDK's generic message.
+ANTICIPATED_TOOL_ERRORS = (
+    ValueError,
+    PermissionError,
+    StaffAPIError,
+    requests.exceptions.HTTPError,
+)
+
 
 def create_mcp_server(
     client_provider: ClientProvider,
     *,
     include_write_tools: bool = False,
-    **fastmcp_options,
-) -> FastMCP:
+) -> MCPServer:
     """Register shared reads and, when requested, hosted write tools."""
-    mcp = FastMCP(
+    mcp = MCPServer(
         "prr-staff-api",
         instructions=(
             HOSTED_INSTRUCTIONS
             if include_write_tools
             else READ_INSTRUCTIONS
         ),
-        **fastmcp_options,
     )
 
     async def call(tool_name, ctx, **kwargs):
@@ -197,7 +207,14 @@ def create_mcp_server(
         """
         client = client_provider(ctx)
         method = getattr(client, TOOL_CLIENT_METHODS[tool_name])
-        return await anyio.to_thread.run_sync(partial(method, **kwargs))
+        try:
+            return await anyio.to_thread.run_sync(partial(method, **kwargs))
+        except ANTICIPATED_TOOL_ERRORS as exc:
+            # mcp 2.x shows a model only "Error executing tool <name>" for any
+            # other exception. These carry the message a model needs to correct
+            # its call (the argument format, the limit range, the 403), and
+            # none of them carries a credential.
+            raise ToolError(str(exc)) from exc
 
     # Every tool below passes its MCP name explicitly rather than inheriting
     # the Python function name. The two namespaces answer to different rules:
@@ -461,7 +478,7 @@ def create_mcp_server(
         # whose parameters are all required: one optional parameter means a
         # trailing ``ctx`` would follow a default, which Python forbids. This
         # matches the read tools, which also put it first for that reason.
-        # FastMCP keys its argument model by name and drops ``ctx``, so the
+        # MCPServer keys its argument model by name and drops ``ctx``, so the
         # position changes no part of the published schema.
         async def draft_acknowledgment(
             ctx: Context,

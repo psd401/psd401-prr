@@ -287,15 +287,15 @@ class ToolAnnotationTests(SimpleTestCase):
                 annotations = annotations_for(tool)
                 # Neither may be left to the schema default: destructiveHint
                 # defaults to true, so silence reads as "dangerous".
-                self.assertIsNotNone(annotations.readOnlyHint)
-                self.assertIsNotNone(annotations.destructiveHint)
-                self.assertIsNotNone(annotations.idempotentHint)
-                self.assertIsNotNone(annotations.openWorldHint)
+                self.assertIsNotNone(annotations.read_only_hint)
+                self.assertIsNotNone(annotations.destructive_hint)
+                self.assertIsNotNone(annotations.idempotent_hint)
+                self.assertIsNotNone(annotations.open_world_hint)
                 self.assertTrue(annotations.title)
 
     def test_reads_are_read_only_and_drafts_are_not(self):
         hints = {
-            tool.name: annotations_for(tool).readOnlyHint
+            tool.name: annotations_for(tool).read_only_hint
             for tool in hosted_tools()
         }
         for name in (*READ_TOOL_NAMES, *HOSTED_READ_TOOL_NAMES):
@@ -312,8 +312,8 @@ class ToolAnnotationTests(SimpleTestCase):
         for tool in hosted_tools():
             with self.subTest(tool=tool.name):
                 annotations = annotations_for(tool)
-                self.assertIs(annotations.destructiveHint, False)
-                self.assertIs(annotations.openWorldHint, False)
+                self.assertIs(annotations.destructive_hint, False)
+                self.assertIs(annotations.open_world_hint, False)
 
     def test_every_tool_has_a_description(self):
         for tool in hosted_tools():
@@ -332,10 +332,10 @@ class ToolDefinitionPinTests(SimpleTestCase):
                     "name": tool.name,
                     "title": annotations_for(tool).title,
                     "description": tool.description,
-                    "readOnlyHint": annotations_for(tool).readOnlyHint,
-                    "destructiveHint": annotations_for(tool).destructiveHint,
-                    "idempotentHint": annotations_for(tool).idempotentHint,
-                    "openWorldHint": annotations_for(tool).openWorldHint,
+                    "readOnlyHint": annotations_for(tool).read_only_hint,
+                    "destructiveHint": annotations_for(tool).destructive_hint,
+                    "idempotentHint": annotations_for(tool).idempotent_hint,
+                    "openWorldHint": annotations_for(tool).open_world_hint,
                 }
                 for tool in sorted(hosted_tools(), key=lambda t: t.name)
             ],
@@ -403,11 +403,11 @@ class ServerManifestTests(SimpleTestCase):
                 annotations = annotations_for(tool)
                 self.assertIs(
                     declared[name]["readOnlyHint"],
-                    annotations.readOnlyHint,
+                    annotations.read_only_hint,
                 )
                 self.assertIs(
                     declared[name]["destructiveHint"],
-                    annotations.destructiveHint,
+                    annotations.destructive_hint,
                 )
 
     def test_the_manifest_marks_the_hosted_only_tools(self):

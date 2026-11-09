@@ -16,7 +16,7 @@ import hashlib
 import json
 from datetime import timedelta
 
-import httpx
+import httpx2
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
@@ -175,9 +175,9 @@ class MCPEvalSuiteTests(TransactionTestCase):
 
     async def run_cases(self, cases):
         application = create_application()
-        transport = httpx.ASGITransport(app=application)
+        transport = httpx2.ASGITransport(app=application)
         async with application.router.lifespan_context(application):
-            async with httpx.AsyncClient(
+            async with httpx2.AsyncClient(
                 transport=transport,
                 base_url="https://localhost",
                 headers={
@@ -187,7 +187,7 @@ class MCPEvalSuiteTests(TransactionTestCase):
                 async with streamable_http_client(
                     "https://localhost/mcp",
                     http_client=http_client,
-                ) as (read_stream, write_stream, _):
+                ) as (read_stream, write_stream):
                     async with ClientSession(
                         read_stream,
                         write_stream,
@@ -212,12 +212,12 @@ class MCPEvalSuiteTests(TransactionTestCase):
                 detail = f"{case.rationale}\nresponse: {text[:800]}"
 
                 if case.expect_error:
-                    self.assertTrue(result.isError, detail)
+                    self.assertTrue(result.is_error, detail)
                     for fragment in case.error_contains:
                         self.assertIn(fragment.lower(), text.lower(), detail)
                     continue
 
-                self.assertFalse(result.isError, detail)
+                self.assertFalse(result.is_error, detail)
                 documents = parsed(result)
                 present = set()
                 for document in documents:

@@ -1,5 +1,5 @@
 # ABOUTME: Top-level ASGI composition for Django plus hosted streamable HTTP MCP.
-# ABOUTME: This lifespan owns FastMCP's session manager; mounted app lifespans do not run.
+# ABOUTME: This lifespan owns MCPServer's session manager; mounted app lifespans do not run.
 from __future__ import annotations
 
 import os
@@ -14,6 +14,7 @@ django_application = get_asgi_application()
 
 from integrations.mcp.hosted import (  # noqa: E402
     StaffTokenAuthenticationMiddleware,
+    create_hosted_http_app,
     create_hosted_mcp,
 )
 
@@ -54,7 +55,7 @@ def create_application():
         routes=[
             ExactMCPRoute(
                 StaffTokenAuthenticationMiddleware(
-                    mcp.streamable_http_app(),
+                    create_hosted_http_app(mcp),
                 )
             ),
             Mount("/", app=django_application),

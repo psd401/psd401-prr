@@ -4,7 +4,7 @@ import hashlib
 import json
 from datetime import timedelta
 
-import httpx
+import httpx2
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
 from django.test import TransactionTestCase
@@ -116,9 +116,9 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
 
     async def call_tools(self, token, calls, *, authorization_scheme="Token"):
         application = create_application()
-        transport = httpx.ASGITransport(app=application)
+        transport = httpx2.ASGITransport(app=application)
         async with application.router.lifespan_context(application):
-            async with httpx.AsyncClient(
+            async with httpx2.AsyncClient(
                 transport=transport,
                 base_url="https://localhost",
                 headers={
@@ -128,7 +128,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
                 async with streamable_http_client(
                     "https://localhost/mcp",
                     http_client=http_client,
-                ) as (read_stream, write_stream, _):
+                ) as (read_stream, write_stream):
                     async with ClientSession(read_stream, write_stream) as session:
                         await session.initialize()
                         listed = await session.list_tools()
@@ -167,7 +167,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
             ],
         )
 
-        self.assertFalse(results[0].isError, rendered_result(results[0]))
+        self.assertFalse(results[0].is_error, rendered_result(results[0]))
         draft = Correspondence.objects.get(
             request=received,
             kind=Correspondence.Kind.ACKNOWLEDGMENT,
@@ -232,7 +232,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
             ],
         )
 
-        self.assertFalse(results[0].isError, rendered_result(results[0]))
+        self.assertFalse(results[0].is_error, rendered_result(results[0]))
         payload = rendered_result(results[0])
         # The draft itself must still carry the statutory wording.
         draft = Correspondence.objects.get(
@@ -309,7 +309,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
             ],
         )
 
-        self.assertTrue(results[0].isError, rendered_result(results[0]))
+        self.assertTrue(results[0].is_error, rendered_result(results[0]))
         self.prr.refresh_from_db()
         self.assertEqual(self.prr.estimated_completion, published_estimate)
         self.assertFalse(
@@ -335,7 +335,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
             ],
         )
 
-        self.assertTrue(results[0].isError)
+        self.assertTrue(results[0].is_error)
         self.assertIn(
             "request number",
             rendered_result(results[0]).lower(),
@@ -374,7 +374,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
             names,
             set(READ_TOOL_NAMES).union(HOSTED_READ_TOOL_NAMES, WRITE_TOOL_NAMES),
         )
-        self.assertFalse(results[0].isError, rendered_result(results[0]))
+        self.assertFalse(results[0].is_error, rendered_result(results[0]))
         draft = Correspondence.objects.get(
             request=self.prr,
             kind=Correspondence.Kind.CLARIFICATION_REQUEST,
@@ -434,7 +434,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
             authorization_scheme="token",
         )
 
-        self.assertFalse(results[0].isError, rendered_result(results[0]))
+        self.assertFalse(results[0].is_error, rendered_result(results[0]))
         self.assertIn(
             '"applied": false',
             rendered_result(results[0]).lower(),
@@ -478,7 +478,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
             names,
             set(READ_TOOL_NAMES).union(HOSTED_READ_TOOL_NAMES, WRITE_TOOL_NAMES),
         )
-        self.assertTrue(all(not result.isError for result in results))
+        self.assertTrue(all(not result.is_error for result in results))
         task_proposal = rendered_result(results[0])
         citation_proposal = rendered_result(results[1])
         self.assertIn("superintendent", task_proposal)
@@ -521,7 +521,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
             ],
         )
 
-        self.assertTrue(results[0].isError)
+        self.assertTrue(results[0].is_error)
         self.assertIn("active", rendered_result(results[0]).lower())
         self.assertEqual(self.record_item.withholding_exemptions.count(), 0)
 
@@ -575,7 +575,7 @@ class MCPWriteToolAcceptanceTests(TransactionTestCase):
             names,
             set(READ_TOOL_NAMES).union(HOSTED_READ_TOOL_NAMES, WRITE_TOOL_NAMES),
         )
-        self.assertTrue(all(result.isError for result in results))
+        self.assertTrue(all(result.is_error for result in results))
         for result in results:
             self.assertIn("personal", rendered_result(result).lower())
         self.assertFalse(

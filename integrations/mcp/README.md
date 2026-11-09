@@ -296,12 +296,16 @@ decision. `apps/api/tests/test_mcp_tool_contract.py` asserts build standard
 
 ## Protocol version and the 2026-07-28 stateless spec
 
-The pinned floor is `mcp>=1.29.1,<2` (in `pyproject.toml` and in this
+The pinned floor is `mcp>=2.3.0,<3` (in `pyproject.toml` and in this
 package's `server.py` PEP 723 block, both asserted by
-`apps/api/tests/test_hosted_mcp.py`). 1.29.1 is the first release verified to
-speak protocol revision **2025-11-25**, which is what the hosted transport
-negotiates today and the minimum `standards/07-mcp.md` build standard 1
-names.
+`apps/api/tests/test_hosted_mcp.py`). The 2.x SDK renamed `FastMCP` to
+`MCPServer` (`mcp.server.mcpserver`), moved the transport options
+(`json_response`, `stateless_http`, `transport_security`) from the
+constructor to `streamable_http_app()` (see `hosted.create_hosted_http_app`),
+and reads model fields in snake_case (`read_only_hint`, `is_error`) while the
+wire stays camelCase. Its latest protocol revision is **2026-07-28**; it
+still negotiates **2025-11-25**, the minimum `standards/07-mcp.md` build
+standard 1 names, with older clients.
 
 Build standard 1 also asks for a migration plan to the **2026-07-28**
 revision, which removes sessions and the `initialize` handshake entirely and

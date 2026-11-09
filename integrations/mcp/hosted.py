@@ -8,11 +8,11 @@ import anyio
 import httpx
 from django.conf import settings
 from django.core.wsgi import get_wsgi_application
-from mcp.server.fastmcp.server import TransportSecuritySettings
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.responses import JSONResponse
 
-from .client import PRRClient
+from .client import PRRClient, StaffAPIError
 from .tools import create_mcp_server
 
 logger = logging.getLogger(__name__)
@@ -30,14 +30,6 @@ def _token_from_authorization(authorization):
     ):
         return None
     return parts[1]
-
-
-class StaffAPIError(RuntimeError):
-    """A sanitized internal staff-API failure with no request credentials."""
-
-    def __init__(self, status_code):
-        super().__init__(f"Staff API returned HTTP {status_code}.")
-        self.status_code = status_code
 
 
 class DjangoPRRClient(PRRClient):
@@ -179,10 +171,13 @@ def _client_for_context(ctx):
 
 
 def create_hosted_mcp():
-    """Create one stateless server suitable for multi-worker ASGI mounting."""
-    return create_mcp_server(
-        _client_for_context,
-        include_write_tools=True,
+    """Create the hosted server: shared reads plus the gated write tools."""
+    return create_mcp_server(_client_for_context, include_write_tools=True)
+
+
+def create_hosted_http_app(mcp):
+    """Its stateless JSON transport, suitable for multi-worker ASGI mounting."""
+    return mcp.streamable_http_app(
         json_response=True,
         stateless_http=True,
         streamable_http_path="/",
