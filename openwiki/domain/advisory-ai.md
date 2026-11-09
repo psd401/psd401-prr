@@ -7,7 +7,7 @@ timestamp: 2026-11-08T00:00:00Z
 openwiki:
   roles: [domain, integration, architecture]
   change_kinds: [advisory-ai, model-provider, redaction-proposal, automatic-run, intake-classification]
-  source_paths: [apps/records/advisory_ai.py, apps/records/redaction_ai.py, apps/records/models.py, apps/records/intake.py, apps/records/tasks.py, apps/records/agreement.py, apps/records/review.py, apps/records/scope_letters.py, apps/api/advisory.py, apps/api/resources/requests.py, apps/api/resources/advisory_agreement.py, apps/configuration/registry.py, apps/configuration/prerequisites.py, infra/cdk/lib/advisory-bedrock.ts, frontend/src/case/IntakeClassificationCard.tsx, frontend/src/pages/AiAgreement.tsx, apps/records/review_batches.py, docs/advisory-ai.md]
+  source_paths: [apps/records/advisory_ai.py, apps/records/redaction_ai.py, apps/records/models.py, apps/records/intake.py, apps/records/tasks.py, apps/records/agreement.py, apps/records/review.py, apps/records/scope_letters.py, apps/api/advisory.py, apps/api/resources/requests.py, apps/api/resources/advisory_agreement.py, apps/configuration/registry.py, apps/configuration/prerequisites.py, infra/cdk/lib/advisory-bedrock.ts, frontend/src/case/IntakeClassificationCard.tsx, frontend/src/case/AiFirstPass.tsx, frontend/src/pages/AiAgreement.tsx, apps/records/review_batches.py, docs/advisory-ai.md]
   symbols: [AdvisoryRun, AdvisoryFeedback, RedactionProposal, RedactionProposalDecision, ReviewDecision, request_request_intent_advisory, request_case_title_advisory, request_intake_classification, defer_automatic_intake_classification, request_record_responsiveness_advisory, request_record_redaction_advisory, request_automatic_record_advisory, defer_automatic_record_advisory, execute_advisory_run, invoke_advisory_model, prepare_record_review_advisories, INTAKE_LABELS, advisory_intake, agreement_report, latest_suggestion_runs, annotate_latest_suggestion, confidence_band, AdvisoryAgreementViewSet]
   test_paths: [apps/records/tests/test_advisory_ai.py, apps/records/tests/test_automatic_record_advisory.py, apps/records/tests/test_redaction_ai.py, apps/records/tests/test_case_titles.py, apps/records/tests/test_intake_classification.py, apps/records/tests/test_scope_conversation.py, apps/records/tests/test_verify_advisory_command.py, apps/records/tests/test_review_agreement.py, apps/api/tests/test_advisory_ai.py, apps/api/tests/test_redaction_ai.py]
   invariants:
@@ -208,7 +208,10 @@ AI's first pass on every record, and it ships on (CIO decision, 2026-11-08). The
 Staff see the first pass as "AI has read N of M records" in the case workspace summary
 (`ai_first_pass`, built by `first_pass_progress()` in `apps/records/advisory_ai.py` and shaped by
 `CaseWorkspaceFirstPassSerializer` in `apps/api/resources/requests.py`; `apps/api/tests/test_case_workspace.py` asserts the
-enabled, read, and total values and the off state). The first pass applies nothing. A
+enabled, read, and total values and the off state). The line is drawn by
+`AiFirstPass` in `frontend/src/case/AiFirstPass.tsx`, which `CaseWorkspace.tsx` mounts above the
+Review and Redact stages. It shows a progress bar while reads are pending, and when the switch is off
+it links to Settings instead of implying that suggestions exist ([staff frontend case stages](../architecture/staff-frontend.md#case-stages-and-views)). The first pass applies nothing. A
 deployment that already stored the old "off" value keeps it until an Application Admin
 changes it.
 
