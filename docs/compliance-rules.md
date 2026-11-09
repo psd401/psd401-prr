@@ -114,22 +114,108 @@ service.
 
 ## Rule 7 — Footage: auto-hold always, auto-deny never
 
-Intake triage (`apps/records/triage.py`) detects camera-footage requests. Inside
-the retention window (`CAMERA_RETENTION_DAYS`): hold EVERY camera immediately via
-Avigilon Alta saved clips (`apps/integrations/avigilon/client.py` — endpoint
-paths carry VERIFY markers; run `manage.py verify_alta` with the district token
-first).
+Intake triage (`apps/records/triage.py`) detects camera-footage requests and
+auto-holds always: every camera at each site the request names
+(`apps/records/footage_sites.py` maps school names, abbreviations, and site
+codes to Aware camera groups), or every camera district-wide when no site is
+identified. Each in-scope camera gets an Avigilon Alta Aware bookmark with no
+expiry (`apps/integrations/avigilon/client.py`), starting at the later of the
+requested window's start and that camera's oldest retained footage. Requested
+dates are whole Pacific calendar days. Retention is per camera, read from
+Aware. `CAMERA_RETENTION_DAYS` only sizes the window when the request has no
+parseable date. When Aware is unreachable the hold is an URGENT manual hold
+whatever the window's age, because only Aware knows which cameras keep footage
+past the setting.
+A camera whose bookmark covers less than 95% of the window, or whose coverage
+Aware did not report, is recorded as a footage gap, and the preservation is
+then PARTIAL, never HELD. PARTIAL sends an URGENT notice naming each failed,
+gap, or unverified camera.
 
-Outside retention: queue only a human-review + adequate-search checklist
-(Neighborhood Alliance standard) — no requester response is drafted or queued
-automatically. A human must complete the search, choose the legally supported
-response, draft, approve, and send; there is no auto-denial code path and none
-may be added.
+A request whose dates span more than `CAMERA_HOLD_MAX_SPAN_DAYS` (default 31)
+is held for that many days only. When the days inside `CAMERA_RETENTION_DAYS`
+alone exceed the cap, the oldest of them are held, because they are pruned
+first. Otherwise the hold keeps every retained day and reaches back from the
+last requested date, since some cameras keep footage longer than the setting.
+A hold narrowed this way,
+or narrowed to the sites the request names, writes a StatusEvent and sends one
+URGENT scope notice to facilities, the PRA supervisor, and the Records
+Officers. A Records Officer widens a site-narrowed hold to every camera
+district-wide through `triage.widen_preservation()` (`POST
+/api/staff/preservations/{id}/widen/`) with a substantive reason. Widening
+bookmarks only cameras with no hold yet, so a camera already tried keeps its
+outcome. It only preserves more, so it is a direct action rather than a
+human-only handoff. A widen is refused while the first run is still PENDING.
+A widen that cannot list Aware's cameras, or finds none, sends an URGENT
+manual notice and leaves the hold's state, held counts, scope and confirmation
+text as they were. A widen's completion notice and not-retained review cover
+only the cameras it added. A widen that stops partway sends an URGENT manual
+notice.
 
-Camera exclusions require a human + substantive reason via
-`triage.exclude_camera()` (AST-guarded like `revise_estimate`). If the Alta API
-is down/unconfigured, holds degrade to URGENT manual instructions to facilities
-— never to silence.
+Zero cameras at a named site goes to human adequate-search review
+(`NO_CAMERAS`) and an URGENT manual notice, never "held": footage may sit on
+another recorder. Where no in-scope camera retains the window, and for each
+camera that no longer retains it inside a partly held preservation: queue only
+a human-review + adequate-search checklist (Neighborhood Alliance standard) —
+no requester response is drafted or queued automatically. A human must complete the search,
+choose the legally supported response, draft, approve, and send; there is no
+auto-denial code path and none may be added. The preservation confirmation
+text (HELD/PARTIAL only) is shown to staff for correspondence they write; it is
+never sent automatically.
+
+Camera exclusion is human-only with a reason: it goes through
+`triage.exclude_camera()`, AST-guarded like `revise_estimate`. Release is
+automatic. There is no release button, API action, or capability, and no
+reason or attestation is collected. `tasks.release_due_footage_preservations`
+runs hourly (beat, at :20) and after every transition into a closed status,
+and it is the only caller of `triage.release_preservation()` (AST-guarded). It
+releases each due preservation in its own transaction, so one failure never
+stops the rest. `triage.release_eligible_at()` sets the time:
+
+| Closure | Released |
+| --- | --- |
+| Fulfilled, withdrawn, duplicate, non-request | At closing (`closed_at`) |
+| Denied, no records, abandoned | One year after closing (`PRA_SUIT_WINDOW`) |
+
+The one-year wait matches the RCW 42.56.550(6) limit on suits over a claim of
+exemption or a last production; those closures are the ones a requester is
+most likely to contest. A merged duplicate waits for its case of record too,
+and the later of the two dates wins. A closed request with no `closed_at` is
+logged and never released on a guess; a reopened request clears `closed_at`
+and keeps its hold. A request reopened after its release gets a timeline entry
+naming the release date, telling staff to re-preserve by hand any footage it
+covers; a delete Aware has not confirmed keeps retrying after a reopen, since
+the hold already ended. The release reason is a system sentence naming the
+closure, with the RCW 42.56.550(6) clause when the release waited, and
+`released_by` stays empty.
+
+Release and exclusion mark each
+bookmark `RELEASE_FAILED` (not yet confirmed deleted) inside their
+transaction, and flip it to `RELEASED` only after Aware confirms the delete (or
+reports the bookmark already gone). A refused delete, or a crash partway
+through, therefore leaves the camera retryable and logged; every run retries
+only those cameras, excluded ones included, and records each retry in the
+audit log. An exclusion whose delete fails on an open request waits for that
+release, so its bookmark over-preserves until then. Release waits
+while a hold run (a widen included) is still bookmarking; if the sweeper
+cleared a stalled run that then makes one more bookmark after a release, that
+bookmark is marked `RELEASE_FAILED` so the next run deletes it. A camera whose
+create Aware never confirmed has no bookmark id to delete by, so the release's
+timeline entry (or, for a create made after the release, its own timeline
+entry) names the bookmark for a human to find and delete in Aware.
+The confirmation text says when footage recorded after the hold was placed is
+not yet confirmed preserved.
+
+Intake enqueues the hold task only after its transaction commits. Each run
+claims a camera's row before calling Aware, so two runs never bookmark the
+same camera; the claim is cleared only when Aware definitely made no bookmark.
+Coverage is scored against the time each camera's bookmark was made. If the
+Aware API is down or unconfigured, or a hold task crashes, holds degrade to
+URGENT manual instructions to facilities — never to silence. Every run (intake
+and widen) marks itself in progress and heartbeats per camera. A beat sweeper
+runs every 5 minutes: a PENDING hold whose heartbeat is 15 minutes old moves
+to URGENT manual, and a stalled widen sends the URGENT notice but keeps the
+hold's state. A run's final state save is conditional on the state it started
+from, so it never overwrites what the sweeper set; a lost save is audited.
 
 ## Rule 8 — The system registry routes collection
 

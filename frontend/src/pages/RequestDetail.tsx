@@ -31,6 +31,7 @@ import {
   reasonTooShort,
 } from '../ui'
 import { proposedVaultQuery } from '../vaultQuery'
+import { preservationStateLabel, preservationStateTone } from '../preservationStatus'
 import { formatDay } from '../date'
 
 interface RequesterInfo {
@@ -84,6 +85,10 @@ interface CollectionTask {
 interface FootagePreservation {
   id: number
   state: string
+  /** What Aware confirmed held, for a human to copy; never sent. */
+  confirmation_text: string | null
+  /** A released hold with cameras whose Aware bookmark delete failed. */
+  has_release_failures?: boolean
 }
 
 interface RequestDetail {
@@ -295,16 +300,18 @@ const TASK_STATE_LABELS: Record<string, string> = {
   failed: 'Failed',
 }
 
-const PRESERVATION_STATE_LABELS: Record<string, string> = {
-  pending: 'Pending — hold executing',
-  held: 'Held',
-  partial: 'Held (some cameras failed)',
-  manual: 'Manual hold required',
-  expired: 'Window outside retention',
-  released: 'Released',
+/** Badge wording and tone for the case footage card, matching Preservations. */
+function preservationBadge(p: FootagePreservation) {
+  // A release that left bookmarks behind is not done: say so, not "Released".
+  const state = p.state === 'released' && p.has_release_failures ? 'release_failed' : p.state
+  return { label: preservationStateLabel(state), tone: preservationStateTone(state) }
 }
 
-const ACTIVE_PRESERVATION_STATES = new Set(['pending', 'partial', 'manual'])
+// States where footage may still be lost and a human must act now.
+// no_cameras belongs here: Aware bookmarked nothing, but a standalone
+// recorder at the site may still be overwriting footage until the
+// adequate-search review finds it.
+const ACTIVE_PRESERVATION_STATES = new Set(['pending', 'partial', 'manual', 'no_cameras'])
 
 const ATTACHMENT_STATUS: Record<
   IntakeAttachment['scan_status'],
@@ -1863,12 +1870,15 @@ export function RequestDetail({
                   {ACTIVE_PRESERVATION_STATES.has(p.state) ? (
                     <Badge tone="red">
                       Footage may be overwritten —{' '}
-                      {PRESERVATION_STATE_LABELS[p.state] ?? p.state}
+                      {preservationBadge(p).label}
                     </Badge>
                   ) : (
-                    <Badge tone={p.state === 'held' ? 'green' : 'neutral'}>
-                      {PRESERVATION_STATE_LABELS[p.state] ?? p.state}
+                    <Badge tone={preservationBadge(p).tone}>
+                      {preservationBadge(p).label}
                     </Badge>
+                  )}
+                  {p.confirmation_text && (
+                    <p className="w-full text-sm text-ink">{p.confirmation_text}</p>
                   )}
                   {(
                     roles.includes('records_officer')

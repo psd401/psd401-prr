@@ -9,6 +9,7 @@ bounded retry for transport failures.
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import logging
@@ -43,6 +44,7 @@ SIGNAL_TYPES: Final = frozenset(
         "footage.manual_hold_required",
         "footage.hold_complete",
         "footage.adequate_search_review_queued",
+        "footage.hold_scope_narrowed",
         "collection.task_created",
         "intake.auto_applied",
         "correspondence.delivery_effects_failed",
@@ -549,8 +551,29 @@ def notify_stalled(
     )
 
 
-def notify_footage_manual_hold(preservation, *, error: str) -> bool | None:
+def _footage_sites(codes) -> str:
+    from .footage_sites import site_name
+
+    return ", ".join(f"{site_name(code)} ({code})" for code in codes)
+
+
+def notify_footage_manual_hold(
+    preservation,
+    *,
+    error: str,
+    site_codes=None,
+    cameras=(),
+    condition: str = "",
+) -> bool | None:
+    """URGENT: a human must bookmark footage in Aware by hand. ``cameras``
+    (one line per camera) scopes the instructions to those cameras; else
+    ``site_codes`` scopes them, and empty means every camera district-wide.
+    ``condition`` keeps a distinct alert for the same preservation (a
+    partial hold, a site with no cameras) from being deduplicated away."""
     request = preservation.request
+    if site_codes is None:
+        site_codes = preservation.site_codes
+    cameras = [str(line)[:200] for line in cameras]
     return enqueue_staff_notification(
         signal_type="footage.manual_hold_required",
         request=request,
@@ -564,11 +587,54 @@ def notify_footage_manual_hold(preservation, *, error: str) -> bool | None:
             "window_end": preservation.window_end,
             "camera_retention_days": runtime.get("CAMERA_RETENTION_DAYS"),
             "failure": str(error)[:500],
+            "sites": _footage_sites(site_codes or ()),
+            "cameras": cameras,
+            "held_count": preservation.held_count,
         },
         condition_key=(
             f"{preservation.pk}:{preservation.window_start.isoformat()}:"
             f"{preservation.window_end.isoformat()}"
+            + (f":{condition}" if condition else "")
+            + f":{_manual_hold_instructions_hash(site_codes, cameras)}"
         ),
+        immediate=True,
+    )
+
+
+def _manual_hold_instructions_hash(site_codes, cameras) -> str:
+    """Short digest of what the notice tells facilities to bookmark, so new
+    instructions (a widen, other cameras) are never deduplicated away."""
+    scope = ",".join(sorted(str(code) for code in site_codes or ())) or "district-wide"
+    lines = "\n".join(sorted(cameras))
+    return hashlib.sha256(f"{scope}\n{lines}".encode()).hexdigest()[:12]
+
+
+def notify_footage_scope_narrowed(
+    preservation, *, reasons, condition: str = "scope",
+) -> bool | None:
+    """URGENT: the automatic hold covers less than the request asked for
+    (a clipped date span, specific sites). A human must widen it."""
+    request = preservation.request
+    reasons = [str(reason)[:500] for reason in reasons]
+    return enqueue_staff_notification(
+        signal_type="footage.hold_scope_narrowed",
+        request=request,
+        recipients=(
+            runtime.get("FACILITIES_EMAIL"),
+            runtime.get("PRA_SUPERVISOR_EMAIL"),
+            *_records_officer_recipients(),
+        ),
+        subject=(
+            f"[URGENT — HOLD SCOPE] {request.number}: the automatic hold is "
+            "narrower than the request"
+        ),
+        template_name="notifications/footage_scope_narrowed.txt",
+        context={
+            "window_start": preservation.window_start,
+            "window_end": preservation.window_end,
+            "reasons": reasons,
+        },
+        condition_key=f"{preservation.pk}:{condition}",
         immediate=True,
     )
 
@@ -577,23 +643,33 @@ def notify_footage_hold_complete(
     preservation,
     *,
     held: int,
-    failed: int,
+    gap: int = 0,
+    failed: int = 0,
+    not_retained: int = 0,
 ) -> bool | None:
     request = preservation.request
+    short = bool(gap or failed or not_retained)
     recipients = list(_records_officer_recipients())
-    if failed:
+    if short:
         recipients.append(runtime.get("PRA_SUPERVISOR_EMAIL"))
     return enqueue_staff_notification(
         signal_type="footage.hold_complete",
         request=request,
         recipients=recipients,
         subject=(
-            f"[FOOTAGE HOLD {'PARTIAL' if failed else 'COMPLETE'}] "
-            f"{request.number}: {held} held, {failed} failed"
+            f"[FOOTAGE HOLD {'PARTIAL' if short else 'COMPLETE'}] "
+            f"{request.number}: {held} held, {gap} gap, {failed} failed, "
+            f"{not_retained} not retained"
         ),
         template_name="notifications/footage_hold_complete.txt",
-        context={"held_count": held, "failed_count": failed},
-        condition_key=f"{preservation.pk}:{held}:{failed}",
+        context={
+            "held_count": held,
+            "gap_count": gap,
+            "failed_count": failed,
+            "not_retained_count": not_retained,
+            "sites": _footage_sites(preservation.site_codes),
+        },
+        condition_key=f"{preservation.pk}:{held}:{gap}:{failed}:{not_retained}",
     )
 
 
@@ -615,8 +691,19 @@ def notify_intake_auto_applied(applied) -> bool | None:
     )
 
 
-def notify_adequate_search_review(preservation) -> bool | None:
+def notify_adequate_search_review(
+    preservation,
+    *,
+    no_camera_sites=(),
+    not_retained_cameras=(),
+    note: str = "",
+) -> bool | None:
+    """Queue the human adequate-search review: nothing is retained for the
+    window (on every camera, or on ``not_retained_cameras`` of a partial
+    hold), or a named site has no cameras in Aware."""
     request = preservation.request
+    no_camera_sites = list(no_camera_sites)
+    not_retained_cameras = [str(line)[:200] for line in not_retained_cameras]
     return enqueue_staff_notification(
         signal_type="footage.adequate_search_review_queued",
         request=request,
@@ -626,9 +713,19 @@ def notify_adequate_search_review(preservation) -> bool | None:
         context={
             "window_start": preservation.window_start,
             "window_end": preservation.window_end,
+            # The window ends at midnight after the last requested day.
+            "window_last_day": preservation.window_end - dt.timedelta(microseconds=1),
             "camera_retention_days": runtime.get("CAMERA_RETENTION_DAYS"),
+            "no_camera_sites": _footage_sites(no_camera_sites),
+            "not_retained_cameras": not_retained_cameras,
+            "note": str(note)[:500],
         },
-        condition_key=str(preservation.pk),
+        condition_key=(
+            f"{preservation.pk}:no-cameras:{','.join(no_camera_sites)}"
+            if no_camera_sites else
+            f"{preservation.pk}:not-retained" if not_retained_cameras else
+            str(preservation.pk)
+        ),
     )
 
 

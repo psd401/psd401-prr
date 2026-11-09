@@ -289,6 +289,8 @@ class AgentCapabilityRegistryTests(SimpleTestCase):
             by_id["correspondence.draft_estimate_revision"]["constraints"],
         )
         self.assertEqual(by_id["preservations.exclude_camera"]["execution"], "human_only")
+        # Release is automatic (rule 7): no capability, human or agent.
+        self.assertNotIn("preservations.release", by_id)
         self.assertEqual(
             by_id["correspondence.approve"]["execution"],
             "human_only",

@@ -1355,12 +1355,34 @@ SETTINGS: tuple[SettingSpec, ...] = (
         label="Camera retention window",
         consequence=(
             "How long the district's cameras are believed to keep footage. "
-            "A request landing inside this window puts an immediate hold on "
-            "every camera. Shortening it below the true retention means "
-            "footage that still exists is never held and can be overwritten "
-            "— a destroyed public record. Outside the window the request "
-            "still gets a human search and an adequate-search checklist; "
-            "nothing is ever denied automatically."
+            "Automatic holds read each camera's real retention from Aware; "
+            "this setting sizes the hold window when a request names no "
+            "date, and, while Aware is unreachable, decides whether a window "
+            "goes to adequate-search review instead of an urgent manual "
+            "hold. Shortening it below the true retention shrinks no-date "
+            "holds and can skip a manual hold on footage that still exists "
+            "— a destroyed public record. Either way the request still gets "
+            "a human search; nothing is ever denied automatically."
+        ),
+    ),
+    SettingSpec(
+        key="CAMERA_HOLD_MAX_SPAN_DAYS",
+        type=values.INTEGER,
+        default=31,
+        minimum=1,
+        maximum=366,
+        unit="days",
+        category=CATEGORY_RECORDS,
+        label="Longest automatic hold span",
+        consequence=(
+            "The longest window an automatic camera hold bookmarks when the "
+            "request's dates span more than this (a birth date beside the "
+            "incident date, for instance). The hold keeps the most recent "
+            "days ending at the request's last date and sends an urgent "
+            "notice asking a human to refine the window and bookmark any "
+            "earlier footage by hand. Raising it bookmarks more footage on "
+            "every camera in scope; lowering it leaves more of a long "
+            "request to that human."
         ),
     ),
     SettingSpec(
@@ -1513,7 +1535,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="PRR_RECORD_UPLOAD_MAX_BYTES",
         type=values.INTEGER,
-        default=100 * _MIB,
+        default=500 * _MIB,
         minimum=1,
         maximum=500 * _MIB,
         unit="bytes",
@@ -1529,7 +1551,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="PRR_RECORD_UPLOAD_TOTAL_MAX_BYTES",
         type=values.INTEGER,
-        default=250 * _MIB,
+        default=2 * _GIB,
         minimum=1,
         maximum=2 * _GIB,
         unit="bytes",
@@ -2369,10 +2391,12 @@ SETTINGS: tuple[SettingSpec, ...] = (
         default="",
         allow_blank=True,
         max_length=255,
-        pattern=r"https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~/-]*)?",
+        # The origin only: the client adds /api/v1 itself.
+        pattern=r"https://[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(?::[0-9]{1,5})?",
         format_message=(
-            "The Alta address is an HTTPS URL with no credentials or query, "
-            "such as https://psd401.alta.avigilon.com/api/v1."
+            "The Alta address is the tenant's HTTPS origin with no path, "
+            "credentials, or query, such as "
+            "https://example.us4.aware.avasecurity.com."
         ),
         category=CATEGORY_INTEGRATIONS,
         label="Avigilon Alta API address",
@@ -2383,17 +2407,37 @@ SETTINGS: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
-        key="ALTA_API_TOKEN",
+        key="ALTA_API_USERNAME",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        max_length=254,
+        pattern=r"\S{1,254}",
+        format_message=(
+            "The Alta service account is its sign-in name with no spaces, "
+            "such as prr-holds@example.org."
+        ),
+        category=CATEGORY_INTEGRATIONS,
+        label="Avigilon Alta service account",
+        consequence=(
+            "The Alta account footage holds sign in as. Give it to nothing "
+            "else: Alta keeps three sessions per account, so anything else "
+            "signing in as it logs the holds out. Blank, holds fall back to "
+            "manual facilities work."
+        ),
+    ),
+    SettingSpec(
+        key="ALTA_API_PASSWORD",
         type=values.SECRET,
         default="",
         allow_blank=True,
-        max_length=4096,
+        max_length=1024,
         category=CATEGORY_INTEGRATIONS,
-        label="Avigilon Alta API token",
+        label="Avigilon Alta service-account password",
         consequence=(
-            "The bearer token footage holds are placed with. It is "
+            "The password the holds account signs in with. It is "
             "write-only: it can be replaced or cleared, never read back. "
-            "Blank or revoked, holds fall back to manual facilities work."
+            "Blank or wrong, holds fall back to manual facilities work."
         ),
     ),
 )

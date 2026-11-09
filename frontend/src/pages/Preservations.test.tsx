@@ -1,9 +1,33 @@
 // ABOUTME: Regression tests for the preservation surface — state filters and hold copy.
 // ABOUTME: A manual hold must never claim an email was sent without delivery evidence.
-import { screen, within } from '@testing-library/react'
+import type { ReactNode } from 'react'
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fakeResponse, page, renderPage } from '../test/pageHarness'
+import { ToastProvider } from '../ui'
+import { fakeResponse, page, queryClient, renderPage } from '../test/pageHarness'
 import { Preservations } from './Preservations'
+
+/** renderPage, but with a QueryClient the test can spy on. */
+function renderWithClient(ui: ReactNode, client: QueryClient) {
+  return render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <MemoryRouter>{ui}</MemoryRouter>
+      </ToastProvider>
+    </QueryClientProvider>,
+  )
+}
+
+function spyOnInvalidate(client: QueryClient) {
+  return vi.spyOn(client, 'invalidateQueries')
+}
+
+function invalidatedKeys(spy: ReturnType<typeof spyOnInvalidate>) {
+  return spy.mock.calls.map(([filters]) => filters?.queryKey)
+}
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -15,13 +39,123 @@ describe('Preservations — state filters', () => {
     vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([]))))
     renderPage(<Preservations roles={['admin']} />)
 
-    await screen.findByRole('button', { name: 'All' })
-    for (const state of ['Pending', 'Held', 'Partial', 'Manual', 'Expired', 'Released']) {
-      expect(
-        screen.getByRole('button', { name: new RegExp(`^${state}$`, 'i') }),
-      ).toBeInTheDocument()
+    const filters = await screen.findByRole('group', { name: 'Preservation state filters' })
+    within(filters).getByRole('button', { name: 'All' })
+    // Filter names come from the same labels as the state badges.
+    for (const label of [
+      'Pending',
+      'Held',
+      'Partly held',
+      'Manual hold required',
+      'No cameras in Aware at the requested site',
+      'Window outside retention',
+      'Released',
+    ]) {
+      expect(within(filters).getByRole('button', { name: label })).toBeInTheDocument()
     }
-    expect(screen.queryByRole('button', { name: /^active$/i })).not.toBeInTheDocument()
+    expect(within(filters).queryByRole('button', { name: /^active$/i })).not.toBeInTheDocument()
+    expect(within(filters).queryByRole('button', { name: /_/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('Preservations — exclusion dialog', () => {
+  async function openExcludeDialog() {
+    const user = userEvent.setup()
+    renderPage(<Preservations roles={['records_officer']} />)
+    await screen.findByText('Staff Parking')
+    await user.click(screen.getAllByRole('button', { name: 'Exclude' })[1]!)
+    const dialog = await screen.findByRole('dialog')
+    return { user, dialog }
+  }
+
+  it('requires a 10-character reason and caps it at 500', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([heldPreservation()]))))
+    const { user, dialog } = await openExcludeDialog()
+    const reason = within(dialog).getByLabelText(/Reason/)
+    expect(reason).toHaveAttribute('maxLength', '500')
+    const submit = within(dialog).getByRole('button', { name: 'Exclude camera' })
+    await user.type(reason, '   short  ')
+    expect(submit).toBeDisabled()
+    await user.type(reason, 'but now long enough')
+    expect(submit).toBeEnabled()
+  })
+
+  it('cannot be cancelled while the exclusion is in flight', async () => {
+    let finish: (value: Response) => void = () => {}
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/exclude-camera/') && init?.method === 'POST') {
+        return new Promise<Response>((resolve) => { finish = resolve })
+      }
+      return Promise.resolve(fakeResponse(page([heldPreservation()])))
+    }))
+    const { user, dialog } = await openExcludeDialog()
+    await user.type(within(dialog).getByLabelText(/Reason/), 'Camera faces a private office.')
+    await user.click(within(dialog).getByRole('button', { name: 'Exclude camera' }))
+
+    expect(await within(dialog).findByRole('button', { name: 'Excluding…' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    finish(fakeResponse({ detail: 'Exclusion refused.' }, 400))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Exclusion refused.')
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeEnabled()
+  })
+})
+
+describe('Preservations — exclusion', () => {
+  it('offers no Exclude once the hold is released or expired', async () => {
+    const base = heldPreservation()
+    for (const [state, cameraState] of [
+      ['released', 'failed'],
+      ['released', 'release_failed'],
+      ['expired', 'not_retained'],
+    ] as const) {
+      vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([
+        heldPreservation({
+          state,
+          release_eligible_at: null,
+          confirmation_text: null,
+          camera_holds: [{ ...base.camera_holds[1], state: cameraState }],
+        }),
+      ]))))
+      const view = renderPage(<Preservations roles={['records_officer']} />)
+      await screen.findByText('Staff Parking')
+      expect(screen.queryByRole('button', { name: 'Exclude' })).not.toBeInTheDocument()
+      view.unmount()
+    }
+  })
+})
+
+describe('Preservations — states that need a human', () => {
+  it('says a human must act, in a warning tone, for every unresolved state', async () => {
+    const base = heldPreservation()
+    const camera = (id: number, state: string) => ({
+      ...base.camera_holds[0], id, camera_name: `Camera ${id}`, state,
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([
+      heldPreservation({ id: 1, state: 'no_cameras', camera_holds: [] }),
+      heldPreservation({ id: 2, state: 'expired', camera_holds: [] }),
+      heldPreservation({
+        id: 3,
+        state: 'partial',
+        camera_holds: [camera(31, 'gap'), camera(32, 'not_retained'), camera(33, 'release_failed')],
+      }),
+    ]))))
+    renderPage(<Preservations roles={['admin']} />)
+
+    for (const label of [
+      'No cameras in Aware at the requested site — adequate-search review required',
+      'Window outside retention — adequate-search review required',
+      'Partly held — gaps or failures need review',
+      'Footage gap — adequate-search review required',
+      'No retained footage — adequate-search review required',
+      'Not yet confirmed deleted — bookmark may still exist; the release retries automatically',
+    ]) {
+      const badge = await screen.findByText(label)
+      expect(badge).toHaveClass('nx-badge')
+      expect(badge).not.toHaveClass('nx-badge--plain')
+    }
   })
 })
 
@@ -47,5 +181,333 @@ describe('Preservations — hold copy', () => {
     ).closest('section')!
     expect(within(preservationCard).getByText(/manual/i)).toHaveTextContent(/manual hold required/i)
     expect(within(preservationCard).queryByText(/email sent/i)).not.toBeInTheDocument()
+  })
+})
+
+const CONFIRMATION =
+  '2 cameras at Example Ridge High School held from 2026-09-22 00:00 to 2026-09-23 00:00 '
+  + 'Pacific time (Aware bookmarks, no expiry); 1 camera has a footage gap; 0 failed.'
+
+function heldPreservation(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 7,
+    request_number: 'PRR-2026-0007',
+    state: 'partial',
+    window_start: '2026-09-22T07:00:00Z',
+    window_end: '2026-09-23T07:00:00Z',
+    detected_dates_note: '',
+    site_codes: ['XRH'],
+    site_resolution:
+      'Sites named in the request: Example Ridge High School (XRH). Holding every camera in those Aware groups.',
+    held_count: 2,
+    confirmation_text: CONFIRMATION,
+    request_closed: true,
+    release_eligible_at: '2026-10-01T09:30:00-07:00',
+    widenable: false,
+    released_at: null,
+    released_by: null,
+    release_reason: '',
+    camera_holds: [
+      {
+        id: 1, camera_id: 'cam-1', camera_name: 'Gym Entrance', site: 'XRH',
+        clip_id: 'bm-1', state: 'held', error: '', coverage_fraction: 1,
+        coverage_note: '', excluded_at: null, excluded_by: null, exclusion_reason: '',
+      },
+      {
+        id: 2, camera_id: 'cam-2', camera_name: 'Staff Parking', site: 'XRH',
+        clip_id: 'bm-2', state: 'gap', error: '', coverage_fraction: 0.4,
+        coverage_note: 'Short coverage: head 0: 40%', excluded_at: null,
+        excluded_by: null, exclusion_reason: '',
+      },
+    ],
+    ...overrides,
+  }
+}
+
+describe('Preservations — Aware bookmark holds', () => {
+  it('shows the site scope, coverage, and bookmark for each camera', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([heldPreservation()]))))
+    renderPage(<Preservations roles={['records_officer']} />)
+
+    expect(await screen.findByText(/Holding every camera in those Aware groups/))
+      .toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Aware bookmark' })).toBeInTheDocument()
+    expect(screen.getByText('bm-2')).toBeInTheDocument()
+    expect(screen.getByText('Footage gap — adequate-search review required')).toBeInTheDocument()
+    expect(screen.getByText('40%')).toBeInTheDocument()
+    expect(screen.getByText('Short coverage: head 0: 40%')).toBeInTheDocument()
+  })
+
+  it('offers the confirmation text to copy and never sends it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([heldPreservation()]))))
+    const user = userEvent.setup()
+    const writeText = vi.fn(async () => undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    renderPage(<Preservations roles={['records_officer']} />)
+
+    expect(await screen.findByText(CONFIRMATION)).toBeInTheDocument()
+    expect(screen.getByText(/never sent automatically/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Copy confirmation' }))
+    expect(writeText).toHaveBeenCalledWith(CONFIRMATION)
+  })
+
+  it('announces "Copied" politely and clears it a few seconds later', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([heldPreservation()]))))
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: vi.fn(async () => undefined) },
+      })
+      renderPage(<Preservations roles={['records_officer']} />)
+
+      await user.click(await screen.findByRole('button', { name: 'Copy confirmation' }))
+      const box = screen.getByText(CONFIRMATION).parentElement!
+      const status = within(box).getByRole('status')
+      expect(status).toHaveAttribute('aria-live', 'polite')
+      await waitFor(() => expect(status).toHaveTextContent('Copied'))
+
+      await act(async () => { vi.advanceTimersByTime(5000) })
+      expect(status).toHaveTextContent('')
+      // The button keeps one stable name; the live region carries the news.
+      expect(screen.getByRole('button', { name: 'Copy confirmation' })).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows a toast when the clipboard refuses the copy', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([heldPreservation()]))))
+    const user = userEvent.setup()
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn(async () => { throw new Error('denied') }) },
+    })
+    renderPage(<Preservations roles={['records_officer']} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Copy confirmation' }))
+    expect(await screen.findByText('Copy failed — select the text and copy it by hand.'))
+      .toBeInTheDocument()
+    expect(screen.queryByText('Copied')).not.toBeInTheDocument()
+  })
+
+  it('gives each hold action a name that includes its request number', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([
+      heldPreservation({ id: 7, request_number: 'PRR-2026-0007', widenable: true }),
+      heldPreservation({ id: 8, request_number: 'PRR-2026-0008', widenable: true }),
+    ]))))
+    renderPage(<Preservations roles={['records_officer']} />)
+
+    for (const number of ['PRR-2026-0007', 'PRR-2026-0008']) {
+      expect(await screen.findByRole('button', { name: `Widen to district-wide — ${number}` }))
+        .toBeInTheDocument()
+    }
+  })
+
+  it('shows no confirmation when nothing is confirmed held', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([
+      heldPreservation({ state: 'no_cameras', confirmation_text: null, camera_holds: [] }),
+    ]))))
+    renderPage(<Preservations roles={['records_officer']} />)
+
+    expect(await screen.findByText('No cameras in Aware at the requested site'))
+      .toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Copy confirmation' })).not.toBeInTheDocument()
+  })
+})
+
+describe('Preservations — automatic release', () => {
+  const AUTO_REASON = 'Released automatically: PRR-2026-0007 closed (Fulfilled) on 2026-10-01.'
+
+  function released(overrides: Record<string, unknown> = {}) {
+    const base = heldPreservation()
+    return heldPreservation({
+      state: 'released',
+      confirmation_text: null,
+      release_eligible_at: null,
+      released_at: '2026-10-01T17:00:00Z',
+      released_by: null,
+      release_reason: AUTO_REASON,
+      camera_holds: base.camera_holds.map((h) => ({ ...h, state: 'released' })),
+      ...overrides,
+    })
+  }
+
+  function retrying() {
+    const base = heldPreservation()
+    return released({
+      release_eligible_at: '2026-10-01T09:30:00-07:00',
+      camera_holds: [
+        { ...base.camera_holds[0], state: 'released' },
+        { ...base.camera_holds[1], state: 'release_failed', error: 'Bookmark delete timed out.' },
+      ],
+    })
+  }
+
+  it('offers no release button, dialog, or retry to anyone', async () => {
+    for (const preservation of [heldPreservation(), retrying()]) {
+      vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([preservation]))))
+      const view = renderPage(<Preservations roles={['records_officer']} />)
+      await screen.findByText('Footage preservation')
+      expect(screen.queryByRole('button', { name: /Release hold|Retry release|Release and delete/ }))
+        .not.toBeInTheDocument()
+      expect(screen.queryByRole('checkbox', { name: /litigation hold/i })).not.toBeInTheDocument()
+      view.unmount()
+    }
+  })
+
+  it('says when the hold releases itself', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([
+      heldPreservation({ release_eligible_at: '2027-10-01T09:30:00-07:00' }),
+    ]))))
+    renderPage(<Preservations roles={['admin']} />)
+
+    expect(await screen.findByText('Releases automatically on 2027-10-01'))
+      .toBeInTheDocument()
+  })
+
+  it('says an open request releases after it closes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([
+      heldPreservation({ request_closed: false, release_eligible_at: null }),
+    ]))))
+    renderPage(<Preservations roles={['records_officer']} />)
+
+    expect(await screen.findByText('Releases automatically after the request closes'))
+      .toBeInTheDocument()
+  })
+
+  it('says a release with unconfirmed deletes is retrying', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([retrying()]))))
+    renderPage(<Preservations roles={['records_officer']} />)
+
+    expect(await screen.findByText('Release retrying')).toBeInTheDocument()
+    expect(screen.queryByText(/Releases automatically on/)).not.toBeInTheDocument()
+  })
+
+  it('shows an automatic release without a person', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([released()]))))
+    renderPage(<Preservations roles={['records_officer']} />)
+
+    expect(await screen.findByText(`Released 2026-10-01 — ${AUTO_REASON}`)).toBeInTheDocument()
+    expect(screen.queryByText(/Releases automatically/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Release retrying')).not.toBeInTheDocument()
+  })
+})
+
+describe('Preservations — widen to district-wide', () => {
+  function narrowed(overrides: Record<string, unknown> = {}) {
+    return heldPreservation({ request_closed: false, release_eligible_at: null, widenable: true, ...overrides })
+  }
+
+  it('offers widening only to a Records Officer on a widenable hold', async () => {
+    for (const [roles, overrides] of [
+      [['admin'], {}],
+      [['records_officer'], { widenable: false }],
+    ] as const) {
+      vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(page([narrowed(overrides)]))))
+      const view = renderPage(<Preservations roles={[...roles]} />)
+      await screen.findByText('Footage preservation')
+      expect(screen.queryByRole('button', { name: /Widen/ })).not.toBeInTheDocument()
+      view.unmount()
+    }
+  })
+
+  it('widens with a substantive reason and refreshes the hold and the request', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/widen/') && init?.method === 'POST') {
+        return fakeResponse(narrowed({ widenable: false, site_codes: [] }))
+      }
+      return fakeResponse(page([narrowed()]))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const client = queryClient()
+    const invalidate = spyOnInvalidate(client)
+    const user = userEvent.setup()
+    renderWithClient(<Preservations roles={['records_officer']} />, client)
+
+    await user.click(await screen.findByRole('button', { name: /Widen to district-wide.*PRR-2026-0007/ }))
+    const dialog = await screen.findByRole('dialog')
+    const reason = within(dialog).getByLabelText(/Reason/)
+    expect(reason).toHaveAttribute('maxLength', '500')
+    const submit = within(dialog).getByRole('button', { name: 'Widen hold' })
+    await user.type(reason, 'too short')
+    expect(submit).toBeDisabled()
+    await user.type(reason, ' — the requester named the wrong school.')
+    expect(submit).toBeEnabled()
+    await user.click(submit)
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/widen/'))
+      expect(call).toBeDefined()
+      expect(String(call![0])).toBe('/api/staff/preservations/7/widen/')
+      expect(call![1]?.method).toBe('POST')
+      expect(JSON.parse(String(call![1]?.body))).toEqual({
+        reason: 'too short — the requester named the wrong school.',
+      })
+    })
+    await waitFor(() => {
+      const keys = invalidatedKeys(invalidate)
+      expect(keys).toContainEqual(['preservations'])
+      expect(keys).toContainEqual(['request', 'PRR-2026-0007'])
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('keeps the dialog open while pending and shows a server refusal', async () => {
+    let finish: (value: Response) => void = () => {}
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/widen/') && init?.method === 'POST') {
+        return new Promise<Response>((resolve) => { finish = resolve })
+      }
+      return Promise.resolve(fakeResponse(page([narrowed()])))
+    }))
+    const user = userEvent.setup()
+    renderPage(<Preservations roles={['records_officer']} />)
+
+    await user.click(await screen.findByRole('button', { name: /Widen to district-wide/ }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText(/Reason/), 'The incident location is unknown.')
+    await user.click(within(dialog).getByRole('button', { name: 'Widen hold' }))
+
+    expect(await within(dialog).findByRole('button', { name: 'Widening…' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    finish(fakeResponse({ detail: 'This hold is already district-wide.' }, 400))
+    expect(await within(dialog).findByRole('alert'))
+      .toHaveTextContent('This hold is already district-wide.')
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeEnabled()
+  })
+})
+
+describe('Preservations — cache refresh after a change', () => {
+  it('refreshes the request detail after a camera exclusion', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/exclude-camera/') && init?.method === 'POST') {
+        return fakeResponse(heldPreservation().camera_holds[1])
+      }
+      return fakeResponse(page([heldPreservation({ request_closed: false, release_eligible_at: null })]))
+    }))
+    const client = queryClient()
+    const invalidate = spyOnInvalidate(client)
+    const user = userEvent.setup()
+    renderWithClient(<Preservations roles={['records_officer']} />, client)
+
+    await screen.findByText('Staff Parking')
+    await user.click(screen.getAllByRole('button', { name: 'Exclude' })[1]!)
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText(/Reason/), 'Camera faces a private office.')
+    await user.click(within(dialog).getByRole('button', { name: 'Exclude camera' }))
+
+    await waitFor(() => {
+      const keys = invalidatedKeys(invalidate)
+      expect(keys).toContainEqual(['preservations'])
+      expect(keys).toContainEqual(['request', 'PRR-2026-0007'])
+    })
   })
 })
