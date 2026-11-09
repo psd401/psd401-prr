@@ -25,6 +25,7 @@ from apps.records import tasks as record_tasks
 from apps.records.models import PublicRecordsRequest, Requester, VaultCountRun
 from apps.records.vault_counts import (
     advance_vault_count,
+    collectable_sources,
     fail_vault_count,
     request_vault_count,
     runs_waiting_on_sources,
@@ -288,6 +289,28 @@ class AdvanceTests(_Fixture):
             row["reason"], "Google's reported total; its count did not finish.",
         )
         delete_export.assert_called_once()
+
+    def test_a_failed_export_reporting_zero_is_unavailable_not_empty(self, get_export, delete_export):
+        get_export.return_value = {
+            "id": "count-export-1", "status": "FAILED",
+            "stats": {"totalArtifactCount": "0"},
+        }
+        run = self.running()
+        self.assertTrue(advance_vault_count(run.pk))
+        run.refresh_from_db()
+        self.assertEqual(run.source_counts["chat"]["state"], "unavailable")
+        self.assertIn("chat", collectable_sources(run))
+
+    def test_a_count_export_past_four_hours_times_out(self, get_export, delete_export):
+        get_export.return_value = {"id": "count-export-1", "status": "IN_PROGRESS"}
+        old = (timezone.now() - dt.timedelta(hours=4, minutes=1)).isoformat()
+        run = self.running(chat={
+            "state": "counting", "method": "export", "export_id": "count-export-1",
+            "started_at": old,
+        })
+        self.assertTrue(advance_vault_count(run.pk))
+        run.refresh_from_db()
+        self.assertEqual(run.source_counts["chat"]["state"], "unavailable")
 
     def test_a_count_export_may_run_past_three_hours(self, get_export, delete_export):
         get_export.return_value = {"id": "count-export-1", "status": "IN_PROGRESS"}

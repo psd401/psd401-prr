@@ -677,11 +677,13 @@ def _advance_source(run: VaultCountRun, source: str, entry: dict) -> dict:
         return _delete_count_export(run, {**entry, **result})
     if status == "FAILED":
         # A failed export may still report the total it was exporting; that
-        # total is kept as the count, marked as Google's reported total.
+        # total is kept as the count, marked as Google's reported total. A
+        # reported zero is not evidence of nothing, so it stays uncounted and
+        # the source is still collected.
         total = vault.export_artifact_total(export)
         result = (
             {"state": COUNTED, "count": total, "reported_total": True}
-            if total is not None
+            if total
             else _could_not_count(source)
         )
         return _delete_count_export(run, {**entry, **result})
