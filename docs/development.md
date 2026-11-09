@@ -520,7 +520,7 @@ ecosystems weekly.
   deploy checks and aborts on an unsafe secret/HTTPS/cookie posture.
 - `docker-compose.deploy.yml` binds Gunicorn with Uvicorn ASGI workers to host
   loopback. `config/asgi.py` serves hosted MCP at `/mcp` and delegates every
-  other path to Django; its top-level lifespan owns FastMCP's session manager.
+  other path to Django; its top-level lifespan owns MCPServer's session manager.
   A trusted reverse proxy must terminate TLS, replace client-supplied
   forwarding headers, set `X-Forwarded-Proto`, and supply the client address as
   the rightmost `X-Forwarded-For` value for public-intake throttling; only then enable

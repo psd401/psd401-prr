@@ -47,7 +47,7 @@ existing Django permissions and human-only handoffs remain authoritative.
 | `mcp-scan.json` | Scanner config naming the stdio entrypoint with placeholder credentials. |
 | `hosted.py` | Per-request token pass-through, fail-closed auth preflight, and the in-process adapter through Django's real URL/middleware/auth stack. |
 | `server.py` | Thin read-only stdio entrypoint over `tools.py`, runnable with `uv run`. |
-| `config/asgi.py` | Top-level Starlette composition and lifespan: `/mcp` reaches FastMCP and every other route reaches Django. |
+| `config/asgi.py` | Top-level Starlette composition and lifespan: `/mcp` reaches MCPServer and every other route reaches Django. |
 | `server.json` (repo root) | Registry manifest and district catalog metadata. |
 
 ## Hosted endpoint
