@@ -18,7 +18,7 @@
 3a4076f680bd99141be5c2e11682ceeb59b5a2ed:frontend/src/pages/IdentitySettings.test.tsx:generic-api-key:137
 3a4076f680bd99141be5c2e11682ceeb59b5a2ed:frontend/src/pages/IdentitySettings.test.tsx:generic-api-key:55
 #
-# Added 2026-11-06 (PR #105, needs owner review): the fake tenant's sign-in
-# password in the Aware client test double. It is a made-up fixture value that
-# no tenant accepts.
+# Added 2026-11-09 at Hagel's request: commit 7d409bd (feat/aware-video-holds,
+# PR #105) holds a made-up Aware test-double password, since replaced with
+# "not-a-real-password". The scan reads every branch, so main lists it too.
 7d409bdcf71a8425c5dde198d195b0f7a5eb4b6a:apps/integrations/avigilon/tests/fakes.py:generic-api-key:31
