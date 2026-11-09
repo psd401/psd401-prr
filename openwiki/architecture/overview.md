@@ -156,7 +156,7 @@ The application impersonates a delegated Vault identity (`PRR_VAULT_IMPERSONATIO
 deployed access is keyless, see [aws-deployment.md](../operations/aws-deployment.md)) for:
 
 1. **Matters** — Created per request, reused if it exists
-2. **Counts** — An entire-organization or account-scoped Gmail count that creates a matter but no hold
+2. **Counts** — An entire-organization or account-scoped count of Gmail, Drive, and Chat that creates a matter but no hold; Drive and Chat are counted by count-only exports that are deleted, never downloaded
 3. **Holds and exports** — Started from a reviewed, completed count, or, only with `PRR_TRUST_SCOPE_MODE=auto`, from a finished automatic scoping session's final count
 4. **Ingest** — Celery polls exports, downloads them to the object store, and converts messages into record items
 
@@ -213,3 +213,4 @@ Google groups and direct grants, not from directory lookups ([Google identity](g
 - [background-jobs.md](background-jobs.md) — Celery beat schedule, watchdogs, and staff alerts
 - [domain/nextrequest-migration.md](../domain/nextrequest-migration.md) — Legacy NextRequest import and cutover
 - [`docs/security.md`](../../docs/security.md) — Security model, attack surface, controls
+ty.md`](../../docs/security.md) — Security model, attack surface, controls
