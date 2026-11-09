@@ -369,7 +369,7 @@ class WorkItemListSerializer(serializers.ModelSerializer):
         if obj.source_type == WorkItem.SourceType.COLLECTION_TASK:
             if not request_number:
                 return None
-            return f"/requests/{request_number}/collection?task={obj.source_id}"
+            return f"/requests/{request_number}/collect?task={obj.source_id}"
         if obj.source_type == WorkItem.SourceType.CORRESPONDENCE:
             if not request_number:
                 return None

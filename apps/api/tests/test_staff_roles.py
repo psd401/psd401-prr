@@ -3,9 +3,11 @@
 import importlib
 import inspect
 import pkgutil
+from typing import cast
 
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings
+from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.views import APIView
 from rest_framework.viewsets import ViewSetMixin
@@ -46,7 +48,7 @@ class RolePermissionDefaultTests(TestCase):
             action = "new_sensitive_action"
             role_permissions = {"list": {StaffRole.RECORDS_OFFICER}}
 
-        self.assertFalse(IsStaffOrReadOnlyAgent().has_permission(request, ExampleView()))
+        self.assertFalse(IsStaffOrReadOnlyAgent().has_permission(cast(Request, request), ExampleView()))
 
 
 @override_settings(PRR_LOCAL_IMPLICIT_STAFF_ROLES=())

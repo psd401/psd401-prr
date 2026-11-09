@@ -213,7 +213,7 @@ class WorkItemApiTests(TestCase):
                 f"/requests/{self.request.number}/messages?message={correspondence.pk}"
             ),
             str(collection.pk): (
-                f"/requests/{self.request.number}/collection?task={task.pk}"
+                f"/requests/{self.request.number}/collect?task={task.pk}"
             ),
             str(review.pk): (
                 f"/requests/{self.request.number}/records?item={record.pk}"

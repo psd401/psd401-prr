@@ -84,7 +84,7 @@ test('role-aware-work-inbox', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'No action required' })).toHaveCount(0)
   await page.getByRole('link', { name: 'Open source context' }).click()
   await expect(page).toHaveURL(
-    /\/requests\/PRR-E2E-2000\/collection\?task=\d+$/,
+    /\/requests\/PRR-E2E-2000\/collect\?task=\d+$/,
   )
   await expect(page.getByRole('dialog', { name: /Task — request/ })).toBeVisible()
   await page.keyboard.press('Escape')
