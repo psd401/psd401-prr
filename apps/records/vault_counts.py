@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 COUNTING = "counting"
 COUNTED = "counted"
 UNAVAILABLE = "unavailable"
+REPORTED_TOTAL_NOTE = "Google's reported total; its count did not finish."
 _SETTLED = {COUNTED, UNAVAILABLE}
 
 #: How each source is counted. ``matters.count`` returns HTTP 400 "not
@@ -55,7 +56,7 @@ COUNT_METHODS = {"mail": "count", "drive": "export", "chat": "export"}
 #: How long a count-only export may run before its source is reported
 #: unavailable. The request accepts no new count while one is running, so
 #: this is also the longest an officer waits to count again.
-COUNT_EXPORT_TIMEOUT = dt.timedelta(hours=3)
+COUNT_EXPORT_TIMEOUT = dt.timedelta(hours=4)
 
 _ITEM_NOUNS = {
     "mail": "Gmail messages",
@@ -675,7 +676,15 @@ def _advance_source(run: VaultCountRun, source: str, entry: dict) -> dict:
         )
         return _delete_count_export(run, {**entry, **result})
     if status == "FAILED":
-        return _delete_count_export(run, {**entry, **_could_not_count(source)})
+        # A failed export may still report the total it was exporting; that
+        # total is kept as the count, marked as Google's reported total.
+        total = vault.export_artifact_total(export)
+        result = (
+            {"state": COUNTED, "count": total, "reported_total": True}
+            if total is not None
+            else _could_not_count(source)
+        )
+        return _delete_count_export(run, {**entry, **result})
     if _timed_out(entry, COUNT_EXPORT_TIMEOUT):
         return _delete_count_export(run, {**entry, **late})
     return entry
@@ -757,9 +766,19 @@ def source_count_summary(run: VaultCountRun) -> list[dict]:
             "label": vault.SOURCE_LABELS[source],
             "state": state,
             "count": entry.get("count") if entry and state == COUNTED else None,
-            "reason": str(entry.get("reason") or "") if entry and state == UNAVAILABLE else "",
+            "reason": _summary_reason(entry, state),
         })
     return rows
+
+
+def _summary_reason(entry: dict | None, state: str) -> str:
+    if not entry:
+        return ""
+    if state == UNAVAILABLE:
+        return str(entry.get("reason") or "")
+    if state == COUNTED and entry.get("reported_total"):
+        return REPORTED_TOTAL_NOTE
+    return ""
 
 
 def collectable_sources(run: VaultCountRun) -> list[str]:

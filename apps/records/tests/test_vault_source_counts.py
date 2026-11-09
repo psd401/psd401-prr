@@ -270,6 +270,37 @@ class AdvanceTests(_Fixture):
         )
         delete_export.assert_called_once()
 
+    def test_a_failed_export_that_reports_a_total_keeps_it(self, get_export, delete_export):
+        get_export.return_value = {
+            "id": "count-export-1", "status": "FAILED",
+            "stats": {"exportedArtifactCount": "2917", "totalArtifactCount": "6057"},
+        }
+        run = self.running()
+        self.assertTrue(advance_vault_count(run.pk))
+        run.refresh_from_db()
+        self.assertEqual(run.state, VaultCountRun.State.COMPLETE)
+        self.assertEqual(run.total_count, 6104)
+        self.assertEqual(run.source_counts["chat"]["state"], "counted")
+        self.assertEqual(run.source_counts["chat"]["count"], 6057)
+        row = next(r for r in source_count_summary(run) if r["source"] == "chat")
+        self.assertEqual(row["count"], 6057)
+        self.assertEqual(
+            row["reason"], "Google's reported total; its count did not finish.",
+        )
+        delete_export.assert_called_once()
+
+    def test_a_count_export_may_run_past_three_hours(self, get_export, delete_export):
+        get_export.return_value = {"id": "count-export-1", "status": "IN_PROGRESS"}
+        old = (timezone.now() - dt.timedelta(hours=3, minutes=30)).isoformat()
+        run = self.running(chat={
+            "state": "counting", "method": "export", "export_id": "count-export-1",
+            "started_at": old,
+        })
+        self.assertFalse(advance_vault_count(run.pk))
+        run.refresh_from_db()
+        self.assertEqual(run.source_counts["chat"]["state"], "counting")
+        delete_export.assert_not_called()
+
     def test_a_completed_export_without_a_total_is_unavailable(self, get_export, delete_export):
         get_export.return_value = {"id": "count-export-1", "status": "COMPLETED"}
         run = self.running()
