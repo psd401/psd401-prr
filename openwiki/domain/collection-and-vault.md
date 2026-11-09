@@ -1,21 +1,22 @@
 ---
 type: Domain
 title: Collection, the System Registry, and Vault Ingest
-description: How a PRR case finds its records - the RecordSystem registry and triage-created CollectionTasks, the human-reviewed Google Vault count and collection, and the resumable ingest of Vault exports into immutable, scanned RecordItems. Covers the gates, states, and tests for each step.
-tags: [domain, collection, vault, record-systems, ingest, google-vault]
-timestamp: 2026-09-24T00:00:00Z
+description: How a PRR case finds its records - the RecordSystem registry and triage-created CollectionTasks, the human-reviewed Google Vault count and collection across Gmail, Drive, and Chat, and the resumable ingest of Vault exports into immutable, scanned RecordItems. Covers the gates, per-source states, and tests for each step.
+tags: [domain, collection, vault, record-systems, ingest, google-vault, drive, chat]
+timestamp: 2026-11-08T18:00:00Z
 openwiki:
   roles: [domain, integration, workflow]
   change_kinds: [vault, collection, record-system, ingest, scoping]
-  source_paths: [apps/records/vault_counts.py, apps/records/vault_collections.py, apps/records/vault_ingest.py, apps/records/vault_metadata.py, apps/records/scoping.py, apps/records/tasks.py, apps/records/triage.py, apps/records/models.py, apps/integrations/vault/client.py, apps/api/resources/record_systems.py, apps/api/resources/collection_tasks.py]
-  symbols: [VaultCountRun, CollectionTask, VaultIngestRun, VaultMessageArtifact, ScopingSession, ScopeIteration, request_vault_count, queue_vault_collection, start_vault_collection, ingest_completed_export, route_to_systems, poll_vault_exports, ingest_vault_export, start_scoping, continue_scoping, rerun_scoping, rescope, queue_automatic_vault_collection]
-  test_paths: [apps/records/tests/test_vault_counts.py, apps/records/tests/test_vault_collections.py, apps/records/tests/test_vault_ingest.py, apps/records/tests/test_vault_tasks.py, apps/records/tests/test_vault_scope_recovery.py, apps/records/tests/test_vault_custodian_metadata.py, apps/records/tests/test_scoping.py, apps/records/tests/test_approve_and_collect.py, apps/api/tests/test_vault_counts.py, apps/api/tests/test_collection_tasks.py]
+  source_paths: [apps/records/vault_counts.py, apps/records/vault_collections.py, apps/records/vault_ingest.py, apps/records/vault_metadata.py, apps/records/scoping.py, apps/records/tasks.py, apps/records/triage.py, apps/records/models.py, apps/integrations/vault/client.py, apps/api/vault_counts.py, apps/api/resources/record_systems.py, apps/api/resources/collection_tasks.py]
+  symbols: [VaultCountRun, CollectionTask, VaultIngestRun, VaultMessageArtifact, ScopingSession, ScopeIteration, request_vault_count, queue_vault_collection, start_vault_collection, ingest_completed_export, route_to_systems, poll_vault_exports, ingest_vault_export, start_scoping, continue_scoping, rerun_scoping, rescope, queue_automatic_vault_collection, run_sources, source_count_summary, collectable_sources, SOURCE_KINDS, source_query, ensure_count_export]
+  test_paths: [apps/records/tests/test_vault_counts.py, apps/records/tests/test_vault_collections.py, apps/records/tests/test_vault_ingest.py, apps/records/tests/test_vault_tasks.py, apps/records/tests/test_vault_scope_recovery.py, apps/records/tests/test_vault_custodian_metadata.py, apps/records/tests/test_vault_source_counts.py, apps/records/tests/test_vault_source_collections.py, apps/records/tests/test_vault_source_ingest.py, apps/records/tests/test_vault_client_sources.py, apps/records/tests/test_scoping.py, apps/records/tests/test_approve_and_collect.py, apps/api/tests/test_vault_counts.py, apps/api/tests/test_collection_tasks.py]
   invariants:
     - "A Vault count estimates a search universe; it never creates a hold, export, collection task, status change, or requester message."
-    - "A Vault collection starts only from a completed count, with no blocking collection deposit gate, the same reviewed scope hash, a non-zero count, and a current Records Officer."
-    - "Every Vault message becomes a RecordItem only after its raw bytes are retained and scanned; a RecordItem is never a responsiveness decision."
+    - "A Vault collection starts only from a completed count, with no blocking collection deposit gate, the same reviewed scope hash, at least one collectable source, and a current Records Officer."
+    - "A Vault collection creates one CollectionTask per collectable source; a source that counted exactly zero is not exported, and a source whose count is unavailable or still running is exported."
+    - "Every Vault message or Drive file becomes a RecordItem only after its raw bytes are retained and scanned; a RecordItem is never a responsiveness decision."
     - "Exactly two Vault actions can run unattended: the automatic count under iterative scoping from an intake intent proposal, which only counts, and, only when PRR_TRUST_SCOPE_MODE is auto, the collection of a finished automatic session's final count on a request with no Vault collection yet."
-  validation_commands: ["PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_vault_counts apps.records.tests.test_vault_collections --settings=config.test_settings"]
+  validation_commands: ["PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_vault_counts apps.records.tests.test_vault_collections apps.records.tests.test_vault_source_counts apps.records.tests.test_vault_source_collections --settings=config.test_settings"]
 ---
 
 # Collection, the System Registry, and Vault Ingest
@@ -52,7 +53,7 @@ Intake calls `triage.route_to_systems()` in
 also sends an immediate preservation alert. The footage path is separate. See
 [Footage triage](footage.md).
 
-A `CollectionTask` has a `kind` (`vault_mail`, `vault_drive`, or `manual`), a
+A `CollectionTask` has a `kind` (`vault_mail`, `vault_drive`, `vault_chat`, or `manual`), a
 `state` (`pending`, `running`, `ingesting`, `complete`, or `failed`), and an
 optional `assigned_to`. Changing `assigned_to` is the one explicit handoff into
 the [work queue](work-queue.md). Tasks are not deleted, because they are the
@@ -73,8 +74,8 @@ flowchart TD
     D -->|no| E[Count failed or retried]
     D -->|yes| F[Officer reviews scope and count]
     F --> G[queue_vault_collection with the reviewed input hash]
-    G --> H[CollectionTask pending and execute_vault_collection]
-    H --> I[Hold and export created, state running]
+    G --> H[One CollectionTask pending per collectable source, execute_vault_collection]
+    H --> I[Export created per source, state running]
     I --> J[poll_vault_exports every 10 minutes]
     J --> K[ingest_vault_export, state ingesting]
     K --> L[RecordItems, state complete]
@@ -83,7 +84,9 @@ flowchart TD
 Caption: the Vault path. The count from an intake intent can start without a named
 officer. With `PRR_TRUST_SCOPE_MODE=auto`, a finished automatic scoping session can also
 start the collection (`queue_automatic_vault_collection`) without one; see
-[iterative scoping](#iterative-scoping-from-intake-intent).
+[iterative scoping](#iterative-scoping-from-intake-intent). Each source (Gmail, Drive,
+Chat) has its own task and export. The count and collection sections below give the
+per-source rules.
 
 ### Count
 
@@ -95,6 +98,30 @@ creates it. `start_vault_count()` and `advance_vault_count()` in
 `vault_count_enabled()` reports whether the delegated identity is configured. The
 count does no more than estimate. It creates no hold, export, collection task, or
 requester message.
+
+A count covers every source in `VaultCountRun.sources`, in the order Gmail, Drive, Chat
+(`run_sources()`, with `vault.SOURCES` in [`apps/integrations/vault/client.py`](../../apps/integrations/vault/client.py)).
+A run with an empty `sources` list is a Gmail-only count, which is what every count before
+migration `0062_vault_drive_and_chat` is.
+
+- **Gmail** uses `matters.count`, started by `start_vault_count()`.
+- **Drive and Chat** cannot use `matters.count`, which Vault rejects for those corpora.
+  They use a count-only export (`vault.ensure_count_export()`). Its total is read from the
+  export's statistics once it completes, and the export is then deleted. A count-only export
+  is never downloaded. The reason is recorded in the client's module docstring.
+- **Per-source state** lives in `VaultCountRun.source_counts`: `counting`, `counted`, or
+  `unavailable`, each with a plain-language reason. A source still running after
+  `COUNT_EXPORT_TIMEOUT` (four hours) is reported unavailable. A rate-limited export is
+  retried. The run completes once every source is counted or unavailable
+  (`_complete_if_settled()`), and it stores the sum as `total_count`.
+- **Staff view.** `source_count_summary()` gives one row per source with no provider
+  identifiers. `apps/api/vault_counts.py` exposes it as `source_counts`, and `collectable`
+  is true only for a complete run with at least one collectable source.
+- **District-wide scope.** Vault's entire-organization method is Gmail-only. A Drive or Chat
+  count of "all district accounts" needs the staff organizational unit set in
+  `PRR_VAULT_STAFF_ORG_UNIT_ID` (`source_query()` builds an org-unit query and raises
+  `StaffOrgUnitMissing` without one). The unit is copied onto the run as `org_unit_id`. Without
+  it, Drive and Chat show as unavailable with a reason, and only Gmail is searched.
 
 The staff API serializers in [`apps/api/vault_counts.py`](../../apps/api/vault_counts.py)
 enforce the scope rule before a count is requested. `VaultCountRequestSerializer`
@@ -123,6 +150,11 @@ when the two differ, or when a count is still running. It never blocks sending, 
 the district chose to leave that judgment with the officer. Its test is
 `frontend/src/scopeCountNotice.test.ts`.
 
+A finished count can also trigger a system draft. With `PRR_AI_AUTOMATIC_SCOPE_LETTER_ENABLED` on, the
+`prepare-scope-letters` job drafts the informational scope letter from the latest count before any
+records are pulled. The draft is never sent, and collection still needs the human gate below. See
+[correspondence](correspondence.md#scope-conversation-letter).
+
 ### Collection
 
 `queue_vault_collection()` in
@@ -135,13 +167,26 @@ the human gate. It requires, in order:
 3. A `COMPLETE` count with its matter evidence.
 4. An `expected_input_sha256` equal to the count's hash. If the scope changed
    after review, it refuses.
-5. A non-zero total count.
-6. A current Records Officer.
+5. At least one collectable source. `collectable_sources()` drops a source that counted
+   exactly zero, and drops Drive or Chat on a district-wide count with no org unit. A
+   source that is unavailable or still counting stays in, because a missing count is not
+   evidence that nothing is there. If every source counted zero, the refusal says so.
+6. A current Records Officer (for a person-started collection).
 
-It creates one `CollectionTask` per count. A failed task that has no export can
-be requeued. The task's instructions say that an entire-organization scope does
-not claim an organization-wide hold. Named custodians are refined later for a
-targeted hold.
+It creates one `CollectionTask` per collectable source, each with its own `kind`
+(`SOURCE_KINDS` maps `mail`, `drive`, and `chat` to `vault_mail`, `vault_drive`, and
+`vault_chat`). Every task shares the count's terms, custodians, and date range. A repeated
+call creates nothing new. A task that failed before its export can be requeued alone. A
+failed task whose export already exists, or whose count was superseded, refuses a new
+collection, and the officer must count again. The task's instructions say that an
+entire-organization scope does not claim an organization-wide hold. Named custodians are
+refined later for a targeted hold.
+
+Holds follow the source and the trigger. A Gmail collection always places its hold. A Drive
+or Chat collection places a hold only when a person starts it. An automatic Drive or Chat
+collection creates the export without a new hold (`start_vault_collection()`, and
+`test_an_automatic_chat_collection_adds_no_hold` in
+`apps/records/tests/test_vault_source_collections.py`).
 
 ### Export polling and ingest
 
@@ -151,6 +196,12 @@ and reconciles stale ingest claims. `ingest_vault_export` in
 
 - `VaultIngestRun` holds a lease token and heartbeat. A stale claim is
   reconciled, not duplicated.
+- **Per source.** Gmail and Chat exports are MBOX messages and take the message path, so a
+  Chat message is stored with `source_system` `google_vault_chat`. A Drive export is a set
+  of files. `_process_drive_file()` ingests each one as a candidate record and keeps the
+  original bytes. The largest object an export may contain is `PRR_VAULT_EXPORT_MAX_BYTES`.
+  An export with a bigger object stops with a reported error rather than ingesting part of
+  it. Ingested Drive and Chat records enter review like Gmail records.
 - `VaultExportObject` records each file of the export with its sizes and digests.
   Archives are bounded (member count and expanded bytes), and messages are capped.
 - Each message is retained as raw bytes before any conversion. `VaultMessageArtifact`
@@ -178,6 +229,10 @@ does the work. The staff endpoint is `POST /api/staff/collection-tasks/{id}/supe
 [`apps/api/resources/collection_tasks.py`](../../apps/api/resources/collection_tasks.py)).
 Its capability entry, `collection_tasks.supersede`, is `high` risk and requires human
 confirmation, so an agent can only propose it. See [agent parity](../architecture/agent-parity.md).
+On the Collect stage, `CollectionCards` in `frontend/src/case/CollectionCards.tsx` shows the action
+only on a `complete` Vault collection (Gmail, Drive, or Chat) to a Records Officer. It
+needs a reason of at least 20 characters, and its confirmation states how many unreviewed records
+leave review before the call is made ([staff frontend](../architecture/staff-frontend.md#case-stages-and-views)).
 
 ```mermaid
 stateDiagram-v2
@@ -280,10 +335,10 @@ Two paths start a Vault collection from a scope:
   `suggest`. When it is `auto`, `_finish()` schedules `_collect_automatically()` after
   commit for a finished automatic session. That calls
   `queue_automatic_vault_collection()` on the final completed count, but only when the
-  count's total is non-zero and the request has no Vault collection yet. The collection
-  is recorded with `trigger=automatic` and no actor. The deposit gate, the targeted-hold
-  rule, and the export into review are the same as for an officer's collection. An
-  officer's re-run never collects by itself.
+  count has at least one collectable source and the request has no Vault collection yet.
+  The collection is recorded with `trigger=automatic` and no actor. The deposit gate, the
+  per-source hold rule, and the export into review are the same as for an officer's
+  collection. An officer's re-run never collects by itself.
 
 AGENTS.md rule 11 records the district decision and its volume risk. Its sentence "Unattended
 Vault actions are exactly two" covers the count and this collection path. See
@@ -301,6 +356,11 @@ Focused tests:
   `test_suggest_mode_collects_nothing`, `test_auto_mode_never_collects_from_an_officers_rerun`,
   `test_auto_mode_never_adds_a_second_collection`, `test_auto_mode_skips_a_zero_count`, and
   `test_rescope_supersedes_the_old_collection_and_collects_the_new_scope`.
+- Multi-source behavior: `apps/records/tests/test_scoping.py::test_automatic_counts_search_gmail_drive_and_chat`
+  (the automatic count covers all three sources), `test_vault_source_collections.py`
+  (`QueueTests` for one task per source, zero-count skipping, every-source-zero refusal,
+  district-wide without an org unit, and requeue of only the failed handoff; `StartTests`
+  for hold rules), and `test_approve_and_collect.py::test_auto_mode_counts_a_drive_task_as_an_existing_collection`.
 
 Minimal validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_scoping apps.records.tests.test_approve_and_collect --settings=config.test_settings`.
 

@@ -5,6 +5,7 @@ import { useState, type FormEvent } from 'react'
 import { api } from '../api/client'
 import { PageHeader } from '../layout/AppLayout'
 import {
+  EmptyState,
   Badge,
   Button,
   Card,
@@ -21,6 +22,7 @@ import {
   reasonTooShort,
   useToast,
 } from '../ui'
+import { formatMoment } from '../date'
 
 /**
  * What a write-only setting is allowed to say about itself: whether one is
@@ -72,6 +74,8 @@ interface DistrictSetting {
   max_items: number | null
   allow_blank: boolean
   choices: string[]
+  /** Known good values offered as a pick list (the granted AI models). */
+  suggestions?: string[]
   requires: string[]
   required_by: string[]
   last_change: SettingChange | null
@@ -99,6 +103,37 @@ const INTAKE_TRUST_KEYS = new Set([
   'PRR_TRUST_INTAKE_NON_REQUEST_MODE',
 ])
 
+/**
+ * The switches that decide how cases are worked, shown first. Everything else
+ * (limits, timeouts, transport plumbing) sits under Advanced.
+ */
+const MAIN_KEYS = [
+  'PRR_AI_ADVISORY_ENABLED',
+  'PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED',
+  'PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED',
+  'PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED',
+  'PRR_AI_AUTOMATIC_ESTIMATE_LETTER_ENABLED',
+  'AUTO_ACK_SAFETY_NET',
+  'PRR_CORRESPONDENCE_AUTOMATED_OUTBOUND_ENABLED',
+  'PRR_AI_MODEL',
+  'PRR_AI_MODEL_INTAKE',
+  'PRR_TRUST_INTAKE_SPAM_MODE',
+  'PRR_TRUST_INTAKE_NON_REQUEST_MODE',
+  'PRR_TRUST_SCOPE_MODE',
+  'PRR_TRUST_RESPONSIVE_MODE',
+  'PRR_TRUST_NON_RESPONSIVE_MODE',
+  'PRR_TRUST_REDACTION_MODE',
+]
+
+function matches(setting: DistrictSetting, query: string) {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return true
+  return [setting.label, setting.consequence, setting.key, setting.category]
+    .some((text) => text.toLowerCase().includes(needle))
+}
+
+const ADVANCED_OPEN_KEY = 'prr.settings.advancedOpen'
+
 const LIST_TYPES = ['domain_list', 'email_list', 'date_list']
 
 /** What one entry of a list setting is, as the hint names it. */
@@ -121,8 +156,7 @@ function secretState(setting: DistrictSetting): SecretState {
 }
 
 function formatWhen(value: string): string {
-  const at = new Date(value)
-  return Number.isNaN(at.getTime()) ? value : at.toLocaleString()
+  return formatMoment(value)
 }
 
 /**
@@ -188,6 +222,9 @@ function editorHint(setting: DistrictSetting): string {
       + `${setting.max_length} characters. It is stored encrypted and cannot `
       + `be read back — not on this page, and not by you.${clearing}`
     )
+  }
+  if (setting.suggestions && setting.suggestions.length > 0) {
+    return 'Pick one of the AI models the district has approved.'
   }
   if (setting.type === 'choice') {
     return `One of: ${setting.choices.join(', ')}.`
@@ -422,6 +459,25 @@ function ValueEditor({
       />
     )
   }
+  if (setting.suggestions && setting.suggestions.length > 0) {
+    const options = setting.suggestions.includes(draft) || draft === ''
+      ? setting.suggestions
+      : [draft, ...setting.suggestions]
+    return (
+      <Select
+        className="w-full"
+        value={draft}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {setting.allow_blank && <option value="">Not set</option>}
+        {options.map((choice) => (
+          <option key={choice} value={choice}>
+            {choice}
+          </option>
+        ))}
+      </Select>
+    )
+  }
   if (setting.type === 'choice') {
     return (
       <Select
@@ -476,6 +532,23 @@ export function DistrictSettings() {
   const [reason, setReason] = useState('')
   const [draft, setDraft] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  // Remembered per browser, so a reload keeps the section as it was left.
+  const [advancedOpen, setAdvancedOpenState] = useState(() => {
+    try {
+      return window.localStorage.getItem(ADVANCED_OPEN_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
+  const setAdvancedOpen = (open: boolean) => {
+    setAdvancedOpenState(open)
+    try {
+      window.localStorage.setItem(ADVANCED_OPEN_KEY, String(open))
+    } catch {
+      // Storage refused (private window): the choice lasts this visit only.
+    }
+  }
 
   const list = useQuery({
     queryKey: ['district-settings'],
@@ -545,12 +618,86 @@ export function DistrictSettings() {
   if (list.isError) return <ErrorNote error={list.error} />
 
   const page = list.data
+  const searching = query.trim() !== ''
+  const shown = page.results.filter((row) => matches(row, query))
+  const main = MAIN_KEYS
+    .map((key) => shown.find((row) => row.key === key))
+    .filter((row): row is DistrictSetting => row !== undefined)
   const byCategory = page.categories
     .map((category) => ({
       category,
-      settings: page.results.filter((row) => row.category === category),
+      settings: shown.filter(
+        (row) => row.category === category && !MAIN_KEYS.includes(row.key),
+      ),
     }))
     .filter((group) => group.settings.length > 0)
+  const renderList = (settings: DistrictSetting[]) => (
+    <ul className="divide-y divide-line">
+      {settings.map((setting) => (
+        <li key={setting.key} className="py-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-heading font-bold text-ink">
+                  {setting.label}
+                </span>
+                {setting.type === 'boolean'
+                  ? (setting.value
+                    ? <Badge tone="green">On</Badge>
+                    : <Badge>Off</Badge>)
+                  : <Badge>{displayValue(setting)}</Badge>}
+                {setting.verification && !setting.verification.ok && (
+                  <Badge tone="amber">Unverified</Badge>
+                )}
+              </div>
+              <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+                {setting.consequence}
+              </p>
+              {isSecret(setting) && <SecretSummary setting={setting} />}
+              <VerificationNote setting={setting} />
+              {INTAKE_TRUST_KEYS.has(setting.key) && <EvaluationNote setting={setting} />}
+              <p className="mt-2 text-xs text-ink-muted">
+                {setting.last_change
+                  ? `Last changed by ${changedBy(setting.last_change)} on `
+                    + `${formatWhen(setting.last_change.at)} — `
+                    + setting.last_change.reason
+                  : 'Never changed in the application.'}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                variant="ghost"
+                aria-expanded={expanded === setting.key}
+                onClick={() => setExpanded(
+                  expanded === setting.key ? null : setting.key,
+                )}
+              >
+                History
+              </Button>
+              <Button
+                variant={
+                  setting.type === 'boolean' && setting.value
+                    ? 'danger'
+                    : 'primary'
+                }
+                onClick={() => open(setting)}
+              >
+                {isSecret(setting)
+                  ? (secretState(setting).set ? 'Replace' : 'Set')
+                  : setting.type !== 'boolean'
+                    ? 'Change'
+                    : setting.value ? 'Turn off' : 'Turn on'}
+              </Button>
+            </div>
+          </div>
+          {expanded === setting.key && (
+            <History settingKey={setting.key} />
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+
   const shortfall = reasonShortfall(reason)
   const isSwitch = pending?.type === 'boolean'
   const problem = pending !== null && !isSwitch
@@ -561,85 +708,44 @@ export function DistrictSettings() {
     <>
       <PageHeader
         title="District settings"
-        subtitle={
-          'Every setting the district controls — switches, limits, rates, '
-          + 'timeouts, domains, address lists, the Google service identities '
-          + 'the application acts as, and staff sign-in — changed here rather '
-          + 'than by a redeploy. A change takes effect within seconds across '
-          + 'the application, its background workers, and its scheduler. Each '
-          + 'one needs a written reason and is kept permanently in the '
-          + 'setting’s history. A secret can be replaced or cleared here and '
-          + 'never read back.'
-        }
+        subtitle="Changes take effect within seconds. Each needs a reason and is kept in its history."
       />
-      {byCategory.map((group) => (
-        <Card key={group.category} title={group.category} className="mb-6">
-          <ul className="divide-y divide-line">
-            {group.settings.map((setting) => (
-              <li key={setting.key} className="py-4">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-heading font-bold text-ink">
-                        {setting.label}
-                      </span>
-                      {setting.type === 'boolean'
-                        ? (setting.value
-                          ? <Badge tone="green">On</Badge>
-                          : <Badge>Off</Badge>)
-                        : <Badge>{displayValue(setting)}</Badge>}
-                      {setting.verification && !setting.verification.ok && (
-                        <Badge tone="amber">Unverified</Badge>
-                      )}
-                    </div>
-                    <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-                      {setting.consequence}
-                    </p>
-                    {isSecret(setting) && <SecretSummary setting={setting} />}
-                    <VerificationNote setting={setting} />
-                    {INTAKE_TRUST_KEYS.has(setting.key) && <EvaluationNote setting={setting} />}
-                    <p className="mt-2 text-xs text-ink-muted">
-                      {setting.last_change
-                        ? `Last changed by ${changedBy(setting.last_change)} on `
-                          + `${formatWhen(setting.last_change.at)} — `
-                          + setting.last_change.reason
-                        : 'Never changed in the application.'}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      aria-expanded={expanded === setting.key}
-                      onClick={() => setExpanded(
-                        expanded === setting.key ? null : setting.key,
-                      )}
-                    >
-                      History
-                    </Button>
-                    <Button
-                      variant={
-                        setting.type === 'boolean' && setting.value
-                          ? 'danger'
-                          : 'primary'
-                      }
-                      onClick={() => open(setting)}
-                    >
-                      {isSecret(setting)
-                        ? (secretState(setting).set ? 'Replace' : 'Set')
-                        : setting.type !== 'boolean'
-                          ? 'Change'
-                          : setting.value ? 'Turn off' : 'Turn on'}
-                    </Button>
-                  </div>
-                </div>
-                {expanded === setting.key && (
-                  <History settingKey={setting.key} />
-                )}
-              </li>
-            ))}
-          </ul>
+      <Input
+        type="search"
+        aria-label="Search settings"
+        placeholder="Search settings"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        className="mb-6 w-full"
+      />
+      {searching && shown.length === 0 && (
+        <EmptyState>No setting matches that search.</EmptyState>
+      )}
+      {main.length > 0 && (
+        <Card title="Main" className="mb-6">
+          {renderList(main)}
         </Card>
-      ))}
+      )}
+      {byCategory.length > 0 && (
+        <details
+          open={searching || advancedOpen}
+          onToggle={(event) => {
+            // A search opens the section by itself; only a person's click is
+            // remembered, so saving a change does not fold it shut again.
+            if (!searching) setAdvancedOpen(event.currentTarget.open)
+          }}
+          className="mb-6"
+        >
+          <summary className="mb-4 cursor-pointer font-heading text-lg font-bold text-ink">
+            Advanced settings
+          </summary>
+          {byCategory.map((group) => (
+            <Card key={group.category} title={group.category} className="mb-6">
+              {renderList(group.settings)}
+            </Card>
+          ))}
+        </details>
+      )}
 
       <Modal
         open={pending !== null}

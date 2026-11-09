@@ -102,7 +102,7 @@ it('lists open cases in the order the server sorts by due date, each with one ne
   expect(within(items[1]!).getByRole('link', { name: 'Review 2,324 records' }))
     .toHaveAttribute('href', '/requests/PRR-2026-0002/review')
   expect(screen.getByText('2 open cases · 1 late')).toBeInTheDocument()
-  expect(fetchMock.mock.calls.map(([url]) => String(url)).some((url) => url.includes('status=open&ordering=due'))).toBe(true)
+  expect(fetchMock.mock.calls.map(([url]) => String(url)).some((url) => url.includes('status=open&ordering=due&page_size=200'))).toBe(true)
 })
 
 it('lists every open case, past the first page', async () => {

@@ -15,6 +15,17 @@ import { RecordClusters } from '../case/RecordClusters'
 import { RedactionProposals } from '../case/RedactionProposals'
 import { RecordHandlingPanel } from '../case/RecordHandlingPanel'
 import {
+  normalizedBox,
+  pointerPosition,
+  tooSmall,
+  type Exemption,
+  type NormalizedBox,
+  type PreviewMetadata,
+  type Redaction,
+  type RedactionProposal,
+} from '../case/redactionCanvas'
+import { Region } from '../case/RedactionRegion'
+import {
   Badge,
   Button,
   Card,
@@ -36,6 +47,8 @@ import {
   useToast,
 } from '../ui'
 import type { Column } from '../ui/Table'
+import { formatDay } from '../date'
+import { sourceSystemLabel } from '../vaultSources'
 
 interface RecordItem {
   id: string
@@ -79,37 +92,6 @@ interface RecordItem {
   reviewable: boolean
 }
 
-interface Exemption {
-  id: number
-  citation: string
-  short_name: string
-  requires_second_review: boolean
-  active: boolean
-}
-
-interface Redaction {
-  id: number
-  record_item: string
-  page_number: number
-  x0: number
-  y0: number
-  x1: number
-  y1: number
-  exemption: number
-  citation: string
-  exemption_name: string
-  requires_second_review: boolean
-  explanation: string
-  created_by_username: string | null
-  created_at: string
-  voided_at: string | null
-  void_reason: string
-}
-
-interface PreviewMetadata {
-  page_count: number
-}
-
 interface ResponsivenessAdvisoryRun {
   id: string
   trigger: 'manual' | 'automatic'
@@ -132,42 +114,10 @@ interface ResponsivenessAdvisoryLatest {
   latest: ResponsivenessAdvisoryRun | null
 }
 
-interface RedactionProposalDecision {
-  outcome: 'accepted' | 'rejected'
-  decided_by_username: string
-  reason: string
-  redaction: number | null
-  decided_at: string
-}
-
-interface RedactionProposal extends NormalizedBox {
-  id: string
-  advisory_run: string
-  record_item: string
-  page_number: number
-  exemption: number
-  citation: string
-  exemption_name: string
-  requires_second_review: boolean
-  confidence: number
-  rationale: string
-  source_span_ids: string[]
-  source_text_sha256: string
-  created_at: string
-  decision: RedactionProposalDecision | null
-}
-
 interface RedactionAdvisoryLatest {
   enabled: boolean
   latest: ResponsivenessAdvisoryRun | null
   proposals: RedactionProposal[]
-}
-
-interface NormalizedBox {
-  x0: number
-  y0: number
-  x1: number
-  y1: number
 }
 
 const REVIEW_STATES = [
@@ -378,57 +328,6 @@ function truncateHash(hash: string): string {
   return hash.length > 16 ? `${hash.slice(0, 16)}…` : hash
 }
 
-function clamp(value: number): number {
-  return Math.max(0, Math.min(1, value))
-}
-
-function pointerPosition(event: ReactPointerEvent<HTMLElement>) {
-  const bounds = event.currentTarget.getBoundingClientRect()
-  return {
-    x: clamp((event.clientX - bounds.left) / bounds.width),
-    y: clamp((event.clientY - bounds.top) / bounds.height),
-  }
-}
-
-function normalizedBox(start: { x: number; y: number }, end: { x: number; y: number }) {
-  const round = (value: number) => Number(value.toFixed(4))
-  return {
-    x0: round(Math.min(start.x, end.x)),
-    y0: round(Math.min(start.y, end.y)),
-    x1: round(Math.max(start.x, end.x)),
-    y1: round(Math.max(start.y, end.y)),
-  }
-}
-
-function Region({
-  box,
-  draft = false,
-  proposal = false,
-}: {
-  box: NormalizedBox
-  draft?: boolean
-  proposal?: boolean
-}) {
-  return (
-    <span
-      aria-hidden="true"
-      className={`pointer-events-none absolute border-2 ${
-        draft
-          ? 'border-warning bg-warning/40'
-          : proposal
-            ? 'border-info bg-info/30'
-            : 'border-danger bg-black/70'
-      }`}
-      style={{
-        left: `${box.x0 * 100}%`,
-        top: `${box.y0 * 100}%`,
-        width: `${(box.x1 - box.x0) * 100}%`,
-        height: `${(box.y1 - box.y0) * 100}%`,
-      }}
-    />
-  )
-}
-
 export function RecordItems({
   roles = ['reviewer'],
   requestNumber: scopedRequestNumber,
@@ -470,7 +369,9 @@ export function RecordItems({
   const [selected, setSelected] = useState<RecordItem | null>(null)
   // Distinct from `listPage`: this is the page *inside* the selected PDF.
   const [pageNumber, setPageNumber] = useState(1)
-  const [reviewDraft, setReviewDraft] = useState('responsive')
+  // Empty until a person (or a completed AI suggestion) picks one: a blind
+  // default would let one click confirm a judgment nobody made.
+  const [reviewDraft, setReviewDraft] = useState('')
   const [reviewDraftTouched, setReviewDraftTouched] = useState(false)
   const [withholdingExemption, setWithholdingExemption] = useState('')
   const [redactionExemption, setRedactionExemption] = useState('')
@@ -557,7 +458,7 @@ export function RecordItems({
     setSelected(item)
     setPageNumber(1)
     setReviewDraft(
-      item.review_state === 'unreviewed' ? 'responsive' : item.review_state,
+      item.review_state === 'unreviewed' ? '' : item.review_state,
     )
     setReviewDraftTouched(false)
     setWithholdingExemption('')
@@ -912,7 +813,7 @@ export function RecordItems({
     hydratedTarget.current = `${request}:${item.id}`
     setSelected(item)
     setPageNumber(1)
-    setReviewDraft(item.review_state === 'unreviewed' ? 'responsive' : item.review_state)
+    setReviewDraft(item.review_state === 'unreviewed' ? '' : item.review_state)
     setReviewDraftTouched(false)
     setWithholdingExemption('')
     setRedactionExemption('')
@@ -976,6 +877,7 @@ export function RecordItems({
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!canReview || selected?.review_state !== 'responsive') return
+    event.currentTarget.setPointerCapture?.(event.pointerId)
     const start = pointerPosition(event)
     setDragStart(start)
     setDraftBox(normalizedBox(start, start))
@@ -983,6 +885,10 @@ export function RecordItems({
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     if (!dragStart) return
+    if (event.buttons === 0) {
+      setDragStart(null)
+      return
+    }
     setDraftBox(normalizedBox(dragStart, pointerPosition(event)))
   }
 
@@ -990,7 +896,7 @@ export function RecordItems({
     if (!dragStart) return
     const box = normalizedBox(dragStart, pointerPosition(event))
     setDragStart(null)
-    if (box.x1 - box.x0 < 0.005 || box.y1 - box.y0 < 0.005) {
+    if (tooSmall(box)) {
       setDraftBox(null)
       toast('error', 'Draw a larger redaction region.')
       return
@@ -1165,7 +1071,7 @@ export function RecordItems({
         </span>
       ) : '—',
     },
-    { header: 'Source system', cell: (row) => row.source_system || '—' },
+    { header: 'Source system', cell: (row) => (row.source_system ? sourceSystemLabel(row.source_system) : '—') },
     {
       header: 'Custodians',
       // Every mailbox the message was found in. One message deduplicated
@@ -1234,7 +1140,7 @@ export function RecordItems({
         </span>
       ),
     },
-    { header: 'Created', cell: (row) => row.created_at.slice(0, 10) },
+    { header: 'Created', cell: (row) => formatDay(row.created_at) },
     ]
   }
 
@@ -1678,7 +1584,7 @@ export function RecordItems({
                   {responsivenessAdvisory.data?.enabled
                     && responsivenessAdvisory.data.latest === null && (
                     <p className="text-sm text-ink-muted">
-                      Automatic analysis is queued as soon as this record becomes review-ready.
+                      No AI suggestion for this record yet.
                     </p>
                   )}
                   {['pending', 'running'].includes(
@@ -1729,6 +1635,7 @@ export function RecordItems({
                         setReviewDraftTouched(true)
                       }}
                     >
+                      <option value="" disabled>Choose an outcome</option>
                       {HUMAN_REVIEW_STATES.map((state) => (
                         <option key={state.value} value={state.value}>{state.label}</option>
                       ))}
@@ -1754,6 +1661,7 @@ export function RecordItems({
                     onClick={() => reviewMutation.mutate()}
                     disabled={
                       reviewMutation.isPending
+                      || reviewDraft === ''
                       || (reviewDraft === 'withheld' && !withholdingExemption)
                     }
                   >

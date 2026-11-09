@@ -118,6 +118,7 @@ this by parsing the source of the letter and task modules for calls.
 | `triage.exclude_camera()` | AST check; human actor plus reason of at least 10 characters | A camera exclusion needs an accountable reason |
 | `services.record_external_initial_response()` | AST-guarded in `test_compliance` | Records a first response sent outside this system; sends nothing |
 | `scope_clarification` letter | `scope-ast-guard`; its clarification form tolls the clock | Choosing the form is a judgment with an accountable name on it |
+| System-drafted scope letter | `test_a_system_scope_letter_is_drafted_never_sent_or_clock_stopping` (`scope-letter-ast-guard`); `create_system_scope_letter_draft` has no `form` argument | The system drafts only the informational form and never sends it. See [correspondence](correspondence.md#scope-conversation-letter) |
 | Submission receipt | `receipt-ast-guard`; non-statutory; cannot set `initial_response_delivered` | Keeps the receipt from acting as a statutory response |
 | Interpretation-and-estimate letter | `test_a_system_prepared_letter_is_drafted_never_sent` (`estimate-letter-ast-guard`); the system drafts it with no actor and never approves or queues it | A Records Officer approves and sends it. See [estimates](estimates.md) |
 
@@ -141,9 +142,10 @@ acknowledgment is strict liability under RCW 42.56.520.
 
 Late acknowledgment is strict liability, so it may be automated. Automated
 estimate-kicking is a penalty aggravator, so it may not be. Never invert this.
-Estimate revisions always require a human. The one system-drafted letter, the
-interpretation-and-estimate letter, is drafted but never approved or sent by the system.
-See [estimates](estimates.md#the-interpretation-letter).
+Estimate revisions always require a human. The system drafts two kinds of letter, the
+interpretation-and-estimate letter and the informational scope letter, but it never approves or
+sends either one. See [estimates](estimates.md#the-interpretation-letter) and
+[correspondence](correspondence.md#scope-conversation-letter).
 
 The safety net is the backstop. The officer-facing plan that sets out the
 four-step acknowledgment ladder, and the states that decide when the net is
@@ -237,6 +239,10 @@ exposure.
 
 - [requests.md](requests.md): request lifecycle and status transitions
 - [matter-kinds.md](matter-kinds.md): which law a matter answers to
+- [footage.md](footage.md): camera footage preservation-first policy
+- [correspondence.md](correspondence.md): letter kinds and send gates
+- [../architecture/overview.md](../architecture/overview.md): architecture
+nswers to
 - [footage.md](footage.md): camera footage preservation-first policy
 - [correspondence.md](correspondence.md): letter kinds and send gates
 - [../architecture/overview.md](../architecture/overview.md): architecture

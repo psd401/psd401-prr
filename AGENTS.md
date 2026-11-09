@@ -39,12 +39,15 @@ and cited from code, tests, and ADRs; never renumber them.
 6. **Only two automated requester-facing paths** — the day-5 safety-net
    acknowledgment (`tasks.auto_acknowledge_safety_net`, in-app
    `AUTO_ACK_SAFETY_NET` switch) and the explicitly non-statutory submission
-   receipt. Estimate revisions, `scope_clarification`, and external-response
-   attestations are human-only. The interpretation-and-estimate letter may be
-   *drafted* by the system (`SYSTEM_PREPARED_DRAFT_KINDS`, never automated)
-   but only a Records Officer approves and sends it. Guards:
+   receipt. Estimate revisions and external-response attestations are
+   human-only. Two letters may be *drafted* by the system
+   (`SYSTEM_PREPARED_DRAFT_KINDS`, never automated): the
+   interpretation-and-estimate letter, and the scope letter after a count in
+   its informational form only (CIO decision, 2026-11-08). Only a person
+   approves and sends either, and the clock-stopping clarification form of the
+   scope letter stays a person's choice. Guards:
    `test_compliance.test_no_automated_path_exists`, `receipt-ast-guard`,
-   `scope-ast-guard`, `estimate-letter-ast-guard`.
+   `scope-ast-guard`, `scope-letter-ast-guard`, `estimate-letter-ast-guard`.
 7. **Footage: auto-hold always, auto-deny never** — `apps/records/triage.py`
    auto-holds every camera at each site the request names
    (`apps/records/footage_sites.py`), or every camera district-wide when no site
@@ -100,13 +103,19 @@ and cited from code, tests, and ADRs; never renumber them.
     gated draft/proposal tools (the fifth proposes a `DecisionBatch`, which
     only a person approves in the staff UI; tokens are handed off on the
     endpoints a batch replaces). Never put tokens in source or `.env.example`.
-    Unattended Vault actions are exactly two: the automatic intent Gmail
-    *counts* (iterative scoping), which never hold, export, collect, change
-    status, or reach the requester; and, only with the in-app
-    `PRR_TRUST_SCOPE_MODE=auto`, the export of a finished automatic scoping
-    session's final count on a request with no Vault collection yet, recorded
-    `trigger=automatic` (`vault_collections.queue_automatic_vault_collection`,
-    holds unchanged) — do not widen either. Web-form files are scan-gated
+    Unattended Vault actions are exactly two: the automatic intent *counts*
+    of Gmail, Drive, and Chat (iterative scoping), which never hold, collect,
+    change status, or reach the requester — Drive and Chat, which Vault's
+    `matters.count` does not support, are counted with a count-only export,
+    never downloaded, deleted once its count is read (`count-export-ast-guard`);
+    and, only with the
+    in-app `PRR_TRUST_SCOPE_MODE=auto`, the export of a finished automatic
+    scoping session's final count on a request with no Vault collection yet,
+    recorded `trigger=automatic` (`vault_collections.queue_automatic_vault_collection`).
+    That export covers Gmail, Drive, and Chat — every source that counted above
+    zero or could not be counted (CIO decision, 2026-11-08) — and places
+    Gmail's targeted hold only, no Drive or Chat hold. Do not widen either
+    unattended action beyond this. Web-form files are scan-gated
     `IntakeAttachment`s, never `RecordItem`s; no unscanned file is downloadable.
 12. **Google group authorization stays keyless and read-only** — a dedicated
     group-reader service account plus named-user membership lookups. No private

@@ -31,6 +31,7 @@ import {
   reasonHint,
   reasonTooShort,
 } from '../ui'
+import { formatDay } from '../date'
 
 export type ReviewQueue = 'unmatched' | 'quarantined'
 
@@ -966,7 +967,7 @@ export function InboundCorrespondenceReview({
                           <option value="">Select a cycle</option>
                           {openClarificationCycles.map((cycle) => (
                             <option key={cycle.id} value={cycle.id}>
-                              {`Opened ${cycle.opened_at.slice(0, 10)} — awaiting response`}
+                              {`Opened ${formatDay(cycle.opened_at)} — awaiting response`}
                             </option>
                           ))}
                         </Select>

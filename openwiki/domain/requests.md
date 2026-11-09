@@ -260,6 +260,14 @@ The duplicate closes as `closed_duplicate` with `merged_into` set, its matched
 email is rematched to the case of record, and the target keeps its own
 `received_at` and deadline. Cases governed by different law cannot merge.
 
+Focused tests: `apps/records/tests/test_merge_requests.py` covers the requester-email move,
+the refusal of a closed or self-merge, and that a merged duplicate cannot be reopened
+(`test_a_merged_duplicate_cannot_be_reopened`). `apps/records/tests/test_reopen_request.py`
+covers reopening with a substantive reason, officer-only reopen, the rule that reopening
+cannot fabricate a delivered state, that reopening does not restart the statutory clock, and
+that no background task may reopen a request (`test_no_background_task_may_reopen_a_request`).
+Run `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_merge_requests apps.records.tests.test_reopen_request --settings=config.test_settings`.
+
 ## Accountability corrections
 
 Two officer-only writes keep who-is-accountable correct without rewriting history.

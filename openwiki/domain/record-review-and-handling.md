@@ -6,14 +6,15 @@ tags: [domain, record-review, redaction, derivatives, handling, media, opaque-re
 openwiki:
   roles: [domain, workflow]
   change_kinds: [review-workflow, rendering, handling-paths]
-  source_paths: [apps/records/handling.py, apps/records/derivatives.py, apps/records/preview.py, apps/records/review.py, apps/records/opaque_review.py, apps/records/media_review.py, apps/records/clusters.py, apps/records/review_batches.py, apps/api/resources/records_misc.py, frontend/src/case/RecordClusters.tsx, frontend/src/case/BatchReview.tsx, frontend/src/case/ReviewFlight.tsx]
-  symbols: [handling_for, handling_for_item, build_derivative, review_record, bulk_review_records, bulk_review_selection, bulk_review_confirmed_selection, approve_second_review, render_redacted_record, record_opaque_disposition, create_media_redaction, render_media_redactions, cluster_records, RecordItemViewSet]
-  test_paths: [apps/records/tests/test_handling.py, apps/records/tests/test_derivatives.py, apps/records/tests/test_record_review.py, apps/records/tests/test_media_and_opaque_review.py, apps/records/tests/test_review_agreement.py, apps/records/tests/test_undo_review.py, apps/api/tests/test_records_misc.py, apps/api/tests/test_bulk_review_by_filter.py, frontend/src/case/ReviewFlight.test.tsx]
+  source_paths: [apps/records/handling.py, apps/records/derivatives.py, apps/records/preview.py, apps/records/readable.py, apps/records/review.py, apps/records/opaque_review.py, apps/records/media_review.py, apps/records/clusters.py, apps/records/review_batches.py, apps/api/resources/records_misc.py, frontend/src/case/RecordClusters.tsx, frontend/src/case/BatchReview.tsx, frontend/src/case/ReviewFlight.tsx, frontend/src/case/RedactWorkspace.tsx, frontend/src/case/redactionCanvas.ts, frontend/src/case/RedactionProposals.tsx]
+  symbols: [handling_for, handling_for_item, build_derivative, readable_text, record_reading_text, review_record, bulk_review_records, bulk_review_selection, bulk_review_confirmed_selection, approve_second_review, render_redacted_record, record_opaque_disposition, create_media_redaction, render_media_redactions, cluster_records, RecordItemViewSet, create_redaction, void_redaction, RedactWorkspace, RedactStage]
+  test_paths: [apps/records/tests/test_handling.py, apps/records/tests/test_derivatives.py, apps/records/tests/test_readable_text.py, apps/records/tests/test_record_review.py, apps/records/tests/test_media_and_opaque_review.py, apps/records/tests/test_review_agreement.py, apps/records/tests/test_undo_review.py, apps/api/tests/test_records_misc.py, apps/api/tests/test_bulk_review_by_filter.py, apps/api/tests/test_record_review.py, apps/api/tests/test_redaction_ai.py, frontend/src/case/ReviewFlight.test.tsx, frontend/src/case/RedactWorkspace.test.tsx]
   invariants:
     - A record's original bytes are never replaced; a reading copy or redacted copy is always a new derived object.
     - A record that cannot be rendered is never marked reviewed by default; a named human records a basis and reasoning.
     - Every redaction cites an exemption, and a second-review exemption needs a distinct second reviewer before burn-in.
     - A filter-driven bulk decision writes only the exact set the reviewer confirmed (same count and digest), or it writes nothing.
+    - A reading copy of extracted text is derived for display only; `ocr_text` is never rewritten, and each read is audited.
   validation_commands: ["PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_handling apps.records.tests.test_derivatives --settings=config.test_settings", "PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_bulk_review_by_filter --settings=config.test_settings"]
 ---
 
@@ -88,6 +89,26 @@ reason. Outlook `.msg` files get guidance instead of a fake render. The Celery t
 (`is_previewable`, `has_ready_derivative`, `preview_pdf_metadata`) gives the reviewer a
 verified PDF for the converted or original copy.
 
+## Reading text without email markup
+
+Reviewers who read extracted text, rather than a PDF page, use a cleaned reading copy from
+`apps/records/readable.py`. `RecordItem.ocr_text` stays exactly as extracted, because search
+reads it. Email bodies arrive with Outlook conditional comments, style blocks, HTML tags, and
+markdown image and link syntax. `readable_text(raw)` removes that markup, collapses blank lines,
+and never writes back. It removes only real HTML element names and Office-namespaced tags, so
+text a person wrote in angle brackets, such as a redaction marker or an address, stays.
+
+`record_reading_text(item, actor=...)` serves the copy at
+`GET /api/staff/record-items/{id}/text/` (the `text` action on `RecordItemViewSet`, registered as
+capability `record_items.read_text`). The response is `{text, truncated}`, capped at
+`READABLE_TEXT_LIMIT` (200,000 characters). Each read writes a `record.text_viewed` audit entry,
+with the same audience as a page preview. `ReviewFlight` fetches this endpoint on the keyboard
+review screen ([keyboard review](#keyboard-review-in-the-case-review-tab)).
+
+Focused tests: `apps/records/tests/test_readable_text.py` for the cleaning rules, and
+`apps/api/tests/test_record_review.py` for the audited read and the role denial. Minimal
+validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_readable_text --settings=config.test_settings`.
+
 ## Human review and second review
 
 `apps/records/review.py` owns the reviewer's decisions:
@@ -145,6 +166,93 @@ rule: `test_undo_returns_a_first_decision_to_unreviewed`,
 `test_the_api_reports_a_refused_undo_as_a_400`.
 
 Minimal validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_undo_review --settings=config.test_settings`.
+
+## The Redact stage
+
+The case's Redact stage (`RedactStage` in `frontend/src/case/CaseWorkspace.tsx`) has two parts.
+Group decisions on pending AI proposals come first, in `RedactionProposals.tsx`
+([trust ladder](trust-ladder.md#redaction-proposal-groups)). Below them,
+`RedactWorkspace` (`frontend/src/case/RedactWorkspace.tsx`) is the per-record drawing surface
+described here. Both use the same redaction endpoints. The Records tab has its own redaction
+panel in `frontend/src/pages/RecordItems.tsx` that calls those endpoints too, so the two
+surfaces must keep the same rules.
+
+```mermaid
+sequenceDiagram
+    participant R as Reviewer in RedactWorkspace
+    participant API as Staff API
+    participant S as apps/records/review.py
+    R->>API: POST "/api/staff/redactions/" (box, page, exemption, explanation)
+    API->>S: create_redaction
+    S-->>R: Redaction row (citation attached)
+    R->>API: POST "record-items/:id/second-review/" (only when required)
+    API->>S: approve_second_review (a different reviewer)
+    R->>API: POST "record-items/:id/render-redactions/"
+    API->>S: render_redacted_record (manifest digest, new PDF object)
+    S-->>R: redacted_artifact_ready
+```
+
+Caption: the per-record sequence from drawing a box to the built redacted PDF. Each step is
+enforced on the server, not only in the screen.
+
+What the screen does:
+
+- **Lists responsive records.** It loads `GET /api/staff/record-items/?request=<number>&review_state=responsive`.
+  The page image comes from `GET /api/staff/record-items/{id}/preview-page/?page=N`, and the
+  page count from the preview metadata. A record that cannot be drawn on shows
+  `RecordHandlingPanel` instead ([handling paths](#handling-paths)).
+- **Adds a redaction.** A pointer drag creates a normalized box (`normalizedBox`, `tooSmall` in
+  `frontend/src/case/redactionCanvas.ts`). Boxes under 0.5% of the page width or height are
+  treated as stray clicks. Add stays disabled until there is a box and an active exemption.
+  The server (`create_redaction`) owns the rules. The screen only mirrors them.
+- **Uses an AI candidate.** "Use suggestion" copies a `RedactionProposal` box, page, citation,
+  and rationale into the draft. Saving then calls
+  `POST /api/staff/redaction-proposals/{id}/accept/`, and dismissing posts a reason to
+  `.../reject/`. Drawing over a suggestion clears it, so the saved box is the reviewer's own
+  redaction. Candidate rules are in [advisory AI](advisory-ai.md#boundary).
+- **Removes a redaction.** `POST /api/staff/redactions/{id}/void/` needs a reason. The row is
+  kept, and the list shows only active redactions.
+- **Approves second review.** The button appears when `second_review_required` is true and no
+  second review exists yet. `approve_second_review` refuses the first reviewer.
+- **Builds the redacted PDF.** The button appears when at least one active redaction exists and
+  any required second review is done. `render_redacted_record` burns the active boxes into a
+  new copy, and the list shows "PDF built".
+- **Remembers the exemption choice.** The last chosen basis is kept in browser storage under
+  `prr.redact.basis`. A remembered basis that is no longer active shows as unchosen and cannot
+  be saved.
+- **Keyboard.** `j` and `k` move between records, the arrow keys turn pages, Enter saves the
+  draft when Add is enabled, and Esc clears it. Typing in a field is excluded.
+
+Invariants:
+
+- A redaction is never saved without an active exemption citation. The server enforces it, and
+  the screen's disabled state is only a mirror.
+- Burn-in is keyed by a manifest digest of the active redactions (`_redaction_manifest`). An
+  unchanged set returns the existing render, and a changed set produces a new immutable object.
+- A redacted record never falls back to the original bytes. The original stays as collected
+  ([record review](#human-review-and-second-review)).
+- Build refuses when there is no active redaction, and refuses while a required second review
+  is missing. Those are the two `ValidationError`s in `render_redacted_record`.
+
+Focused tests:
+
+- `frontend/src/case/RedactWorkspace.test.tsx` covers the rendered flow. Its test names include
+  `builds the redacted PDF when no second review is needed`, `removes a redaction only with a reason`,
+  and `treats a box drawn over a suggestion as your own redaction`.
+- `apps/api/tests/test_record_review.py` covers create through the domain service, void that keeps
+  the row (`test_redaction_void_retains_row_and_reason`), and the second-review and render actions.
+- `apps/api/tests/test_redaction_ai.py` covers the accept and reject endpoints.
+- `apps/records/tests/test_record_review.py` covers the distinct second reviewer before burn-in
+  (`test_ferpa_redaction_requires_distinct_second_review_before_burn_in`).
+
+Minimal validation: `cd frontend && bun run test -- src/case/RedactWorkspace.test.tsx`, and
+`PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_record_review apps.api.tests.test_redaction_ai --settings=config.test_settings`.
+
+Change recipe: a new per-redaction field must pass through `create_redaction` and the
+`redactions.create` capability in `apps/api/capabilities.py`, use the TypeScript shapes in
+`redactionCanvas.ts`, and be added to `_redaction_manifest` when it changes the burned-in
+output. Scope: a change to this screen alone does not touch the domain rules, so the backend tests
+above are the ones to run with it. Escalate to the full suite only when a shared service changes.
 
 ## Keyboard review in the case Review tab
 

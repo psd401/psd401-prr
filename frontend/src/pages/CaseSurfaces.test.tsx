@@ -125,10 +125,10 @@ describe('collection-task deadline semantics', () => {
 
     renderPage(<Tasks roles={['reviewer']} />)
 
-    const today = await screen.findByText('2026-07-30')
+    const today = await screen.findByText('Jul 30, 2026')
     expect(today).not.toHaveClass('text-danger-ink')
-    expect(screen.getByText('2026-07-01')).not.toHaveClass('text-danger-ink')
-    expect(screen.getByText('2026-07-29')).toHaveClass('text-danger-ink')
+    expect(screen.getByText('Jul 1, 2026')).not.toHaveClass('text-danger-ink')
+    expect(screen.getByText('Jul 29, 2026')).toHaveClass('text-danger-ink')
   })
 })
 

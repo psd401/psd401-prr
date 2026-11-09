@@ -22,6 +22,11 @@ app.conf.beat_schedule = {
         "schedule": crontab(minute="*/5"),
         "kwargs": {"limit": 25},
     },
+    "prepare-scope-letters": {
+        "task": "apps.records.tasks.prepare_scope_letters",
+        "schedule": crontab(minute="*/10"),  # drafts only, never sends
+        "kwargs": {"limit": 10},
+    },
     "prepare-estimate-letters": {
         "task": "apps.records.tasks.prepare_estimate_letters",
         "schedule": crontab(minute=15),  # hourly; drafts only, never sends

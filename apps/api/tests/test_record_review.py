@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from apps.api.identity import apply_staff_roles
 from apps.api.models import StaffRole
+from apps.audit.models import AuditLog
 from apps.records.models import (
     ExemptionCitation,
     PublicRecordsRequest,
@@ -66,6 +67,39 @@ class RecordReviewApiTests(TestCase):
             "ocr_text",
         ):
             self.assertNotIn(private_field, body)
+
+    def test_reviewer_reads_a_records_text_without_its_markup_and_it_is_audited(self):
+        self.item.ocr_text = "<p>Board minutes&nbsp;attached</p><!-- tracking -->"
+        self.item.email_body_sha256 = "b" * 64
+        self.item.save(update_fields=["ocr_text", "email_body_sha256"])
+
+        response = self.client.get(f"/api/staff/record-items/{self.item.pk}/text/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json(), {"text": "Board minutes attached", "truncated": False})
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="record.text_viewed", target=str(self.item.pk),
+            ).exists()
+        )
+        self.item.refresh_from_db()
+        self.assertEqual(
+            self.item.ocr_text, "<p>Board minutes&nbsp;attached</p><!-- tracking -->",
+        )
+        # Identical copies are folded in review by their body fingerprint.
+        listed = self.client.get(f"/api/staff/record-items/{self.item.pk}/").json()
+        self.assertEqual(listed["email_body_sha256"], "b" * 64)
+
+    def test_a_role_that_cannot_preview_cannot_read_record_text(self):
+        liaison = get_user_model().objects.create(
+            username="review-api-liaison", email="liaison@example.org", is_staff=True,
+        )
+        apply_staff_roles(liaison, [StaffRole.LIAISON])
+        self.client.force_login(liaison)
+
+        response = self.client.get(f"/api/staff/record-items/{self.item.pk}/text/")
+
+        self.assertEqual(response.status_code, 403)
 
     def test_review_action_records_human_withholding_decision(self):
         response = self.client.post(

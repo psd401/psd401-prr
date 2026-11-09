@@ -1315,6 +1315,32 @@ def request_record_redaction_advisory(record_item_id, *, actor) -> AdvisoryRun:
     )
 
 
+def first_pass_progress(prr) -> dict:
+    """How far the automatic first pass has read this case's records.
+
+    A record counts as read once its responsiveness proposal is complete.
+    Superseded records are out of review and are not counted. Counts only;
+    no record or model text is returned.
+    """
+    from .models import AdvisoryRun, RecordItem
+
+    in_review = RecordItem.objects.filter(request=prr).exclude(
+        review_state=RecordItem.ReviewState.SUPERSEDED,
+    )
+    read = in_review.filter(
+        advisory_runs__kind=AdvisoryRun.Kind.RECORD_RESPONSIVENESS,
+        advisory_runs__state=AdvisoryRun.State.COMPLETE,
+    ).distinct().count()
+    return {
+        "enabled": bool(
+            runtime.get("PRR_AI_ADVISORY_ENABLED")
+            and runtime.get("PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED")
+        ),
+        "read": read,
+        "total": in_review.count(),
+    }
+
+
 def request_automatic_record_advisory(
     record_item_id,
     *,
@@ -1759,9 +1785,11 @@ def _advisory_system_message(kind: str) -> str:
         )
     elif kind == SCOPE_REFINEMENT:
         output_contract = (
-            "You are refining a Google Vault Gmail count for a public records "
-            "request. iterations lists each query already counted, with its "
-            "total and the custodian accounts holding the most matches. Decide "
+            "You are refining a Google Vault count of Gmail, Drive, and Chat "
+            "for a public records request. iterations lists each query already "
+            "counted, with its total, source_totals per source (null where "
+            "Vault could not count that source), and the Gmail accounts "
+            "holding the most matches. Decide "
             "whether the last scope is reasonable. Return exactly: decision "
             "(stop or refine) and reason (string); when decision is refine, "
             "also required_search_terms (string array), search_terms (string "

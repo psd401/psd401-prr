@@ -926,6 +926,83 @@ class EstimateRevisionTests(TestCase):
                         callers.add(path.relative_to(settings.BASE_DIR).as_posix())
         self.assertEqual(callers, {"apps/records/scoping.py"})
 
+    def test_a_vault_count_never_downloads_holds_collects_or_makes_records(self):
+        """count-export-ast-guard (rule 11).
+
+        A Drive or Chat count may fall back to a count-only Vault export. That
+        export is read for its total and deleted: the count path may never
+        download an export, place a hold, start a collection export, or create
+        a RecordItem, and only the count path creates or deletes one.
+        """
+        import ast
+
+        forbidden = {
+            "download_export",
+            "_default_download",
+            "download_to_file",
+            "ingest_completed_export",
+            "ingest_vault_export",
+            "create_scanned_record_item",
+            "retain_scanned_record_bytes",
+            "store_immutable_object",
+            "create_mail_export",
+            "ensure_mail_export",
+            "create_source_export",
+            "ensure_source_export",
+            "create_mail_hold",
+            "ensure_mail_hold",
+            "ensure_source_hold",
+            "queue_vault_collection",
+            "queue_automatic_vault_collection",
+        }
+        count_path = Path(settings.BASE_DIR, "apps/records/vault_counts.py")
+        tree = ast.parse(count_path.read_text())
+        called, names = set(), set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                called.add(
+                    node.func.attr if isinstance(node.func, ast.Attribute)
+                    else getattr(node.func, "id", "")
+                )
+            if isinstance(node, ast.Name):
+                names.add(node.id)
+            if isinstance(node, ast.Attribute):
+                names.add(node.attr)
+            if isinstance(node, ast.ImportFrom):
+                names.update(alias.name for alias in node.names)
+        self.assertEqual(called & forbidden, set())
+        self.assertFalse("RecordItem" in names, "The Vault count path may not touch RecordItem.")
+
+        client_tree = ast.parse(
+            Path(settings.BASE_DIR, "apps/integrations/vault/client.py").read_text()
+        )
+        count_export = next(
+            node for node in ast.walk(client_tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "ensure_count_export"
+        )
+        statements = count_export.body
+        if ast.get_docstring(count_export) is not None:
+            statements = statements[1:]
+        body = "\n".join(ast.unparse(statement) for statement in statements)
+        for word in ("download", "cloudStorageSink", "storage"):
+            self.assertNotIn(word, body)
+
+        callers = {"ensure_count_export": set(), "delete_export": set()}
+        for path in Path(settings.BASE_DIR, "apps").rglob("*.py"):
+            if "tests" in path.parts or "migrations" in path.parts:
+                continue
+            where = path.relative_to(settings.BASE_DIR).as_posix()
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.Call):
+                    name = (
+                        node.func.attr if isinstance(node.func, ast.Attribute)
+                        else getattr(node.func, "id", "")
+                    )
+                    if name in callers:
+                        callers[name].add(where)
+        self.assertEqual(callers["ensure_count_export"], {"apps/records/vault_counts.py"})
+        self.assertEqual(callers["delete_export"], {"apps/records/vault_counts.py"})
+
     def test_only_the_intake_trust_ladder_closes_a_case_without_a_person(self):
         """intake-auto-close-ast-guard (#34).
 
@@ -1008,12 +1085,74 @@ class EstimateRevisionTests(TestCase):
         )
         self.assertEqual(
             correspondence_services.SYSTEM_PREPARED_DRAFT_KINDS,
-            frozenset({Correspondence.Kind.INTERPRETATION_ESTIMATE}),
+            frozenset(
+                {
+                    Correspondence.Kind.INTERPRETATION_ESTIMATE,
+                    Correspondence.Kind.SCOPE_CLARIFICATION,
+                }
+            ),
         )
         self.assertTrue(
             correspondence_services.SYSTEM_PREPARED_DRAFT_KINDS.isdisjoint(
                 correspondence_services.AUTOMATED_CORRESPONDENCE_KINDS
             )
+        )
+
+    def test_a_system_scope_letter_is_drafted_never_sent_or_clock_stopping(self):
+        """scope-letter-ast-guard (CIO decision, 2026-11-08).
+
+        The system may draft the scope letter after a count, but the drafting
+        path calls no approval, queue, send, state-change, estimate, or fee
+        function, and it can only produce the informational form: the
+        clarification form tolls the response period on delivery, so it stays
+        a person's choice. The officer-authored create_scope_clarification_draft
+        is still never called by it.
+        """
+        import ast
+        import inspect
+
+        from apps.records import scope_letters
+
+        source = (
+            inspect.getsource(scope_letters)
+            + inspect.getsource(tasks.prepare_scope_letters)
+            + inspect.getsource(correspondence_services.create_system_scope_letter_draft)
+        )
+        tree = ast.parse(source)
+        calls = {
+            (
+                node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else getattr(node.func, "id", "")
+            )
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+        }
+        self.assertTrue(
+            calls.isdisjoint(
+                {
+                    "approve_draft",
+                    "approve_and_send",
+                    "batch_approve_and_send",
+                    "queue_approved",
+                    "queue_automated_acknowledgment",
+                    "transition",
+                    "record_acknowledgment",
+                    "revise_estimate",
+                    "apply_deposit_gate",
+                    "create_fee_estimate_draft",
+                    "create_scope_clarification_draft",
+                }
+            ),
+            calls,
+        )
+        self.assertNotIn('"clarification"', source)
+        self.assertNotIn("'clarification'", source)
+        self.assertNotIn(
+            "form",
+            inspect.signature(
+                correspondence_services.create_system_scope_letter_draft
+            ).parameters,
         )
 
     def test_a_case_title_cannot_reach_a_requester_a_status_or_vault(self):

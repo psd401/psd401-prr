@@ -61,6 +61,19 @@ from dataclasses import dataclass
 
 from . import values
 
+#: The Bedrock inference profiles the production grant names
+#: (``infra/cdk/lib/advisory-bedrock.ts``), offered on the model settings.
+#: A test keeps this list and the grant identical.
+BEDROCK_PROFILES = (
+    "us.amazon.nova-2-lite-v1:0",
+    "us.anthropic.claude-opus-5-5",
+    "us.anthropic.claude-fable-5-1",
+    "us.anthropic.claude-sonnet-5-5",
+    "us.anthropic.claude-haiku-5-5",
+    "us.openai.gpt-6.1-sol",
+    "us.openai.gpt-6.1-terra",
+)
+
 
 @dataclass(frozen=True)
 class SettingSpec:
@@ -88,6 +101,9 @@ class SettingSpec:
     periods: tuple[str, ...] = ()
     #: What the number counts, for the Settings page to render beside it.
     unit: str = ""
+    #: Known good values for a ``text`` setting, offered as a pick list. Not
+    #: an allow-list: validation still runs on ``pattern``.
+    suggestions: tuple[str, ...] = ()
     #: Variables this key used to take its default from before it moved into
     #: the store. Consulted only by the one-time bootstrap, and only when the
     #: key's own environment variable is unset.
@@ -100,6 +116,8 @@ class SettingSpec:
             raise ValueError(f"{self.key} is a choice with no choices.")
         if self.type != values.CHOICE and self.choices:
             raise ValueError(f"{self.key} lists choices but is not a choice.")
+        if self.suggestions and self.type != values.TEXT:
+            raise ValueError(f"{self.key} offers suggestions but is not text.")
         if self.type == values.SECRET and self.default != "":
             # A shipped default for a secret would be a credential in source.
             raise ValueError(f"{self.key} is a secret and may not carry a default.")
@@ -250,13 +268,30 @@ SETTINGS: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED",
         type=values.BOOLEAN,
-        default=False,
+        # On by default (CIO decision, 2026-11-08): the first pass is how
+        # review and redaction start. It still applies nothing.
+        default=True,
         category=CATEGORY_ADVISORY_AI,
         label="Prepare record proposals automatically",
         consequence=(
             "On, a record's advisory proposal is prepared as the record "
             "arrives instead of when a reviewer clicks Run. Off, a reviewer "
             "asks for each one. Nothing is applied either way."
+        ),
+        requires=("PRR_AI_ADVISORY_ENABLED",),
+    ),
+    SettingSpec(
+        key="PRR_AI_AUTOMATIC_SCOPE_LETTER_ENABLED",
+        type=values.BOOLEAN,
+        default=False,
+        category=CATEGORY_ADVISORY_AI,
+        label="Draft scope letters automatically",
+        consequence=(
+            "On, when a Gmail count finishes and nothing has been pulled yet, "
+            "the system drafts the informational letter telling the requester "
+            "how many items matched and how they could narrow it. A person "
+            "approves and sends it; the system never sends it. Off, staff "
+            "write each one."
         ),
         requires=("PRR_AI_ADVISORY_ENABLED",),
     ),
@@ -551,6 +586,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
         type=values.TEXT,
         default="",
         allow_blank=True,
+        suggestions=BEDROCK_PROFILES,
         max_length=255,
         pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
         format_message="The advisory model must be a Bedrock model identifier.",
@@ -568,6 +604,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
         type=values.TEXT,
         default="",
         allow_blank=True,
+        suggestions=BEDROCK_PROFILES,
         max_length=255,
         pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
         format_message="The advisory model must be a Bedrock model identifier.",
@@ -584,6 +621,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
         type=values.TEXT,
         default="",
         allow_blank=True,
+        suggestions=BEDROCK_PROFILES,
         max_length=255,
         pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
         format_message="The advisory model must be a Bedrock model identifier.",
@@ -600,6 +638,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
         type=values.TEXT,
         default="",
         allow_blank=True,
+        suggestions=BEDROCK_PROFILES,
         max_length=255,
         pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
         format_message="The advisory model must be a Bedrock model identifier.",
@@ -616,6 +655,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
         type=values.TEXT,
         default="",
         allow_blank=True,
+        suggestions=BEDROCK_PROFILES,
         max_length=255,
         pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
         format_message="The advisory model must be a Bedrock model identifier.",
@@ -634,6 +674,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
         type=values.TEXT,
         default="",
         allow_blank=True,
+        suggestions=BEDROCK_PROFILES,
         max_length=255,
         pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
         format_message="The advisory model must be a Bedrock model identifier.",
@@ -1974,6 +2015,27 @@ SETTINGS: tuple[SettingSpec, ...] = (
             "The Workspace account the Vault identity acts as. It must be an "
             "account with Vault privileges; the wrong one makes every Vault "
             "call fail rather than silently return less."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_VAULT_STAFF_ORG_UNIT_ID",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        max_length=100,
+        pattern=r"id:[A-Za-z0-9_-]{1,96}",
+        format_message=(
+            "An organizational unit ID from the Google Admin console, such as "
+            "id:03ph8a2z1enx4lx."
+        ),
+        category=CATEGORY_GOOGLE_IDENTITY,
+        label="Staff organizational unit for district-wide Drive and Chat",
+        consequence=(
+            "Google Vault searches Gmail across the whole district, but Drive "
+            "and Chat only by account or organizational unit. A district-wide "
+            "count or collection searches Drive and Chat for everyone in this "
+            "unit. Blank means a district-wide search covers Gmail only, and "
+            "Drive and Chat show as not available."
         ),
     ),
     SettingSpec(

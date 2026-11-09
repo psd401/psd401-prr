@@ -952,6 +952,27 @@ describe('CaseWorkspace stage rail (#45)', () => {
       .toHaveAttribute('aria-current', 'page')
   })
 
+  it('tells Review and Redact how far the AI has read', async () => {
+    const reading = { ...SUMMARY, ai_first_pass: { enabled: true, read: 40, total: 120 } }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/workspace-summary/')) return fakeResponse(reading)
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    })
+    renderCase('/requests/PRR-2026-0001/review', ['records_officer'], fetchMock)
+    expect(await screen.findByText('AI has read 40 of 120 records.')).toBeInTheDocument()
+  })
+
+  it('tells Redact how far the AI has read', async () => {
+    const reading = { ...SUMMARY, ai_first_pass: { enabled: true, read: 120, total: 120 } }
+    renderCase('/requests/PRR-2026-0001/redact', ['records_officer'], vi.fn(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/workspace-summary/')) return fakeResponse(reading)
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    }))
+    expect(await screen.findByText('AI has read all 120 records.')).toBeInTheDocument()
+  })
+
   it('heads the stage with what it asks, and jumps to the work when already there', async () => {
     renderCase('/requests/PRR-2026-0001/collect', ['records_officer'], withCollections([VAULT_TASK]))
 
@@ -977,6 +998,16 @@ describe('CaseWorkspace stage rail (#45)', () => {
     await screen.findByRole('heading', { name: 'Board minutes for the spring term', level: 1 })
     expect(screen.queryByRole('link', { name: 'Finish collection' })).not.toBeInTheDocument()
     expect(screen.queryByText('No due date')).not.toBeInTheDocument()
+  })
+
+  it('says only what is true of a later stage with nothing waiting', async () => {
+    // Every record decided while a collection is still open: Review is not
+    // the current stage, but saying nothing has reached it would be false.
+    renderCase('/requests/PRR-2026-0001/redact', ['records_officer'], withCollections([VAULT_TASK]))
+
+    const card = await screen.findByRole('region', { name: 'Redact decision' })
+    expect(card).toHaveTextContent('Nothing is waiting here right now.')
+    expect(card).not.toHaveTextContent('Nothing has reached this stage yet.')
   })
 
   it('says a finished stage is done', async () => {

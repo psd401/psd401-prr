@@ -54,6 +54,7 @@ import {
   outstandingStatutoryStep,
   type StatutoryResponse,
 } from '../statutory'
+import { formatDay } from '../date'
 
 // The interpretation-and-estimate letter is drafted by the system from a
 // computed estimate (#42), never composed here.
@@ -1917,8 +1918,8 @@ export function CorrespondencePanel({
                     {cycleState(cycle)}
                   </p>
                   <p className="text-xs text-ink-muted">
-                    Opened {cycle.opened_at.slice(0, 10)}
-                    {cycle.responded_at ? ` · response ${cycle.responded_at.slice(0, 10)}` : ''}
+                    Opened {formatDay(cycle.opened_at)}
+                    {cycle.responded_at ? ` · response ${formatDay(cycle.responded_at)}` : ''}
                   </p>
                 </div>
                 {canManage

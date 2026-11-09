@@ -51,6 +51,17 @@ Conversion runs when a record is created and is retried by
 inline: a migration stores hundreds of files at once, and doing this inline
 would turn a transfer into an hours-long job that fails as a single unit.
 
+## Files from Google Drive (Vault)
+
+A Vault Drive export arrives as ZIP archives of native files: Google Docs as
+DOCX, Sheets as XLSX, Slides as PPTX, Drawings as PDF, Vids as MP4, and
+uploaded files as themselves. `apps/records/vault_ingest.py` keeps each file
+as the original record (`source_system` `google_vault_drive`), with its media
+type taken from its name, and this module decides its path exactly as for any
+other file. No new format is added for Drive: an unrecognized file is
+`opaque`, as everywhere else. Chat messages arrive as MBOX and render through
+the email converter (`google_vault_chat`).
+
 ## Audio and video (`media`)
 
 `apps/records/media_review.py`. Time-based media cannot be reduced to pages:

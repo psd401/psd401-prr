@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('records', '0064_footagepreservation_hold_run_heartbeat'),
+        ('records', '0066_footagepreservation_hold_run_heartbeat'),
     ]
 
     operations = [

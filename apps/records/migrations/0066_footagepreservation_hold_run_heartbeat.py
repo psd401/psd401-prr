@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('records', '0063_camerahold_hold_claimed_at'),
+        ('records', '0065_camerahold_hold_claimed_at'),
     ]
 
     operations = [

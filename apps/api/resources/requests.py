@@ -43,6 +43,7 @@ from apps.api.identity import (
     has_staff_role,
     staff_roles,
 )
+from apps.api.pagination import CaseListPagination
 from apps.api.resources.collection_tasks import CollectionTaskSerializer
 from apps.api.resources.records_misc import InstallmentSerializer
 from apps.api.resources.work_items import (
@@ -70,6 +71,7 @@ from apps.correspondence.models import (
 from apps.records import services, triage
 from apps.records.advisory_ai import (
     INTAKE_LABELS,
+    first_pass_progress,
     request_intake_classification,
     request_request_intent_advisory,
 )
@@ -491,8 +493,14 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        user = self.context["request"].user
-        if not has_staff_role(user, StaffRole.RECORDS_OFFICER):
+        # A page reads the caller's role once (``list`` sets it), not once
+        # per row: each check is a group query.
+        is_officer = self.context.get("is_records_officer")
+        if is_officer is None:
+            is_officer = has_staff_role(
+                self.context["request"].user, StaffRole.RECORDS_OFFICER,
+            )
+        if not is_officer:
             data["requester_email"] = None
             data["requester_name"] = None
         return data
@@ -1270,6 +1278,12 @@ class CaseWorkspaceNextActionSerializer(serializers.Serializer):
     work_item_id = serializers.UUIDField()
 
 
+class CaseWorkspaceFirstPassSerializer(serializers.Serializer):
+    enabled = serializers.BooleanField()
+    read = serializers.IntegerField()
+    total = serializers.IntegerField()
+
+
 class CaseWorkspaceSummarySerializer(serializers.Serializer):
     number = serializers.CharField()
     legal_status = serializers.CharField()
@@ -1287,6 +1301,7 @@ class CaseWorkspaceSummarySerializer(serializers.Serializer):
     next_due_basis = serializers.ChoiceField(
         choices=list(DueBasis.CHOICES), allow_null=True,
     )
+    ai_first_pass = CaseWorkspaceFirstPassSerializer()
 
 
 class CaseActivityEntrySerializer(serializers.Serializer):
@@ -1490,6 +1505,7 @@ class RecordUploadResponseSerializer(serializers.Serializer):
 
 def _scoping_data(session) -> dict:
     from apps.records.models import ScopeIteration
+    from apps.records.vault_counts import source_count_summary
 
     iterations = list(
         ScopeIteration.objects.filter(session=session).select_related("count_run").order_by("number")
@@ -1510,6 +1526,8 @@ def _scoping_data(session) -> dict:
             "custodians": iteration.custodians,
             "state": run.state,
             "total": run.total_count,
+            # Per source: Gmail, Drive, Chat (counting, counted, unavailable).
+            "source_counts": source_count_summary(run),
             "top_accounts": run.account_counts[:5],
             "date_range_start": run.date_range_start,
             "date_range_end": run.date_range_end,
@@ -1540,6 +1558,8 @@ class RequestsViewSet(
     drive status changes through the service layer, never the model directly.
     Estimate revisions use the durable correspondence resource.
     """
+
+    pagination_class = CaseListPagination
     lookup_field = "number"
     http_method_names = ["get", "patch", "post", "head", "options"]
     role_permissions = {
@@ -1840,6 +1860,9 @@ class RequestsViewSet(
         rows = page if page is not None else list(queryset)
         context = dict(self.get_serializer_context())
         context["stages"] = current_stages(rows)
+        context["is_records_officer"] = has_staff_role(
+            request.user, StaffRole.RECORDS_OFFICER,
+        )
         if request.query_params.get("queue") == "inbox" and has_staff_role(
             request.user, StaffRole.RECORDS_OFFICER,
         ):
@@ -2027,6 +2050,7 @@ class RequestsViewSet(
                 else None
             ),
             "stages": case_stages(prr),
+            "ai_first_pass": first_pass_progress(prr),
         }
         return Response(CaseWorkspaceSummarySerializer(payload).data)
 
@@ -3300,13 +3324,16 @@ class RequestsViewSet(
         if request.method == "GET":
             latest = (
                 VaultCountRun.objects.filter(request=prr)
-                .select_related("requested_by", "collection_task")
+                .select_related("requested_by")
+                .prefetch_related("collection_tasks")
                 .first()
             )
             return Response(
                 {
                     "enabled": vault_count_enabled(),
                     "corpus": "MAIL",
+                    # Every count searches these Google Workspace sources.
+                    "sources": ["mail", "drive", "chat"],
                     "latest": (
                         VaultCountRunSerializer(latest).data
                         if latest is not None

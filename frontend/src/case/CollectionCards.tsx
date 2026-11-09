@@ -7,6 +7,7 @@ import type { StaffRole } from '../api/auth'
 import { api } from '../api/client'
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Spinner, Textarea, useToast } from '../ui'
 import { type CollectionCardTask, useCaseCollections } from './caseCollections'
+import { isVaultKind } from '../vaultSources'
 
 
 const STATE_LABELS: Record<string, string> = {
@@ -65,9 +66,9 @@ function CollectionCard({
       )
     },
   })
-  // The same condition the task dialog applies: only a finished Gmail export
-  // has records the service can take back out of review.
-  const canSupersede = canManage && task.kind === 'vault_mail' && task.state === 'complete'
+  // The same condition the task dialog applies: only a finished Vault export
+  // (Gmail, Drive, or Chat) has records the service can take back out of review.
+  const canSupersede = canManage && isVaultKind(task.kind) && task.state === 'complete'
   const viewRecords = `/requests/${number}/review?view=records&collection_task=${task.id}`
 
   return (

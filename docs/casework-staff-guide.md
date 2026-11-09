@@ -26,7 +26,10 @@ in the request.
 
 **New request** logs a phone, mailed, or in-person request. **Settings** holds
 configuration and, under *Reports*, JLARC reporting, the audit log, and the AI
-evaluation and agreement reports. The Inbox, Review, Decisions, and Oversight
+evaluation and agreement reports. District settings opens on *Main* -- the AI
+switches, the day-5 safety net, the AI models (picked from the approved list),
+and the trust ladder -- with every other limit and timeout under *Advanced
+settings*; the search box finds any of them. The Inbox, Review, Decisions, and Oversight
 pages still open from their links and old bookmarks.
 
 ## Triage the Inbox
@@ -171,9 +174,27 @@ lines; **Show full request** shows all of it. The text is never edited.
   human action and footage is never auto-denied.
 - **Review**: **Review one by one** (the keyboard flight) or the **Record
   list** with filters, clusters, redaction, exemption citations, and second
-  review. Admins see the record list read-only.
-- **Redact**: the case's AI redaction proposals grouped by exemption and
-  pattern.
+  review. Admins see the record list read-only. Review one by one shows each
+  record as readable text under its subject (email markup removed; **t**
+  switches to the page image), the AI suggestion when there is one, and a
+  progress bar for the whole case. **r** or **n** decides and moves to the
+  next record; identical copies on the page (same text, subject, and sending
+  domain) are folded into one row and
+  decided together. **f** opens a full-screen focus mode (**Esc** leaves it).
+  When every record has a decision the stage says *All done*, with **Go to
+  Redact** (and **Nothing to redact: go to Release**). In the record
+  dialog nothing is chosen until you pick an outcome, unless the AI has a
+  completed suggestion.
+- **Redact**: the case's AI redaction proposal groups, when there are any,
+  above the redaction workspace: the case's responsive records on the left,
+  the selected record's page in the centre, and the legal basis, note, and
+  **Add redaction** on the right. Drag a box over what to hide, pick the basis
+  (it stays chosen for the next record), and press **Enter**. **j**/**k** move
+  between records, **←**/**→** turn pages, **Esc** clears a draft; zoom goes
+  to 200%. The record's redactions are listed under the form with **Remove**
+  (a reason is required), **Approve second review** when the basis needs one,
+  and **Build redacted PDF**. AI suggestions for the record appear only when
+  there are undecided ones.
 - **Release**: installments, fees, packages, exemption-log readiness, and
   downloads. Opening it does not release records.
 - **Close**: the read-only closure blocker report and the same closing actions

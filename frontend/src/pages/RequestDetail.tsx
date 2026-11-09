@@ -11,6 +11,8 @@ import { IntakeClassificationCard } from '../case/IntakeClassificationCard'
 import { INTAKE_LABEL_TEXT, intakeAction, type IntakeLabel } from '../case/intakeLabels'
 import { CaseActivityFeed } from '../case/CaseActivityFeed'
 import { CaseNotesPanel } from '../case/CaseNotesPanel'
+import { VaultSourceCounts } from '../case/VaultSourceCounts'
+import { countHeadline, type VaultSource, type VaultSourceCount } from '../vaultSources'
 import {
   Badge,
   Button,
@@ -30,6 +32,7 @@ import {
 } from '../ui'
 import { proposedVaultQuery } from '../vaultQuery'
 import { preservationStateLabel, preservationStateTone } from '../preservationStatus'
+import { formatDay } from '../date'
 
 interface RequesterInfo {
   name: string
@@ -184,6 +187,7 @@ interface AdvisoryRun {
     clarification_questions?: string[]
     complexity_flags?: string[]
     date_range?: { start: string | null; end: string | null }
+    custodians?: string[]
     narrowing_options?: { terms: string[]; rationale: string }[]
   }
   failure_detail: string
@@ -198,6 +202,11 @@ interface VaultCountRun {
   id: string
   state: 'pending' | 'running' | 'complete' | 'failed'
   corpus: 'MAIL'
+  /** Gmail, Drive, Chat; a count from before Drive and Chat is Gmail only. */
+  sources?: VaultSource[]
+  source_counts?: VaultSourceCount[]
+  /** Whether a collection may start from this count (any source to export). */
+  collectable?: boolean
   search_scope: 'accounts' | 'entire_org'
   terms: string
   custodian_emails: string[]
@@ -224,6 +233,7 @@ interface VaultCountRun {
 interface VaultCountLatest {
   enabled: boolean
   corpus: 'MAIL'
+  sources?: VaultSource[]
   latest: VaultCountRun | null
 }
 
@@ -270,6 +280,7 @@ const CHANNEL_LABELS: Record<string, string> = {
 const TASK_KIND_LABELS: Record<string, string> = {
   vault_mail: 'Vault – Gmail',
   vault_drive: 'Vault – Drive',
+  vault_chat: 'Vault – Chat',
   manual: 'Manual / Department',
 }
 
@@ -400,6 +411,10 @@ export function RequestDetail({
   const [vaultCustodians, setVaultCustodians] = useState('')
   const [vaultStartDate, setVaultStartDate] = useState('')
   const [vaultEndDate, setVaultEndDate] = useState('')
+  // Fields the officer has changed by hand. Defaults (the AI reading, the
+  // receipt date) fill only untouched fields, so an edit -- including
+  // clearing a field -- is never overwritten when a reading arrives later.
+  const vaultTouched = useRef({ start: false, end: false, custodians: false })
   const [vaultCollectionOpen, setVaultCollectionOpen] = useState(false)
   const [vaultCollectionConfirmed, setVaultCollectionConfirmed] = useState(false)
   const [vaultCollectionState, setVaultCollectionState] = useState<string | null>(null)
@@ -458,27 +473,38 @@ export function RequestDetail({
       return
     }
     if (latestIntentAdvisory?.state === 'complete') {
+      const proposal = latestIntentAdvisory.proposal
       setVaultTerms(
         (current) => current
-          || proposedVaultQuery(
-            latestIntentAdvisory.proposal.required_search_terms,
-            latestIntentAdvisory.proposal.search_terms,
-          ),
+          || proposedVaultQuery(proposal.required_search_terms, proposal.search_terms),
       )
+      // The AI's reading also names a date range and the accounts to search;
+      // they fill only empty fields, so an officer's edit is never undone.
+      const start = proposal.date_range?.start
+      if (start && !vaultTouched.current.start) setVaultStartDate(start)
+      const custodians = proposal.custodians ?? []
+      if (custodians.length > 0 && !vaultTouched.current.custodians) {
+        setVaultCustodians(custodians.join('\n'))
+      }
     }
   }, [latestIntentAdvisory, latestVaultCount])
 
   // Responsive records are those in existence when the request was received,
   // so the receipt date is the end date the officer would otherwise retype on
   // every case. It is a starting point, not a rule the server enforces: a
-  // recorded count still wins, and the effect fills only an empty field, when
-  // the case record arrives, so an officer's edit -- including clearing the
-  // field -- is never overwritten afterwards.
+  // recorded count still wins, and the effect fills only a field the officer
+  // has not touched, so an edit -- including clearing the field -- is never
+  // overwritten afterwards.
   const receiptDate = detail.data?.received_at.slice(0, 10) ?? ''
+  // The AI's proposed end date wins when it is earlier; nothing after receipt
+  // can be responsive, so a later one is held to the receipt date.
+  const proposedEnd = latestIntentAdvisory?.state === 'complete'
+    ? latestIntentAdvisory.proposal.date_range?.end ?? ''
+    : ''
   useEffect(() => {
-    if (latestVaultCount || !receiptDate) return
-    setVaultEndDate((current) => current || receiptDate)
-  }, [receiptDate, latestVaultCount])
+    if (latestVaultCount || !receiptDate || vaultTouched.current.end) return
+    setVaultEndDate(proposedEnd && proposedEnd < receiptDate ? proposedEnd : receiptDate)
+  }, [receiptDate, latestVaultCount, proposedEnd])
 
   const requestIntentAdvisory = useMutation({
     mutationFn: () => api<AdvisoryRun>(
@@ -1263,14 +1289,17 @@ export function RequestDetail({
         {showScope && canManageRequest && (
           <Card title="Google Vault scope count" className="lg:col-span-2">
             <p className="text-sm text-ink-muted">
-              Count possible Gmail messages for human-reviewed terms, district
-              custodians, and an optional date range. This does not create an
-              export, hold, collection task, status change, or requester message.
-              The first count may create the request&apos;s empty Vault matter.
+              Count possible Gmail messages, Drive files, and Chat messages for
+              human-reviewed terms, district custodians, and an optional date
+              range. This does not create a hold, collection task, status change,
+              or requester message. The first count may create the request&apos;s
+              empty Vault matter.
             </p>
             <p className="mt-1 text-xs text-ink-muted">
-              Google does not provide this count operation for Drive. A count is
-              a scoping estimate, not a responsiveness determination.
+              Google cannot count Drive or Chat directly, so Vault counts them
+              with a short-lived export that is deleted as soon as it is counted
+              and is never downloaded; those counts can take longer. A count is a scoping estimate, not a
+              responsiveness determination.
             </p>
             {vaultCounts.isError && <ErrorNote error={vaultCounts.error} />}
             {vaultCounts.data && !vaultCounts.data.enabled && (
@@ -1338,7 +1367,10 @@ export function RequestDetail({
                   aria-label="Custodian accounts"
                   rows={3}
                   value={vaultCustodians}
-                  onChange={(event) => setVaultCustodians(event.target.value)}
+                  onChange={(event) => {
+                    vaultTouched.current.custodians = true
+                    setVaultCustodians(event.target.value)
+                  }}
                   required={vaultSearchScope === 'accounts'}
                   disabled={vaultSearchScope === 'entire_org'}
                   placeholder="name@psd401.net"
@@ -1350,7 +1382,10 @@ export function RequestDetail({
                     aria-label="Start date"
                     type="date"
                     value={vaultStartDate}
-                    onChange={(event) => setVaultStartDate(event.target.value)}
+                    onChange={(event) => {
+                      vaultTouched.current.start = true
+                      setVaultStartDate(event.target.value)
+                    }}
                   />
                 </Field>
                 <Field
@@ -1367,7 +1402,10 @@ export function RequestDetail({
                     type="date"
                     value={vaultEndDate}
                     min={vaultStartDate || undefined}
-                    onChange={(event) => setVaultEndDate(event.target.value)}
+                    onChange={(event) => {
+                      vaultTouched.current.end = true
+                      setVaultEndDate(event.target.value)
+                    }}
                   />
                 </Field>
               </div>
@@ -1381,12 +1419,15 @@ export function RequestDetail({
                   || ['pending', 'running'].includes(vaultCounts.data?.latest?.state ?? '')
                 }
               >
-                {requestVaultCount.isPending ? 'Queueing…' : 'Count possible messages'}
+                {requestVaultCount.isPending ? 'Queueing…' : 'Count possible items'}
               </Button>
             </form>
             {requestVaultCount.isError && <ErrorNote error={requestVaultCount.error} />}
             {['pending', 'running'].includes(vaultCounts.data?.latest?.state ?? '') && (
-              <p className="mt-4 text-sm text-ink-muted">Vault count in progress…</p>
+              <div className="mt-4">
+                <p className="text-sm text-ink-muted">Vault count in progress…</p>
+                <VaultSourceCounts rows={vaultCounts.data?.latest?.source_counts} />
+              </div>
             )}
             {vaultCounts.data?.latest?.state === 'failed' && (
               <p className="mt-4 text-sm text-danger-ink">
@@ -1397,8 +1438,9 @@ export function RequestDetail({
               <div className="mt-5 rounded-lg border border-flow bg-surface-sunken p-4">
                 <p className="font-heading text-2xl font-bold text-ink">
                   {new Intl.NumberFormat().format(vaultCounts.data.latest.total_count ?? 0)}{' '}
-                  possible Gmail messages
+                  {countHeadline(vaultCounts.data.latest.sources)}
                 </p>
+                <VaultSourceCounts rows={vaultCounts.data.latest.source_counts} />
                 <p className="mt-1 text-sm text-ink-muted">
                   This is a search-universe estimate, not a responsiveness determination.
                 </p>
@@ -1452,7 +1494,8 @@ export function RequestDetail({
                 >
                   Write the scope conversation
                 </Button>
-                {(vaultCounts.data.latest.total_count ?? 0) > 0
+                {(vaultCounts.data.latest.collectable
+                  ?? (vaultCounts.data.latest.total_count ?? 0) > 0)
                   && (vaultCollectionState == null || vaultCollectionRetryable) && (
                   <Button
                     className="mt-4"
@@ -1514,13 +1557,13 @@ export function RequestDetail({
             </div>
             <div className="flex justify-between gap-3">
               <dt className="text-ink-muted">Received</dt>
-              <dd className="font-heading font-bold text-ink">{r.received_at.slice(0, 10)}</dd>
+              <dd className="font-heading font-bold text-ink">{formatDay(r.received_at)}</dd>
             </div>
             {r.matter_kind === 'public_records' && (
               <div className="flex justify-between gap-3">
                 <dt className="text-ink-muted">Statutory response due</dt>
                 <dd className="font-heading font-bold text-ink">
-                  {r.statutory_response_due ?? '—'}
+                  {formatDay(r.statutory_response_due)}
                 </dd>
               </div>
             )}
@@ -1528,14 +1571,14 @@ export function RequestDetail({
               <div className="flex justify-between gap-3">
                 <dt className="text-ink-muted">FERPA access due (45 days)</dt>
                 <dd className="font-heading font-bold text-ink">
-                  {r.ferpa_access_due ?? '—'}
+                  {formatDay(r.ferpa_access_due)}
                 </dd>
               </div>
             )}
             <div className="flex justify-between gap-3">
               <dt className="text-ink-muted">Estimated completion</dt>
               <dd className="font-heading font-bold text-ink">
-                {r.estimated_completion ?? '—'}
+                {formatDay(r.estimated_completion)}
               </dd>
             </div>
             {r.matter_kind === 'public_records' && (
@@ -1549,13 +1592,13 @@ export function RequestDetail({
             <div className="flex justify-between gap-3">
               <dt className="text-ink-muted">Acknowledgment sent</dt>
               <dd className="font-heading font-bold text-ink">
-                {r.acknowledgment_sent_at ? r.acknowledgment_sent_at.slice(0, 10) : '—'}
+                {formatDay(r.acknowledgment_sent_at)}
               </dd>
             </div>
             <div className="flex justify-between gap-3">
               <dt className="text-ink-muted">Closed</dt>
               <dd className="font-heading font-bold text-ink">
-                {r.closed_at ? r.closed_at.slice(0, 10) : '—'}
+                {formatDay(r.closed_at)}
               </dd>
             </div>
           </dl>
@@ -1588,7 +1631,7 @@ export function RequestDetail({
                     {r.ferpa_identity_verification.verified_by
                       ? ` — ${r.ferpa_identity_verification.verified_by}`
                       : ''}
-                    , {r.ferpa_identity_verification.verified_at.slice(0, 10)}.{' '}
+                    , {formatDay(r.ferpa_identity_verification.verified_at)}.{' '}
                     {r.ferpa_identity_verification.note}
                   </p>
                 ) : (
@@ -1686,7 +1729,7 @@ export function RequestDetail({
         {showOverview && <Card title="Estimate">
           <p className="text-sm text-ink-muted">Current estimated completion</p>
           <p className="mt-1 font-heading text-2xl font-bold text-ink">
-            {r.estimated_completion ?? '—'}
+            {formatDay(r.estimated_completion)}
           </p>
           {canManageRequest && (
             <p className="mt-2 text-xs text-ink-muted">
@@ -1708,10 +1751,10 @@ export function RequestDetail({
                     {canManageRequest ? (
                       <>
                         {' '}— {rev.reason} ({rev.automated ? 'automated' : rev.revised_by ?? 'system'},{' '}
-                        {rev.created_at.slice(0, 10)})
+                        {formatDay(rev.created_at)})
                       </>
                     ) : (
-                      <> ({rev.created_at.slice(0, 10)})</>
+                      <> ({formatDay(rev.created_at)})</>
                     )}
                   </span>
                 </div>
@@ -1988,8 +2031,10 @@ export function RequestDetail({
           </p>
           <div className="rounded-lg border border-line bg-surface-sunken p-3 text-sm text-ink">
             <p className="font-semibold">
-              {new Intl.NumberFormat().format(latestVaultCount?.total_count ?? 0)} possible messages
+              {new Intl.NumberFormat().format(latestVaultCount?.total_count ?? 0)}{' '}
+              {countHeadline(latestVaultCount?.sources)} to export
             </p>
+            {vaultCollectionOpen && <VaultSourceCounts rows={latestVaultCount?.source_counts} />}
             <p className="mt-2 break-words"><span className="font-semibold">Query:</span> {latestVaultCount?.terms}</p>
             <p className="mt-1">
               <span className="font-semibold">Scope:</span>{' '}
@@ -2011,8 +2056,8 @@ export function RequestDetail({
             </p>
           ) : (
             <p className="text-sm text-ink-muted">
-              A targeted mail hold for the specified district accounts will be
-              verified or created before the export starts.
+              A targeted hold on the specified district accounts (Gmail, Drive,
+              and Chat) will be verified or created before each export starts.
             </p>
           )}
           <label className="flex items-start gap-2 text-sm text-ink">

@@ -823,9 +823,9 @@ class Correspondence(models.Model):
                 ),
                 name="correspondence_automation_kind_allowed",
             ),
-            # A system-prepared draft is written by the estimate engine, never
-            # sent by it: it is never ``automated`` and only one kind may be
-            # prepared this way. Approval still needs a named Records Officer
+            # A system-prepared draft is written by the system, never sent by
+            # it: it is never ``automated`` and only two kinds may be prepared
+            # this way. Approval still needs a named Records Officer
             # (correspondence_approved_snapshot_complete).
             models.CheckConstraint(
                 condition=(
@@ -833,7 +833,7 @@ class Correspondence(models.Model):
                     | Q(
                         automated=False,
                         direction="outbound",
-                        kind="interpretation_estimate",
+                        kind__in=["interpretation_estimate", "scope_clarification"],
                     )
                 ),
                 name="correspondence_system_prepared_kind_allowed",

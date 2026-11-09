@@ -2,7 +2,7 @@
 // ABOUTME: through Close, each stage led by its decision card. One stage mounts.
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router'
+import { Link, Navigate, useParams, useSearchParams } from 'react-router'
 import type { StaffRole } from '../api/auth'
 import { api } from '../api/client'
 import { PageHeader } from '../layout/AppLayout'
@@ -24,6 +24,8 @@ import { useCaseCollections } from './caseCollections'
 import { EstimateLetterCard } from './EstimateLetterCard'
 import { RecordUploadPanel } from './RecordUploadPanel'
 import { RedactionProposals } from './RedactionProposals'
+import { RedactWorkspace } from './RedactWorkspace'
+import { AiFirstPass, type FirstPassProgress } from './AiFirstPass'
 import { ReviewFlight } from './ReviewFlight'
 import { ScopingTrail } from './ScopingTrail'
 
@@ -71,6 +73,8 @@ interface CaseSummary {
   summary: string
   matter_kind: string
   next_due: string | null
+  /** How far the AI's automatic first pass has read this case's records. */
+  ai_first_pass?: FirstPassProgress
 }
 
 interface ClosureReadiness {
@@ -307,7 +311,7 @@ function StageDecision({ stage }: { stage: StageSummary }) {
   if (stage.state === 'blocked') why = stage.reason
   else if (stage.state === 'done') why = 'Nothing is open at this stage.'
   else if (stage.summary) why = stage.summary
-  else if (stage.state === 'upcoming') why = 'Nothing has reached this stage yet.'
+  else if (stage.state === 'upcoming') why = 'Nothing is waiting here right now.'
   else why = 'Every earlier stage is done; this is the next step.'
   return (
     <section
@@ -391,7 +395,15 @@ function ScopeStage({ number, roles }: { number: string; roles: StaffRole[] }) {
 }
 
 /** Review: the keyboard flight by default, or every record (`?view=records`). */
-function ReviewStage({ number, roles }: { number: string; roles: StaffRole[] }) {
+function ReviewStage({
+  number,
+  roles,
+  firstPass,
+}: {
+  number: string
+  roles: StaffRole[]
+  firstPass?: FirstPassProgress
+}) {
   const [params, setParams] = useSearchParams()
   const canFly = roles.includes('records_officer') || roles.includes('reviewer')
   const view = !canFly || params.get('view') === 'records' ? 'records' : 'flight'
@@ -403,6 +415,7 @@ function ReviewStage({ number, roles }: { number: string; roles: StaffRole[] }) 
   }
   return (
     <div className="space-y-4">
+      {firstPass && <AiFirstPass progress={firstPass} />}
       {canFly && (
         <div role="group" aria-label="Review view" className="flex gap-2">
           <button
@@ -434,15 +447,21 @@ function ReviewStage({ number, roles }: { number: string; roles: StaffRole[] }) 
   )
 }
 
-function RedactStage({ number }: { number: string }) {
-  const navigate = useNavigate()
+function RedactStage({ number, firstPass }: { number: string; firstPass?: FirstPassProgress }) {
+  const [params, setParams] = useSearchParams()
   return (
-    <RedactionProposals
-      request={number}
-      onOpen={(id) => navigate(
-        `/requests/${number}/review?view=records&item=${encodeURIComponent(id)}`,
-      )}
-    />
+    <div className="space-y-5">
+      {firstPass && <AiFirstPass progress={firstPass} />}
+      <RedactionProposals
+        request={number}
+        onOpen={(id) => {
+          const next = new URLSearchParams(params)
+          next.set('item', id)
+          setParams(next)
+        }}
+      />
+      <RedactWorkspace number={number} />
+    </div>
   )
 }
 
@@ -488,8 +507,10 @@ function TabContent({
       </div>
     )
   }
-  if (tab === 'review') return <ReviewStage number={number} roles={roles} />
-  if (tab === 'redact') return <RedactStage number={number} />
+  if (tab === 'review') {
+    return <ReviewStage number={number} roles={roles} firstPass={summary.ai_first_pass} />
+  }
+  if (tab === 'redact') return <RedactStage number={number} firstPass={summary.ai_first_pass} />
   if (tab === 'release') return <Installments key={number} roles={roles} requestNumber={number} />
   if (tab === 'close') {
     return (
