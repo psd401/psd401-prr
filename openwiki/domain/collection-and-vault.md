@@ -229,6 +229,10 @@ does the work. The staff endpoint is `POST /api/staff/collection-tasks/{id}/supe
 [`apps/api/resources/collection_tasks.py`](../../apps/api/resources/collection_tasks.py)).
 Its capability entry, `collection_tasks.supersede`, is `high` risk and requires human
 confirmation, so an agent can only propose it. See [agent parity](../architecture/agent-parity.md).
+On the Collect stage, `CollectionCards` in `frontend/src/case/CollectionCards.tsx` shows the action
+only on a `complete` Vault collection (Gmail, Drive, or Chat) to a Records Officer. It
+needs a reason of at least 20 characters, and its confirmation states how many unreviewed records
+leave review before the call is made ([staff frontend](../architecture/staff-frontend.md#case-stages-and-views)).
 
 ```mermaid
 stateDiagram-v2
