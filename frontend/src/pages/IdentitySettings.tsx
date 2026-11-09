@@ -17,6 +17,7 @@ import {
   Table,
   useToast,
 } from '../ui'
+import { formatMoment } from '../date'
 
 type Role = 'records_officer' | 'intake_clerk' | 'liaison' | 'reviewer' | 'admin'
 
@@ -367,7 +368,7 @@ export function IdentitySettings() {
       />
       <div className="space-y-6">
         <Card title="Integration identities">
-          <p className="mb-4 text-sm text-pacific/80">
+          <p className="mb-4 text-sm text-ink-muted">
             Each account must carry exactly one integration scope. Newly issued tokens are
             shown once and cannot be retrieved later.
           </p>
@@ -375,12 +376,12 @@ export function IdentitySettings() {
             {integrationList.data.map((identity) => (
               <section
                 key={identity.id}
-                className="rounded-md border border-driftwood/60 bg-skylight/40 p-4"
+                className="rounded-md border border-line bg-surface-sunken p-4"
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className="font-heading font-bold text-pacific">{identity.label}</h3>
-                    <code className="text-xs text-pacific/80">{identity.permission}</code>
+                    <h3 className="font-heading font-bold text-ink">{identity.label}</h3>
+                    <code className="text-xs text-ink-muted">{identity.permission}</code>
                   </div>
                   {!identity.exists && (
                     <Button
@@ -402,13 +403,13 @@ export function IdentitySettings() {
                     {identity.accounts.map((account) => (
                       <div
                         key={account.username}
-                        className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-seafoam bg-white p-3"
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line bg-surface-raised p-3"
                       >
                         <div>
-                          <p className="font-mono text-sm text-pacific">{account.username}</p>
-                          <p className="text-xs text-pacific/80">
+                          <p className="font-mono text-sm text-ink">{account.username}</p>
+                          <p className="text-xs text-ink-muted">
                             {account.token_created_at
-                              ? `Token created ${new Date(account.token_created_at).toLocaleString()}`
+                              ? `Token created ${formatMoment(account.token_created_at)}`
                               : 'No token issued'}
                           </p>
                         </div>
@@ -466,7 +467,7 @@ export function IdentitySettings() {
           )}
         </Card>
         <Card title="Direct role grants">
-          <p className="mb-4 text-sm text-pacific/80">
+          <p className="mb-4 text-sm text-ink-muted">
             Group membership is the normal way to hold a role. A direct grant
             names one person who needs the system but belongs to no group that
             can be synced. Grants add to whatever the groups already say and
@@ -497,7 +498,7 @@ export function IdentitySettings() {
         <form onSubmit={submit} className="space-y-4">
           <Field label="Application role">
             <select
-              className="w-full rounded-md border border-driftwood bg-white px-3 py-2 text-sm text-pacific"
+              className="w-full rounded-md border border-line bg-surface-raised px-3 py-2 text-sm text-ink"
               value={form.role}
               onChange={(event) => setForm({ ...form, role: event.target.value as Role })}
             >
@@ -553,7 +554,7 @@ export function IdentitySettings() {
             </Field>
           )}
           <fieldset className="space-y-2">
-            <legend className="mb-1 text-sm font-semibold text-pacific">Application roles</legend>
+            <legend className="mb-1 text-sm font-semibold text-ink">Application roles</legend>
             {roles.map((role) => (
               <label key={role.value} className="flex items-center gap-2 text-sm">
                 <input
@@ -607,7 +608,7 @@ export function IdentitySettings() {
       >
         {deletingPerson && (
           <div className="space-y-4">
-            <p className="text-sm text-pacific">
+            <p className="text-sm text-ink">
               Delete every direct grant for <strong>{deletingPerson.email}</strong>? They
               lose those roles immediately unless a configured group also gives them.
             </p>
@@ -635,7 +636,7 @@ export function IdentitySettings() {
       >
         {deletingMapping && (
           <div className="space-y-4">
-            <p className="text-sm text-pacific">
+            <p className="text-sm text-ink">
               Delete the mapping from <strong>{deletingMapping.google_group}</strong> to{' '}
               <strong>{deletingMapping.role_label}</strong>? Staff relying on this group
               will lose that application role after authorization is refreshed.
@@ -683,7 +684,7 @@ export function IdentitySettings() {
                 />
               </Field>
             ) : (
-              <p className="text-sm text-pacific">
+              <p className="text-sm text-ink">
                 Rotating <strong>{credentialAction.username}</strong> immediately revokes
                 its current token. Update the integration before its next request.
               </p>
@@ -708,10 +709,10 @@ export function IdentitySettings() {
       >
         {issuedCredential && (
           <div className="space-y-4">
-            <p className="text-sm text-pacific">
+            <p className="text-sm text-ink">
               Store this token in the integration credential now. It will not be shown again.
             </p>
-            <code className="block break-all rounded-md border border-driftwood bg-white p-3 text-sm text-pacific">
+            <code className="block break-all rounded-md border border-line bg-surface-raised p-3 text-sm text-ink">
               {issuedCredential.token}
             </code>
             <div className="flex justify-end gap-2">

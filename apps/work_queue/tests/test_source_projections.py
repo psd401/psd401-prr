@@ -10,7 +10,11 @@ from django.utils import timezone
 from apps.api.identity import apply_staff_roles
 from apps.api.models import StaffRole
 from apps.correspondence.models import Correspondence
-from apps.correspondence.services import approve_draft, create_authored_draft
+from apps.correspondence.services import (
+    approve_draft,
+    create_authored_draft,
+    delete_draft,
+)
 from apps.records.intake import submit_intake
 from apps.records.models import (
     Channel,
@@ -330,6 +334,26 @@ class SourceProjectionTests(TestCase):
             approve_draft(draft, actor=self.officer, expected_version=1)
         draft_work.refresh_from_db()
         self.assertEqual(draft_work.disposition, WorkItem.Disposition.SOURCE_EXCLUDED)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            discarded = create_authored_draft(
+                self.request,
+                kind=Correspondence.Kind.GENERAL,
+                subject="Mistaken draft",
+                body="Drafted before the requester was corrected.",
+                actor=self.liaison,
+            )
+        discarded_work = WorkItem.objects.get(
+            source_type=WorkItem.SourceType.CORRESPONDENCE,
+            source_id=str(discarded.pk),
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            delete_draft(discarded, actor=self.liaison, expected_version=1)
+        discarded_work.refresh_from_db()
+        self.assertEqual(
+            discarded_work.disposition,
+            WorkItem.Disposition.SOURCE_EXCLUDED,
+        )
 
         self.client.force_login(self.officer)
         with self.captureOnCommitCallbacks(execute=True):

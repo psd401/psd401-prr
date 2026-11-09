@@ -13,12 +13,11 @@ The scheduled OpenWiki GitHub Actions workflow refreshes the repository wiki. Do
 
 # AGENTS.md — PSD401 Public Records Request System
 
-A map, not a manual. `CLAUDE.md` imports this file; edit this one. Depth lives in `docs/` — follow the links.
+`CLAUDE.md` imports this file; edit this one.
 
-Custom-built Public Records Act request management for Peninsula School District
-No. 401 (WA), replacing commercial tools like NextRequest/GovQA. Governing law:
-**RCW 42.56** (WA PRA) + **FERPA** (student records). Compliance is the product —
-treat deadline math and exemption logic as legal artifacts, not just features.
+Public Records Act request management for Peninsula School District No. 401 (WA).
+Governing law: **RCW 42.56** (WA PRA) + **FERPA** (student records). Treat deadline
+math and exemption logic as legal artifacts, not just features.
 
 ## Architecture rules (do not violate)
 
@@ -40,10 +39,15 @@ and cited from code, tests, and ADRs; never renumber them.
 6. **Only two automated requester-facing paths** — the day-5 safety-net
    acknowledgment (`tasks.auto_acknowledge_safety_net`, in-app
    `AUTO_ACK_SAFETY_NET` switch) and the explicitly non-statutory submission
-   receipt. Estimate revisions, `scope_clarification`, and external-response
-   attestations are human-only. Guards:
+   receipt. Estimate revisions and external-response attestations are
+   human-only. Two letters may be *drafted* by the system
+   (`SYSTEM_PREPARED_DRAFT_KINDS`, never automated): the
+   interpretation-and-estimate letter, and the scope letter after a count in
+   its informational form only (CIO decision, 2026-11-08). Only a person
+   approves and sends either, and the clock-stopping clarification form of the
+   scope letter stays a person's choice. Guards:
    `test_compliance.test_no_automated_path_exists`, `receipt-ast-guard`,
-   `scope-ast-guard`.
+   `scope-ast-guard`, `scope-letter-ast-guard`, `estimate-letter-ast-guard`.
 7. **Footage: auto-hold always, auto-deny never** — `apps/records/triage.py` holds
    every camera inside retention via `apps/integrations/avigilon/client.py`;
    outside retention a human completes the search and chooses the response. There
@@ -63,12 +67,24 @@ and cited from code, tests, and ADRs; never renumber them.
     /api/public/requests/` is the sole anonymous operation (write-only,
     rate-limited, no PII echo). Shared stdio MCP holds only
     `records.read_staff_api`; hosted MCP uses attributed personal staff tokens,
-    never that shared identity for its gated tools, and exposes exactly three
-    gated draft/proposal tools. Never put tokens in source or `.env.example`. The
-    one unattended Vault action is the automatic intent Gmail *count*: it never
-    holds, exports, collects, changes status, or reaches the requester — do not
-    widen it. Web-form files are scan-gated `IntakeAttachment`s, never
-    `RecordItem`s; no unscanned file is downloadable.
+    never that shared identity for its gated tools, and exposes exactly five
+    gated draft/proposal tools (the fifth proposes a `DecisionBatch`, which
+    only a person approves in the staff UI; tokens are handed off on the
+    endpoints a batch replaces). Never put tokens in source or `.env.example`.
+    Unattended Vault actions are exactly two: the automatic intent *counts*
+    of Gmail, Drive, and Chat (iterative scoping), which never hold, collect,
+    change status, or reach the requester — Drive and Chat, which Vault's
+    `matters.count` does not support, are counted with a count-only export,
+    never downloaded, deleted once its count is read (`count-export-ast-guard`);
+    and, only with the
+    in-app `PRR_TRUST_SCOPE_MODE=auto`, the export of a finished automatic
+    scoping session's final count on a request with no Vault collection yet,
+    recorded `trigger=automatic` (`vault_collections.queue_automatic_vault_collection`).
+    That export covers Gmail, Drive, and Chat — every source that counted above
+    zero or could not be counted (CIO decision, 2026-11-08) — and places
+    Gmail's targeted hold only, no Drive or Chat hold. Do not widen either
+    unattended action beyond this. Web-form files are scan-gated
+    `IntakeAttachment`s, never `RecordItem`s; no unscanned file is downloadable.
 12. **Google group authorization stays keyless and read-only** — a dedicated
     group-reader service account plus named-user membership lookups. No private
     key, domain-wide delegation, Vault-identity reuse, or Groups Editor/Admin
@@ -83,40 +99,35 @@ and cited from code, tests, and ADRs; never renumber them.
 
 ## Layout
 
-Annotated detail: [`docs/architecture.md`](docs/architecture.md) §10.
+Full annotated map: [`docs/architecture.md`](docs/architecture.md) §10. What it won't tell you:
 
-| Path | What lives there |
-|------|------------------|
-| `config/` | Settings, celery (beat schedule in `config/celery.py`). Credentials, identity, infrastructure addresses, and the Phase A bootstrap switches; district-tunable values live in `apps/configuration/`, read via `runtime.get()`, never `settings.PRR_*` |
-| `apps/configuration/` | The in-app district settings store. `runtime.get()` is the single read path; `services.set_value()` the single write path |
-| `apps/records/` | Core domain: `models.py`, `deadlines.py` (RCW 42.56.520 engine — READ ITS DOCSTRING), `services.py`, `tasks.py`, `triage.py` |
-| `apps/records/handling.py` | Which review path a media type allows; `derivatives.py`, `media_review.py`, `opaque_review.py`. READ [`docs/record-formats.md`](docs/record-formats.md) before adding a format |
-| `apps/api/` | Staff DRF API, session/token auth, SPA serving, capability contract (`capabilities.py`) |
-| `apps/audit/` | Append-only audit log, `audit()` helper |
-| `apps/integrations/` | `gmail/` (keyless Gmail client), `vault/client.py` (matters/holds/exports), `avigilon/` (camera holds) |
-| `frontend/` | React/Vite/TypeScript staff workspace; compliance logic stays in Django |
-| `integrations/mcp/` | Hosted and standalone MCP facades over the staff REST API |
-| `templates/correspondence/` | Versioned requester templates (COUNSEL REVIEW REQUIRED markers) |
-| `templates/sops/` | SOP templates (`personal-device-search.md` = the Nissen procedure) |
-| `infra/cdk/` | AWS CDK (TypeScript, bun); `psd401-prr-prod` hosts production. AWS is CDK only — no console, CLI, or Terraform provisioning |
-| `openwiki/` | Auto-generated repo wiki; start at `openwiki/quickstart.md`, don't hand-edit. `openwiki/INSTRUCTIONS.md` (the wiki brief) and `.openwikiignore` are hand-written |
+- `config/` holds credentials, identity, infrastructure addresses, and the Phase A
+  bootstrap switches only. District-tunable values live in `apps/configuration/`:
+  read via `runtime.get()`, never `settings.PRR_*`; write via `services.set_value()`.
+- `apps/records/deadlines.py` is the RCW 42.56.520 engine — read its docstring first.
+- Read [`docs/record-formats.md`](docs/record-formats.md) before adding a media
+  format (`apps/records/handling.py`).
+- `templates/correspondence/` holds versioned requester templates with COUNSEL
+  REVIEW REQUIRED markers.
+- `infra/cdk/` (TypeScript, bun) is the only AWS provisioning path — no console,
+  CLI, or Terraform. Stack `psd401-prr-prod` hosts production.
+- `openwiki/` is generated, except `openwiki/INSTRUCTIONS.md` (the wiki brief) and
+  `.openwikiignore`, which are hand-written.
 
 ## Commands
 
 ```bash
-python manage.py test apps --settings=config.test_settings   # run everything
+PYTHON_DOTENV_DISABLED=1 uv run python manage.py test apps --settings=config.test_settings   # run everything
 uv run ruff check . && uv run python scripts/pyright_baseline.py  # lint; typecheck ratchet
-python manage.py makemigrations --settings=config.test_settings
-python manage.py seed_exemptions                              # exemption taxonomy
+uv run python manage.py makemigrations --settings=config.test_settings
+uv run python manage.py seed_exemptions                       # exemption taxonomy
 uv sync --locked && docker compose up -d db redis minio      # deps from uv.lock; dev services
-celery -A config worker -l info && celery -A config beat -l info
+uv run celery -A config worker -l info && uv run celery -A config beat -l info
 cd infra/cdk && bunx cdk deploy psd401-prr-prod --require-approval never --profile psd401-prr-prod
 ```
 
-Run the suite with `PYTHON_DOTENV_DISABLED=1`; tests use SQLite via
-`config/test_settings.py` while runtime is Postgres 16. Timezone is
-America/Los_Angeles and deadline math depends on it. Full setup, gates, and
-testing conventions: [`docs/development.md`](docs/development.md).
+Tests use SQLite via `config/test_settings.py`; runtime is Postgres 16. Timezone is
+America/Los_Angeles and deadline math depends on it.
 
 Production is the sole deployed target (`prr.psd401.net`). After merging to
 `main`, the single CDK deploy command above — documented in
@@ -128,11 +139,11 @@ prerequisites. No dev environment (`dev-prr.psd401.net`, decommissioned 2026-10-
 
 - TDD: a failing test first, then the minimal code to pass, for every feature and
   bugfix. Deadline/tolling changes require tests with real WA calendar dates.
-- `python manage.py test apps --settings=config.test_settings` passes, plus the
-  frontend and `infra/cdk` gates in [`docs/development.md`](docs/development.md),
-  and ≥80% patch coverage on added lines (`verify-fast.sh --patch-coverage`) —
-  never a project-coverage floor. A test you cannot make reliable is quarantined
-  through [`FLAKY.md`](FLAKY.md): owner, issue, four-week expiry, never skipped.
+- The test suite passes, plus the frontend and `infra/cdk` gates in
+  [`docs/development.md`](docs/development.md), and ≥80% patch coverage on added
+  lines (`verify-fast.sh --patch-coverage`) — never a project-coverage floor. A
+  test you cannot make reliable is quarantined through [`FLAKY.md`](FLAKY.md):
+  owner, issue, four-week expiry, never skipped.
 - A new or changed staff-UI outcome has its registered capability (rule 10).
 - The PR follows `.github/pull_request_template.md`, including the human-handoff
   checks for rules 6 and 7.
@@ -140,11 +151,6 @@ prerequisites. No dev environment (`dev-prr.psd401.net`, decommissioned 2026-10-
 
 ## Where the rest lives
 
-- Compliance rules, in full: [`docs/compliance-rules.md`](docs/compliance-rules.md)
 - Calling a deployed instance, not editing code: [`docs/agentic-integration.md`](docs/agentic-integration.md)
-- Setup, quality gates, security boundaries: [`docs/development.md`](docs/development.md)
 - Readiness and accounts still needed: [`docs/phase-2-production-handoffs.md`](docs/phase-2-production-handoffs.md)
-- Dated capability snapshot and kickoff ledger: [`docs/project-status.md`](docs/project-status.md)
-- Record locations and custodians — READ before changing registry or triage scope:
-  [`docs/custodian-gap-analysis.md`](docs/custodian-gap-analysis.md)
-- Next phased work: [`docs/roadmap-usability.md`](docs/roadmap-usability.md)
+- Record locations and custodians — READ before changing registry or triage scope: [`docs/custodian-gap-analysis.md`](docs/custodian-gap-analysis.md)

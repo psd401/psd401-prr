@@ -2,7 +2,7 @@
 // ABOUTME: network isolation, host hardening, and IAM limits the review demanded.
 
 import { describe, expect, test } from "bun:test";
-import { App } from "aws-cdk-lib";
+import { App, ContextProvider, Stack } from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { spawnSync } from "node:child_process";
 import {
@@ -19,6 +19,11 @@ import { join } from "node:path";
 
 import { prodConfig, type PrrEnvConfig } from "../lib/config";
 import { PrrHostingStack } from "../lib/prr-hosting-stack";
+import {
+  SHARED_SUBNET_LOOKUP_PROVIDER,
+  sharedSubnetQuery,
+  type SharedSubnetCandidate,
+} from "../lib/shared-subnet";
 
 // Route tables, NACLs and subnets belonging to the shared DMZ that serves the
 // district's legacy automation production box. A single reference to one of
@@ -30,10 +35,54 @@ const SHARED_DMZ_IDS = [
   "subnet-0f692ddb4076078e9",
 ];
 
+// A stand-in for the subnet psd-aws-infra tags for this host, so the suite
+// exercises the tag lookup rather than its synth-time dummy.
+const TEST_SUBNET_ID = "subnet-0123456789abcdef0";
+
+function taggedSubnet(
+  config: PrrEnvConfig,
+  subnetId: string,
+  tags: Record<string, string> = {
+    Name: `psd401-prr-${config.envName}`,
+    "psd:shared": "network",
+  },
+): SharedSubnetCandidate {
+  return {
+    Identifier: subnetId,
+    AvailabilityZone: config.availabilityZone,
+    Tags: Object.entries(tags).map(([Key, Value]) => ({ Key, Value })),
+  };
+}
+
+// What `cdk synth` would have cached in cdk.context.json for the subnet
+// lookup, keyed exactly as the stack asks for it.
+function subnetContext(
+  config: PrrEnvConfig,
+  subnets: SharedSubnetCandidate[],
+): Record<string, unknown> {
+  const probe = new Stack(new App(), "ContextKeyProbe", {
+    env: { account: config.account, region: config.region },
+  });
+  const { key } = ContextProvider.getKey(probe, {
+    provider: SHARED_SUBNET_LOOKUP_PROVIDER,
+    props: sharedSubnetQuery(config.vpcId),
+  });
+  return { [key]: subnets };
+}
+
+function stackFor(
+  config: PrrEnvConfig,
+  subnets: SharedSubnetCandidate[] = [taggedSubnet(config, TEST_SUBNET_ID)],
+  extraContext: Record<string, unknown> = {},
+): PrrHostingStack {
+  const app = new App({
+    context: { ...subnetContext(config, subnets), ...extraContext },
+  });
+  return new PrrHostingStack(app, `psd401-prr-${config.envName}`, config);
+}
+
 function templateFor(config: PrrEnvConfig): Template {
-  const app = new App();
-  const stack = new PrrHostingStack(app, `psd401-prr-${config.envName}`, config);
-  return Template.fromStack(stack);
+  return Template.fromStack(stackFor(config));
 }
 
 function jsonFor(config: PrrEnvConfig): string {
@@ -211,7 +260,6 @@ const environments: Array<[string, PrrEnvConfig]> = [["prod", prodConfig]];
 const unpinnedConfig: PrrEnvConfig = {
   ...prodConfig,
   envName: "dev",
-  subnetCidr: "172.25.201.0/24",
   eipAllocationId: undefined,
   hostname: "unpinned.example.invalid",
 };
@@ -220,28 +268,134 @@ describe.each(environments)("psd401-prr-%s network", (envName, config) => {
   const template = templateFor(config);
   const json = jsonFor(config);
 
-  test("owns its subnet but never the VPC", () => {
-    template.resourceCountIs("AWS::EC2::VPC", 0);
-    template.resourceCountIs("AWS::EC2::Subnet", 1);
-    template.hasResourceProperties("AWS::EC2::Subnet", {
-      VpcId: config.vpcId,
-      CidrBlock: config.subnetCidr,
-      AvailabilityZone: config.availabilityZone,
-      MapPublicIpOnLaunch: true,
-    });
-  });
-
-  test("routes to the internet gateway and nowhere else", () => {
-    template.resourceCountIs("AWS::EC2::RouteTable", 1);
-    template.resourceCountIs("AWS::EC2::Route", 1);
-    template.hasResourceProperties("AWS::EC2::Route", {
-      DestinationCidrBlock: "0.0.0.0/0",
-      GatewayId: config.igwId,
-    });
+  // psd-aws-infra owns every subnet in a shared VPC (psd-dev-standards 08
+  // "Shared network"; psd401/psd-aws-infra#42). The subnet, its route table,
+  // association and default route left this stack with Retain deployed, so
+  // CloudFormation kept them for Terraform to import.
+  test("owns no network resources", () => {
+    for (const type of [
+      "AWS::EC2::VPC",
+      "AWS::EC2::Subnet",
+      "AWS::EC2::RouteTable",
+      "AWS::EC2::SubnetRouteTableAssociation",
+      "AWS::EC2::Route",
+    ]) {
+      template.resourceCountIs(type, 0);
+    }
     expect(json).not.toContain("10.0.0.0/8");
     expect(json).not.toContain("VpcPeeringConnectionId");
     expect(json).not.toContain("vgw-");
     expect(json).not.toContain("pcx-");
+  });
+
+  test("points the deployment and the InstanceId output at the instance", () => {
+    const instanceRef = {
+      Ref: Object.keys(template.findResources("AWS::EC2::Instance"))[0],
+    };
+    template.hasResourceProperties("AWS::SSM::Association", {
+      AssociationName: `psd401-prr-${envName}-application`,
+      Targets: [{ Key: "InstanceIds", Values: [instanceRef] }],
+    });
+    template.hasOutput("InstanceId", { Value: instanceRef });
+  });
+
+  test("places the host in the handed-over subnet", () => {
+    template.hasResourceProperties("AWS::EC2::Instance", {
+      SubnetId: TEST_SUBNET_ID,
+      AvailabilityZone: config.availabilityZone,
+    });
+    template.hasOutput("SubnetId", { Value: TEST_SUBNET_ID });
+  });
+
+  // psd-dev-standards 08 "Shared network": an app finds a shared network
+  // resource by its psd:shared tag and stable Name, never by an ID in code.
+  test("queries every subnet in the configured VPC", () => {
+    expect(sharedSubnetQuery(config.vpcId)).toEqual({
+      typeName: "AWS::EC2::Subnet",
+      propertyMatch: { VpcId: config.vpcId },
+      propertiesToReturn: ["AvailabilityZone", "Tags"],
+      expectedMatchCount: "at-least-one",
+    });
+  });
+
+  test("picks the one subnet carrying both tags", () => {
+    const picked = Template.fromStack(
+      stackFor(config, [
+        taggedSubnet(config, "subnet-0aaaaaaaaaaaaaaa1", {
+          Name: `psd401-prr-${envName}`,
+        }),
+        taggedSubnet(config, "subnet-0aaaaaaaaaaaaaaa2", {
+          Name: "some-other-app",
+          "psd:shared": "network",
+        }),
+        taggedSubnet(config, TEST_SUBNET_ID),
+      ]),
+    );
+    picked.hasResourceProperties("AWS::EC2::Instance", {
+      SubnetId: TEST_SUBNET_ID,
+    });
+  });
+
+  // An untagged VPC or a second subnet with the same tags must stop synth,
+  // never quietly move a FERPA host somewhere else.
+  test("fails synth unless exactly one subnet matches", () => {
+    expect(() =>
+      stackFor(config, [
+        taggedSubnet(config, "subnet-0aaaaaaaaaaaaaaa1", { Name: "other" }),
+      ]),
+    ).toThrow(/found 0/);
+    expect(() =>
+      stackFor(config, [
+        taggedSubnet(config, TEST_SUBNET_ID),
+        taggedSubnet(config, "subnet-0aaaaaaaaaaaaaaa2"),
+      ]),
+    ).toThrow(/found 2/);
+  });
+
+  // The VPC import names the configured AZ; a matching subnet anywhere else
+  // would move the host, so it stops synth too.
+  test("fails synth if the matching subnet is in another AZ", () => {
+    expect(() =>
+      stackFor(config, [
+        {
+          ...taggedSubnet(config, TEST_SUBNET_ID),
+          AvailabilityZone: "us-west-2c",
+        },
+      ]),
+    ).toThrow(/us-west-2c/);
+  });
+
+  // The first `cdk synth` pass, before the CLI has done the lookup, sees
+  // CDK's dummy value. It must still build so the CLI can ask AWS, and must
+  // never emit anything that looks like a real subnet.
+  test("synthesizes with the dummy value before the lookup is cached", () => {
+    const app = new App();
+    const stack = new PrrHostingStack(app, `psd401-prr-${envName}`, config);
+    Template.fromStack(stack).hasResourceProperties("AWS::EC2::Instance", {
+      SubnetId: "subnet-00000000000000000",
+      AvailabilityZone: config.availabilityZone,
+    });
+  });
+
+  // Both left the stack and were imported back during the subnet handover.
+  // Retain keeps the host, and the Elastic IP on it, if either ever leaves
+  // the stack again.
+  test("retains the instance and its Elastic IP association", () => {
+    for (const type of ["AWS::EC2::Instance", "AWS::EC2::EIPAssociation"]) {
+      const resources = template.findResources(type);
+      expect(Object.keys(resources)).toHaveLength(1);
+      for (const [logicalId, resource] of Object.entries(resources)) {
+        expect({
+          logicalId,
+          DeletionPolicy: resource.DeletionPolicy,
+          UpdateReplacePolicy: resource.UpdateReplacePolicy,
+        }).toEqual({
+          logicalId,
+          DeletionPolicy: "Retain",
+          UpdateReplacePolicy: "Retain",
+        });
+      }
+    }
   });
 
   test("never touches shared DMZ resources", () => {
@@ -998,30 +1152,53 @@ describe.each(environments)("psd401-prr-%s identity", (envName, config) => {
     expect(stsStatements.flatMap(actionsFor)).not.toContain("sts:AssumeRole");
   });
 
-  test("invokes only the US Nova 2 Lite advisory inference profile", () => {
+  test("invokes only the allow-listed US advisory inference profiles", () => {
     const statements = runtimePolicyStatements(template).filter((statement) =>
       actionsFor(statement).some((action) => action.startsWith("bedrock:")),
     );
-    const profileArn =
-      `arn:aws:bedrock:us-west-2:${config.account}:inference-profile/` +
-      "us.amazon.nova-2-lite-v1:0";
+    const allowed: Array<[string, string]> = [
+      ["us.amazon.nova-2-lite-v1:0", "amazon.nova-2-lite-v1:0"],
+      ["us.anthropic.claude-opus-5-5", "anthropic.claude-opus-5-5"],
+      ["us.anthropic.claude-fable-5-1", "anthropic.claude-fable-5-1"],
+      ["us.anthropic.claude-sonnet-5-5", "anthropic.claude-sonnet-5-5"],
+      ["us.anthropic.claude-haiku-5-5", "anthropic.claude-haiku-5-5"],
+      ["us.openai.gpt-6.1-sol", "openai.gpt-6.1-sol"],
+      ["us.openai.gpt-6.1-terra", "openai.gpt-6.1-terra"],
+    ];
 
-    expect(statements).toHaveLength(2);
-    expect(statements.flatMap(actionsFor)).toEqual([
-      "bedrock:InvokeModel",
-      "bedrock:InvokeModel",
-    ]);
-    expect(resourcesFor(statements[0])).toEqual([profileArn]);
-    expect(statements[0].Condition).toBeUndefined();
-    expect(resourcesFor(statements[1])).toEqual([
-      "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-2-lite-v1:0",
-      "arn:aws:bedrock:us-east-2::foundation-model/amazon.nova-2-lite-v1:0",
-      "arn:aws:bedrock:us-west-2::foundation-model/amazon.nova-2-lite-v1:0",
-    ]);
-    expect(statements[1].Condition).toEqual({
-      StringLike: { "bedrock:InferenceProfileArn": profileArn },
+    // One read-only statement lets verification confirm zero retention.
+    const retention = statements.filter((statement) =>
+      actionsFor(statement).includes("bedrock:GetAccountDataRetention"),
+    );
+    expect(retention).toHaveLength(1);
+    expect(actionsFor(retention[0])).toEqual(["bedrock:GetAccountDataRetention"]);
+    expect(JSON.stringify(statements)).not.toContain("PutAccountDataRetention");
+    const invoke = statements.filter((statement) => statement !== retention[0]);
+    statements.splice(0, statements.length, ...invoke);
+    expect(statements).toHaveLength(allowed.length * 2);
+    expect(new Set(statements.flatMap(actionsFor))).toEqual(
+      new Set(["bedrock:InvokeModel"]),
+    );
+    allowed.forEach(([profileId, foundationModelId], index) => {
+      const profileArn =
+        `arn:aws:bedrock:us-west-2:${config.account}:inference-profile/` +
+        profileId;
+      const profile = statements[index * 2];
+      const foundation = statements[index * 2 + 1];
+      expect(resourcesFor(profile)).toEqual([profileArn]);
+      expect(profile.Condition).toBeUndefined();
+      expect(resourcesFor(foundation)).toEqual(
+        ["us-east-1", "us-east-2", "us-west-2"].map(
+          (region) =>
+            `arn:aws:bedrock:${region}::foundation-model/${foundationModelId}`,
+        ),
+      );
+      expect(foundation.Condition).toEqual({
+        StringLike: { "bedrock:InferenceProfileArn": profileArn },
+      });
     });
     expect(json).not.toContain("bedrock:*");
+    expect(json).not.toContain("foundation-model/*");
   });
 
   test("grants exactly the private object operations the application uses", () => {
@@ -1515,4 +1692,33 @@ describe.each(environments)("psd401-prr-%s backups", (envName, config) => {
       ],
     });
   });
+});
+
+// The instance's SubnetId is replace-on-change, and its root volume holds
+// PostgreSQL. The committed lookup cache is now the only source of that ID,
+// so pin what it resolves to: an edited or reset cache that picks any other
+// subnet fails here, not at deploy.
+test("the committed lookup cache resolves production to its subnet", () => {
+  const cached = JSON.parse(
+    readFileSync(join(__dirname, "../cdk.context.json"), "utf8"),
+  );
+  const app = new App({ context: cached });
+  const stack = new PrrHostingStack(app, "psd401-prr-prod", prodConfig);
+  Template.fromStack(stack).hasResourceProperties("AWS::EC2::Instance", {
+    SubnetId: "subnet-02ccab0368061c253",
+    AvailabilityZone: "us-west-2a",
+  });
+});
+
+// The subnet handover finished on 2026-11-03 (README, "Moving to
+// psd-aws-infra"). Its transitional "detached" template dropped the instance
+// from the stack; a deploy of it now, with no import to follow, would leave
+// the host unmanaged. The context that selected it must do nothing.
+test("the retired subnetHandover context changes nothing", () => {
+  const stack = stackFor(prodConfig, undefined, {
+    subnetHandover: "detached",
+  });
+  expect(Template.fromStack(stack).toJSON()).toEqual(
+    templateFor(prodConfig).toJSON(),
+  );
 });

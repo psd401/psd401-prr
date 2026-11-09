@@ -1,4 +1,12 @@
 {
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.app)",
+      "Edit(**/.env)",
+      "Edit(**/.env.app)"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {

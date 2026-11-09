@@ -6,6 +6,7 @@ import { useSearchParams } from 'react-router'
 import { api, unwrap, type Page } from '../api/client'
 import type { StaffRole } from '../api/auth'
 import { pacificDateString } from '../date'
+import { isVaultKind } from '../vaultSources'
 import {
   Badge,
   Button,
@@ -22,9 +23,12 @@ import {
   Textarea,
   useToast,
 } from '../ui'
+import { formatDay } from '../date'
 
 interface CollectionTask {
   id: number
+  /** "automatic" when the scope trust policy started it (#37). */
+  trigger?: 'manual' | 'automatic'
   request: number
   request_number: string
   system_name: string | null
@@ -44,6 +48,8 @@ interface CollectionTask {
   vault_hold_id: string
   vault_export_id: string
   vault_ingest: VaultIngestProgress | null
+  /** Unreviewed records this collection created, for the supersede confirm. */
+  records_unreviewed?: number
   created_at: string
   completed_at: string | null
 }
@@ -61,6 +67,14 @@ interface VaultIngestProgress {
   updated_at: string
   completed_at: string | null
 }
+
+interface SupersedeResult {
+  collection_task_id: number
+  record_count: number
+}
+
+// The service refuses a shorter reason; the button stays disabled until then.
+const MIN_SUPERSEDE_REASON = 20
 
 interface TaskPatchPayload {
   id: number
@@ -110,6 +124,7 @@ const STATE_TABS = [{ value: '', label: 'All' }, ...STATES]
 const KIND_LABELS: Record<string, string> = {
   vault_mail: 'Vault — Gmail',
   vault_drive: 'Vault — Drive',
+  vault_chat: 'Vault — Chat',
   manual: 'Manual / Department',
 }
 
@@ -119,7 +134,7 @@ function isPastDue(dueDate: string | null, state: string): boolean {
 }
 
 function isVaultTask(task: CollectionTask): boolean {
-  return task.kind === 'vault_mail' || task.kind === 'vault_drive'
+  return isVaultKind(task.kind)
 }
 
 export function Tasks({
@@ -147,6 +162,7 @@ export function Tasks({
   const [assignDraft, setAssignDraft] = useState('')
   const [creating, setCreating] = useState(false)
   const [manualTaskForm, setManualTaskForm] = useState(emptyManualTaskForm)
+  const [supersedeReason, setSupersedeReason] = useState<string | null>(null)
   const hydratedTarget = useRef('')
 
   const list = useQuery({
@@ -222,6 +238,30 @@ export function Tasks({
     },
     onError: (err) => toast('error', err.message),
   })
+  const supersedeTask = useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      api<SupersedeResult>(`/api/staff/collection-tasks/${id}/supersede/`, {
+        method: 'POST',
+        body: { reason },
+      }),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['collection-tasks'] })
+      qc.invalidateQueries({ queryKey: ['record-items'] })
+      qc.invalidateQueries({ queryKey: ['record-item-facets'] })
+      if (requestFilter) {
+        qc.invalidateQueries({ queryKey: ['case-workspace-summary', requestFilter] })
+        qc.invalidateQueries({ queryKey: ['case-closure-readiness', requestFilter] })
+      }
+      setSupersedeReason(null)
+      toast(
+        'success',
+        result.record_count === 0
+          ? 'No unreviewed records were left to supersede.'
+          : `${result.record_count} unreviewed records left review.`,
+      )
+    },
+    onError: (err) => toast('error', err.message),
+  })
   const createManualTask = useMutation({
     mutationFn: () => {
       if (!requestScope.data) throw new Error('The request is still loading.')
@@ -293,6 +333,7 @@ export function Tasks({
   }
 
   function closeTask() {
+    setSupersedeReason(null)
     setSelected(null)
     const next = new URLSearchParams(searchParams)
     next.delete('task')
@@ -368,8 +409,8 @@ export function Tasks({
         <label
           className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 font-heading text-sm font-semibold transition-colors ${
             activeUrgentOnly
-              ? 'border-red-300 bg-red-100 text-red-900'
-              : 'border-driftwood bg-white text-pacific hover:bg-skylight'
+              ? 'border-danger bg-danger-soft text-danger-ink'
+              : 'border-line bg-surface-raised text-ink hover:bg-surface-sunken'
           }`}
         >
           <input
@@ -418,11 +459,16 @@ export function Tasks({
                   r.system_urgent_hold ? <Badge tone="red">URGENT</Badge> : '—',
               },
               {
+                header: 'Started',
+                cell: (r: CollectionTask) =>
+                  r.trigger === 'automatic' ? <Badge tone="amber">Automatically</Badge> : 'By staff',
+              },
+              {
                 header: 'Due date',
                 cell: (r: CollectionTask) =>
                   r.due_date ? (
-                    <span className={isPastDue(r.due_date, r.state) ? 'font-bold text-red-800' : ''}>
-                      {r.due_date}
+                    <span className={isPastDue(r.due_date, r.state) ? 'font-bold text-danger-ink' : ''}>
+                      {formatDay(r.due_date)}
                     </span>
                   ) : (
                     '—'
@@ -434,7 +480,7 @@ export function Tasks({
               },
               {
                 header: 'Completed',
-                cell: (r: CollectionTask) => (r.completed_at ? r.completed_at.slice(0, 10) : '—'),
+                cell: (r: CollectionTask) => formatDay(r.completed_at),
               },
             ]}
             rows={rows}
@@ -545,40 +591,41 @@ export function Tasks({
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2">
               <Badge>{KIND_LABELS[selected.kind] ?? selected.kind}</Badge>
+              {selected.trigger === 'automatic' && <Badge tone="amber">Started automatically</Badge>}
               {selected.system_name && <Badge tone="blue">{selected.system_name}</Badge>}
               {selected.system_urgent_hold && <Badge tone="red">URGENT</Badge>}
             </div>
 
             <div>
-              <p className="font-heading text-sm font-bold text-pacific">Instructions</p>
-              <p className="mt-1 whitespace-pre-wrap text-sm text-pacific">
+              <p className="font-heading text-sm font-bold text-ink">Instructions</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-ink">
                 {selected.instructions || '—'}
               </p>
             </div>
 
             <div>
-              <p className="font-heading text-sm font-bold text-pacific">Custodian emails</p>
-              <p className="mt-1 text-sm text-pacific">
+              <p className="font-heading text-sm font-bold text-ink">Custodian emails</p>
+              <p className="mt-1 text-sm text-ink">
                 {selected.custodian_emails.length ? selected.custodian_emails.join(', ') : '—'}
               </p>
             </div>
 
             <div>
-              <p className="font-heading text-sm font-bold text-pacific">Search terms</p>
-              <p className="mt-1 text-sm text-pacific">{selected.search_terms || '—'}</p>
+              <p className="font-heading text-sm font-bold text-ink">Search terms</p>
+              <p className="mt-1 text-sm text-ink">{selected.search_terms || '—'}</p>
             </div>
 
             {selected.vault_ingest && (
-              <section className="rounded-xl border border-driftwood bg-skylight/40 p-4">
+              <section className="rounded-xl border border-line bg-surface-sunken p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-heading text-sm font-bold text-pacific">
+                  <p className="font-heading text-sm font-bold text-ink">
                     Vault ingest progress
                   </p>
                   <Badge tone={selected.vault_ingest.state === 'failed' ? 'red' : 'blue'}>
                     {selected.vault_ingest.state}
                   </Badge>
                 </div>
-                <div className="mt-3 grid gap-2 text-sm text-pacific sm:grid-cols-2">
+                <div className="mt-3 grid gap-2 text-sm text-ink sm:grid-cols-2">
                   <p>
                     {selected.vault_ingest.files_processed} of {selected.vault_ingest.files_total}{' '}
                     files processed
@@ -589,12 +636,71 @@ export function Tasks({
                     {selected.vault_ingest.duplicates_skipped} duplicates retained as evidence
                   </p>
                 </div>
-                <p className="mt-3 text-xs text-pacific/80">
+                <p className="mt-3 text-xs text-ink-muted">
                   Attempt {selected.vault_ingest.attempt_count}
                   {selected.vault_ingest.last_error_code
                     ? ` · ${selected.vault_ingest.last_error_code}`
                     : ''}
                 </p>
+              </section>
+            )}
+
+            {canManageTask && isVaultKind(selected.kind) && selected.state === 'complete' && (
+              <section className="rounded-xl border border-line p-4">
+                <p className="font-heading text-sm font-bold text-ink">
+                  Supersede this collection
+                </p>
+                <p className="mt-1 text-sm text-ink-muted">
+                  Takes every unreviewed record from this export out of review. Nothing is
+                  deleted, and records already decided are not changed. A later collection
+                  that finds the same message puts it back in review.
+                </p>
+                {supersedeReason === null ? (
+                  <div className="mt-3 flex justify-end">
+                    <Button type="button" variant="ghost" onClick={() => setSupersedeReason('')}>
+                      Supersede collection
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    {typeof selected.records_unreviewed === 'number' && (
+                      <p className="text-sm font-semibold text-ink">
+                        This takes {selected.records_unreviewed} unreviewed{' '}
+                        {selected.records_unreviewed === 1 ? 'record' : 'records'} out of review.
+                      </p>
+                    )}
+                    <p className="text-sm text-ink-muted">
+                      The reason is kept in the audit log and case timeline. Describe the
+                      scope problem; do not name students or include record contents.
+                    </p>
+                    <Field label="Reason">
+                      <Textarea
+                        value={supersedeReason}
+                        onChange={(event) => setSupersedeReason(event.target.value)}
+                        rows={3}
+                      />
+                    </Field>
+                    {supersedeTask.isError && <ErrorNote error={supersedeTask.error} />}
+                    <div className="flex justify-end gap-3">
+                      <Button type="button" variant="ghost" onClick={() => setSupersedeReason(null)}>
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => supersedeTask.mutate({
+                          id: selected.id,
+                          reason: supersedeReason.trim(),
+                        })}
+                        disabled={
+                          supersedeTask.isPending
+                          || supersedeReason.trim().length < MIN_SUPERSEDE_REASON
+                        }
+                      >
+                        Supersede unreviewed records
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </section>
             )}
 
@@ -635,8 +741,8 @@ export function Tasks({
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-pacific/80">
-                Due {selected.due_date ?? '—'} · Assigned {selected.assigned_to_username ?? '—'}
+              <p className="text-sm text-ink-muted">
+                Due {formatDay(selected.due_date)} · Assigned {selected.assigned_to_username ?? '—'}
               </p>
             )}
 

@@ -90,7 +90,9 @@ first response is delivered, so a case list must not keep showing it afterward.
 | `litigation_discovery` | Always | None |
 | Any kind | Closed or terminal | None |
 
-`next_response_due()` and `annotate_next_response_due()` produce this value.
+`next_response_due()` and `annotate_next_response_due()` produce this value. Only the
+human-set `estimated_completion` feeds the `estimate` basis. The `RecordsEstimate` rows
+from the [estimate engine](estimates.md) are evidence and do not set it.
 The day-5 safety net, the watchdogs, and JLARC still use the statutory fields,
 not this one. The step-by-step state of the first response (drafted, approved,
 queued, delivered) is a separate read model, described in
@@ -167,7 +169,12 @@ payload:
 
 Only public records requests may arrive through the public form or the intake
 mailbox (`apps/records/intake.py`). Intake then runs through the canonical
-`submit_intake` pipeline with `Channel.PORTAL`.
+`submit_intake` pipeline with `Channel.PORTAL`. When the intake-classification switch
+is on, `submit_intake` also defers a suggested label for the new case until after the
+write commits. The label is advisory and changes nothing about the case, except that a
+`spam` or `non_request` label in its `auto` trust mode can close an email-created case
+automatically; see [advisory AI](advisory-ai.md) and
+[automatic intake closure](trust-ladder.md#automatic-intake-closure).
 
 ```mermaid
 sequenceDiagram
@@ -247,10 +254,19 @@ handoffs are in [agent-parity.md](../architecture/agent-parity.md).
 `request.description` is never edited after intake. It is the legal record of
 what was asked. Clarifications are recorded as new `StatusEvent` rows.
 
-Two numbers for one matter are resolved only by `services.merge_requests()`.
+Two numbers for one matter are resolved only by `services.merge_requests()`. A
+proposed merge reaches it only when a person approves a `duplicate_of` [decision batch](decision-batches.md).
 The duplicate closes as `closed_duplicate` with `merged_into` set, its matched
 email is rematched to the case of record, and the target keeps its own
 `received_at` and deadline. Cases governed by different law cannot merge.
+
+Focused tests: `apps/records/tests/test_merge_requests.py` covers the requester-email move,
+the refusal of a closed or self-merge, and that a merged duplicate cannot be reopened
+(`test_a_merged_duplicate_cannot_be_reopened`). `apps/records/tests/test_reopen_request.py`
+covers reopening with a substantive reason, officer-only reopen, the rule that reopening
+cannot fabricate a delivered state, that reopening does not restart the statutory clock, and
+that no background task may reopen a request (`test_no_background_task_may_reopen_a_request`).
+Run `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_merge_requests apps.records.tests.test_reopen_request --settings=config.test_settings`.
 
 ## Accountability corrections
 

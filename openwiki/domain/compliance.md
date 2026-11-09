@@ -16,12 +16,15 @@ non-negotiable rules that `AGENTS.md` indexes are written in full in
 [`docs/compliance-rules.md`](../../docs/compliance-rules.md); this page explains how
 the code enforces them.
 
-`AGENTS.md` is kept as a short map, with a ceiling of about 150 lines, and it must keep
-each rule's operative prohibition. `apps/api/tests/test_agent_context_files.py` enforces
-both. It also checks that `docs/compliance-rules.md` still names every enforcement
-anchor, such as `services.transition()`, `ExemptionCitation`, and
-`test_no_automated_path_exists`. Run it after you edit `AGENTS.md` or the rules
-document: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_agent_context_files --settings=config.test_settings`.
+`AGENTS.md` is kept as a short map and must keep each rule's operative prohibition.
+No single test pins the whole file any more: the earlier AGENTS.md line-ceiling and
+rule-anchor test (`test_agent_context_files`) is no longer in the repository. The
+checks that remain are narrower. `apps/api/tests/test_hosted_mcp.py`
+(`test_source_docs_do_not_describe_the_whole_mcp_surface_as_readonly`) asserts the
+hosted-MCP wording that rule 11 and `docs/compliance-rules.md` must keep, and
+`apps/records/tests/test_compliance.py` (`test_no_automated_path_exists`) guards the
+human-only rule. After you edit `AGENTS.md` or the rules document, run
+`PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_hosted_mcp apps.records.tests.test_compliance --settings=config.test_settings`.
 
 ## Guarantee table
 
@@ -115,12 +118,18 @@ this by parsing the source of the letter and task modules for calls.
 | `triage.exclude_camera()` | AST check; human actor plus reason of at least 10 characters | A camera exclusion needs an accountable reason |
 | `services.record_external_initial_response()` | AST-guarded in `test_compliance` | Records a first response sent outside this system; sends nothing |
 | `scope_clarification` letter | `scope-ast-guard`; its clarification form tolls the clock | Choosing the form is a judgment with an accountable name on it |
+| System-drafted scope letter | `test_a_system_scope_letter_is_drafted_never_sent_or_clock_stopping` (`scope-letter-ast-guard`); `create_system_scope_letter_draft` has no `form` argument | The system drafts only the informational form and never sends it. See [correspondence](correspondence.md#scope-conversation-letter) |
 | Submission receipt | `receipt-ast-guard`; non-statutory; cannot set `initial_response_delivered` | Keeps the receipt from acting as a statutory response |
+| Interpretation-and-estimate letter | `test_a_system_prepared_letter_is_drafted_never_sent` (`estimate-letter-ast-guard`); the system drafts it with no actor and never approves or queues it | A Records Officer approves and sends it. See [estimates](estimates.md) |
+| Automatic Vault collection | `test_only_scoping_starts_an_automatic_collection` (`automatic-collection-ast-guard`); only `apps/records/scoping.py` may call `queue_automatic_vault_collection` | Rule 11: the unattended export has one door, a finished automatic scoping session under `PRR_TRUST_SCOPE_MODE=auto`. See [collection and Vault](collection-and-vault.md#iterative-scoping-from-intake-intent) |
+| Vault count path | `test_a_vault_count_never_downloads_holds_collects_or_makes_records` (`count-export-ast-guard`); `apps/records/vault_counts.py` may not call download, hold, collection, or `RecordItem` paths, and `ensure_count_export` and `delete_export` have that module as their only caller | Rule 11: a Drive or Chat count-only export is read for its total and deleted, never downloaded or ingested. See [collection and Vault](collection-and-vault.md#count) |
+| Automatic intake closure | `test_only_the_intake_trust_ladder_closes_a_case_without_a_person` (`intake-auto-close-ast-guard`); only `apps/records/intake_trust.py` calls `auto_close_non_request`, and only `services.transition()` receives `_system_closure_note`; the labels are `spam` and `non_request` | The one closure with no human actor, under trust-scope `auto`. See [trust ladder](trust-ladder.md#automatic-intake-closure) |
 
 The main enforcement test is `test_no_automated_path_exists` in
 [`apps/records/tests/test_compliance.py`](../../apps/records/tests/test_compliance.py).
 The same file holds the companion guards (`fee-ast-guard`,
-`matter-kind-ast-guard`, and `case-title-ast-guard`).
+`matter-kind-ast-guard`, and `case-title-ast-guard`) and the three guards above, which
+apply to unattended Vault actions and the intake closure.
 
 Staff and token actors reach `exclude-camera` through
 `apps/api/handoffs.py`, which returns `human_approval_required` to token callers
@@ -137,7 +146,10 @@ acknowledgment is strict liability under RCW 42.56.520.
 
 Late acknowledgment is strict liability, so it may be automated. Automated
 estimate-kicking is a penalty aggravator, so it may not be. Never invert this.
-Estimate revisions always require a human.
+Estimate revisions always require a human. The system drafts two kinds of letter, the
+interpretation-and-estimate letter and the informational scope letter, but it never approves or
+sends either one. See [estimates](estimates.md#the-interpretation-letter) and
+[correspondence](correspondence.md#scope-conversation-letter).
 
 The safety net is the backstop. The officer-facing plan that sets out the
 four-step acknowledgment ladder, and the states that decide when the net is
@@ -204,6 +216,16 @@ The no-records closure wording is versioned in `correspondence` templates
   `audit_auditlog` that rejects `UPDATE` and `DELETE`. SQLite gets only an update trigger, used by
   tests. `manage.py export_audit_log` streams the whole ledger as canonical JSON Lines, and the
   [application backup](../operations/backups.md) writes that export as its independent audit copy.
+- **Staff read path.** `AuditLogViewSet` in `apps/api/resources/audit.py` is a read-only viewset
+  at `/api/staff/audit-log/`. Its `allowed_roles` are Records Officer and Admin, which is the
+  same set as the Audit log item in `OVERSIGHT_NAV` (`frontend/src/nav.ts`). The Oversight
+  screen (`frontend/src/pages/Audit.tsx`, route `/oversight/audit`) reads this endpoint and
+  never writes to it. Results are newest first, with counted keyset pagination. Callers follow
+  `next` as an opaque link, and a legacy `page` parameter is refused with 404. The filters are
+  `action` and `target` (case-insensitive contains) and `since` (a date). Write verbs are
+  refused with 405, as `test_write_methods_rejected` checks for POST and PUT. Focused tests are
+  in `apps/api/tests/test_audit.py`: `test_list_orders_newest_first`, `test_pagination_is_stable_when_new_rows_arrive_and_timestamps_tie`,
+  `test_filter_by_action_icontains`, and `test_write_methods_rejected`.
 - **IP and actor tracking**: actions are logged with actor and target.
 - **Corrections** are new append-only rows, not edits. This also applies to
   `CaseNote`, `InitialResponseAttestation`, and `FerpaIdentityVerification`.

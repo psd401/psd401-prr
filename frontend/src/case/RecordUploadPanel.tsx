@@ -101,7 +101,7 @@ export function RecordUploadPanel({
   return (
     <div className="flex flex-wrap items-center justify-end gap-3">
       {closed && (
-        <p className="text-sm text-pacific/80">
+        <p className="text-sm text-ink-muted">
           This case is closed. Reopen it to add records.
         </p>
       )}
@@ -126,7 +126,7 @@ export function RecordUploadPanel({
             if (files.length) upload.mutate(files)
           }}
         >
-          <p className="text-sm text-pacific/80">
+          <p className="text-sm text-ink-muted">
             Each file is scanned for malware and stored unchanged before it is
             added as an unreviewed record. Infected files, and any file that
             cannot be scanned, are refused.
@@ -145,7 +145,7 @@ export function RecordUploadPanel({
             />
           </Field>
           {upload.isError && (
-            <p role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+            <p role="alert" className="rounded-md border border-danger bg-danger-soft p-3 text-sm text-danger-ink">
               {uploadErrorMessage(upload.error)}
             </p>
           )}
@@ -154,10 +154,10 @@ export function RecordUploadPanel({
               {results.map((result, index) => (
                 <li
                   key={`${result.filename}-${index}`}
-                  className="rounded-md border border-driftwood/60 bg-white p-3 text-sm"
+                  className="rounded-md border border-line bg-surface-raised p-3 text-sm"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="break-all font-heading font-bold text-pacific">
+                    <span className="break-all font-heading font-bold text-ink">
                       {result.filename}
                     </span>
                     <Badge tone={OUTCOME_TONES[result.outcome] ?? 'neutral'}>
@@ -165,7 +165,7 @@ export function RecordUploadPanel({
                     </Badge>
                   </div>
                   {result.outcome !== 'added' && result.detail && (
-                    <p className="mt-1 text-xs text-pacific/80">{result.detail}</p>
+                    <p className="mt-1 text-xs text-ink-muted">{result.detail}</p>
                   )}
                 </li>
               ))}

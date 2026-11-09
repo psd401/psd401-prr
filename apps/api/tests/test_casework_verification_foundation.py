@@ -98,6 +98,21 @@ class CaseworkVerificationFoundationTests(SimpleTestCase):
                 "complete-liaison-handoff",
                 "complete-reviewer-journey",
                 "accessibility-audit",
+                "officer-supersede-collection",
+                "reviewer-bulk-review-by-filter",
+                "officer-ai-evaluation-report",
+                "officer-knowledge-pack-edit",
+                "officer-approve-estimate-letter",
+                "reviewer-cluster-approve-sampled",
+                "reviewer-elusion-signoff",
+                "reviewer-redaction-group-accept",
+                "reviewer-keyboard-flight",
+                "officer-scope-iterations",
+                "officer-approve-and-collect",
+                "officer-rescope",
+                "officer-one-step-release",
+                "officer-approve-decision-batch",
+                "officer-intake-auto-apply-undo",
             ],
         )
         self.assertEqual(
@@ -246,22 +261,23 @@ class CaseworkVerificationFoundationTests(SimpleTestCase):
             "admin-agent-configuration": ("/configuration/agent-access",),
             "intake-clerk-route-boundary": ("Not authorized",),
             "officer-new-case": (
-                "/overview",
+                "/intake",
                 "officer-new-case-overview.png",
                 "officer-case-collection.png",
                 "officer-case-records.png",
                 "officer-case-releases.png",
+                "officer-case-close.png",
             ),
             "officer-clarification-response": (
                 "/messages",
                 "officer-clarification-response.png",
             ),
             "liaison-assigned-case-work": (
-                "/collection",
+                "/collect",
                 "liaison-assigned-case-work.png",
             ),
             "reviewer-record-work-no-pii": (
-                "/records",
+                "/review",
                 "reviewer-record-work-no-pii.png",
             ),
             "correspondence-destination-parity": (

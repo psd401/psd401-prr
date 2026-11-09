@@ -1,7 +1,7 @@
 // ABOUTME: Move an automatically opened email case's message onto the case it
 // ABOUTME: actually belongs to, closing the leftover case in one action.
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { api } from '../api/client'
 import {
   Button,
@@ -46,6 +46,7 @@ interface ReceiptVersion {
  * DOM for no reason.
  */
 export function AddToExistingCaseModal({
+  initialDestination,
   open,
   sourceNumber,
   subject,
@@ -57,10 +58,15 @@ export function AddToExistingCaseModal({
   sourceNumber: string
   subject?: string
   receiptId: string | null
+  /** Prefill the destination, e.g. from a confirmed intake label. */
+  initialDestination?: string
   onClose: () => void
   onRedirected: () => Promise<void>
 }) {
-  const [destination, setDestination] = useState('')
+  const [destination, setDestination] = useState(initialDestination ?? '')
+  useEffect(() => {
+    if (open) setDestination(initialDestination ?? '')
+  }, [open, initialDestination])
   const [reason, setReason] = useState('')
 
   const receipt = useQuery({
@@ -114,7 +120,7 @@ export function AddToExistingCaseModal({
           redirect.mutate()
         }}
       >
-        <p className="text-sm text-pacific/80">
+        <p className="text-sm text-ink-muted">
           {`${sourceNumber} was opened automatically from an emailed message`}
           {subject ? ` (“${subject}”)` : ''}
           . Moving it keeps the message and every attachment as retained
@@ -147,7 +153,7 @@ export function AddToExistingCaseModal({
           />
         </Field>
         {shortfall && (
-          <p aria-live="polite" className="text-sm text-pacific/80">
+          <p aria-live="polite" className="text-sm text-ink-muted">
             {shortfall}
           </p>
         )}

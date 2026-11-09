@@ -189,6 +189,10 @@ _TOKEN_RENAMES = {
             "{{ not_maintained_paragraph }}",
         ),
     ),
+    "interpretation_estimate": (
+        *_COMMON_RENAMES,
+        ('{{ completion_date|date:"F j, Y" }}', "{{ completion_date }}"),
+    ),
     "fee_estimate": (
         *_COMMON_RENAMES,
         # The optional RCW 42.56.120(2) deposit paragraph.
@@ -469,6 +473,41 @@ TEMPLATE_SPECS = {
                 (
                     "A no-records closure must state that it is not an exemption "
                     "determination."
+                ),
+            ),
+        ),
+    ),
+    Correspondence.Kind.INTERPRETATION_ESTIMATE: _structured_spec(
+        label="Interpretation and estimate",
+        kind=Correspondence.Kind.INTERPRETATION_ESTIMATE,
+        builtin_version="1",
+        allowed_tokens=COMMON_TOKENS
+        | {"interpretation", "record_estimate", "charge_paragraph", "completion_date"},
+        required_tokens=frozenset(
+            {
+                "request_number",
+                "interpretation",
+                "record_estimate",
+                "charge_paragraph",
+                "completion_date",
+            }
+        ),
+        required_values=frozenset(
+            {"interpretation", "record_estimate", "charge_paragraph", "completion_date"}
+        ),
+        required_phrases=(
+            (
+                "rcw 42.56.520",
+                (
+                    "An interpretation-and-estimate letter must say its date is "
+                    "the District's reasonable estimate under RCW 42.56.520."
+                ),
+            ),
+            (
+                "misunderstood",
+                (
+                    "An interpretation-and-estimate letter must invite the "
+                    "requester to correct the District's interpretation."
                 ),
             ),
         ),
@@ -1143,6 +1182,10 @@ def _values(context: dict) -> dict[str, str]:
             if context.get("deposit_amount")
             else ""
         ),
+        "interpretation": context.get("interpretation", ""),
+        "record_estimate": context.get("record_estimate", ""),
+        "charge_paragraph": context.get("charge_paragraph", ""),
+        "completion_date": _date(context.get("completion_date")),
         "production_summary": context.get("production_summary", ""),
         "amount_due": context.get("amount_due", ""),
         "payment_requested_on_date": _date(

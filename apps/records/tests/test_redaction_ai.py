@@ -158,6 +158,7 @@ class RedactionAITests(TestCase):
                     {
                         "span_ids": ["p1s1"],
                         "exemption_id": self.exemption.pk,
+                        "pattern": "student_identifier",
                         "confidence": 0.91,
                         "rationale": "The span contains a student identifier.",
                     }
@@ -204,6 +205,7 @@ class RedactionAITests(TestCase):
                 {
                     "span_ids": ["p1s999"],
                     "exemption_id": self.exemption.pk + 999,
+                    "pattern": "other",
                     "confidence": 1,
                     "rationale": "Invented output.",
                 }
@@ -249,6 +251,7 @@ class RedactionAITests(TestCase):
                         {
                             "span_ids": ["p1s1"],
                             "exemption_id": self.exemption.pk,
+                            "pattern": "student_identifier",
                             "confidence": 0.91,
                             "rationale": "Possible student identifier.",
                         }

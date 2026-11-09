@@ -63,10 +63,12 @@ const HOSTING_STATEFUL: readonly StatefulResource[] = [
   {
     logicalId: "InstanceC1063A87",
     type: "AWS::EC2::Instance",
-    // Not Retain: the instance is replaceable in principle, but its root
-    // volume is an inline block device, so a replacement takes the live
+    // Retain since the subnet handover (psd401/psd-aws-infra#42): the
+    // instance leaves the stack and is imported back with the subnet as a
+    // literal ID, because changing its SubnetId in place replaces it. Its root
+    // volume is an inline block device, so a replacement would take the live
     // PostgreSQL database and the audit trail with it.
-    retained: false,
+    retained: true,
     why: "Its inline root volume holds PostgreSQL and the audit trail.",
   },
   {

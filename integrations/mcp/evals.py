@@ -273,6 +273,54 @@ READ_CASES: tuple[EvalCase, ...] = (
 
 WRITE_CASES: tuple[EvalCase, ...] = (
     EvalCase(
+        name="acknowledgment_draft_answers_over_mcp_and_sends_nothing",
+        tool="psd_prr_acknowledgment_draft",
+        arguments={"request_number": REQUEST_NUMBER},
+        rationale=(
+            "The statutory RCW 42.56.520 letter, and the backlog an officer "
+            "most needs an agent's help with. The response must show an "
+            "unapproved, unqueued, unsent draft: `acknowledged` follows a "
+            "human-approved delivery, so a draft that reported itself sent "
+            "would be a false compliance signal. `automated` must be false "
+            "because rule 6 allows exactly two automated requester-facing "
+            "paths and this is neither."
+        ),
+        required_keys=("status", "request_number", "letter_text"),
+        # The letter quotes the request description in full, which is
+        # unbounded requester text. `forbidden_keys` is the PII assertion and
+        # is recursive, so this states that no rendered body reaches the
+        # caller's model provider by any nesting.
+        forbidden_keys=(
+            "draft_body",
+            "draft_subject",
+            "approved_body",
+            "snippet",
+        ),
+        required_values={
+            "status": "draft",
+            "automated": False,
+            "approved_at": None,
+            "queued_at": None,
+            "sent_at": None,
+            "approved_by": None,
+            "queued_by": None,
+        },
+    ),
+    EvalCase(
+        name="acknowledgment_draft_teaches_the_date_format",
+        tool="psd_prr_acknowledgment_draft",
+        arguments={
+            "request_number": REQUEST_NUMBER,
+            "estimated_completion": "next Friday",
+        },
+        rationale=(
+            "The optional estimate is a date, and a model that guessed prose "
+            "has to learn the format rather than see a parser traceback."
+        ),
+        expect_error=True,
+        error_contains=("yyyy-mm-dd",),
+    ),
+    EvalCase(
         name="clarification_draft_answers_over_mcp_and_applies_nothing",
         tool="psd_prr_clarification_letter_draft",
         arguments={

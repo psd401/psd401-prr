@@ -38,8 +38,10 @@ The schedule is `app.conf.beat_schedule` in `config/celery.py`.
 | `estimate-watchdog-daily` | `apps.records.tasks.estimate_watchdog` | Daily 07:00 | [compliance](../domain/compliance.md) |
 | `unpaid-fee-watchdog-daily` | `apps.records.tasks.unpaid_fee_watchdog` | Daily 07:15 | [fees and deposits](../domain/fees-and-deposits.md) |
 | `stall-detector-weekly` | `apps.records.tasks.stall_detector` | Mondays 07:30 | [requests](../domain/requests.md) |
-| `poll-vault-exports` | `apps.records.tasks.poll_vault_exports` | Every 10 minutes | [collection and Vault](../domain/collection-and-vault.md) |
+| `poll-vault-exports` | `apps.records.tasks.poll_vault_exports` | Every 10 minutes; advances running Vault exports, reconciles stale ingest claims, and finishes Drive and Chat counts | [collection and Vault](../domain/collection-and-vault.md) |
 | `prepare-record-review-advisories` | `apps.records.tasks.prepare_record_review_advisories` | Every 5 minutes, limit 25 | [advisory AI](../domain/advisory-ai.md) |
+| `prepare-scope-letters` | `apps.records.tasks.prepare_scope_letters` | Every 10 minutes, limit 10; drafts only | [correspondence](../domain/correspondence.md#scope-conversation-letter) |
+| `prepare-estimate-letters` | `apps.records.tasks.prepare_estimate_letters` | Hourly at :15, limit 10; drafts only | [estimates](../domain/estimates.md) |
 | `build-pending-record-derivatives` | `apps.records.tasks.build_pending_record_derivatives` | Every 10 minutes, limit 25 | [record review](../domain/record-review-and-handling.md) |
 | `poll-inbound-gmail` | `apps.correspondence.tasks.poll_inbound_gmail` | Every minute | [correspondence](../domain/correspondence.md#gmail-transport) |
 | `reconcile-inbound-gmail` | `apps.correspondence.tasks.reconcile_inbound_gmail` | Hourly at :45 | [correspondence](../domain/correspondence.md#gmail-transport) |

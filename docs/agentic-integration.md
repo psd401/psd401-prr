@@ -249,7 +249,7 @@ Router-registered resources, one row per module in `apps/api/resources/`:
 | Module | Base path | Methods | Notes |
 |---|---|---|---|
 | `audit.py` | `audit-log/` | GET (list, retrieve) | `ReadOnlyModelViewSet`: no write route exists for `AuditLog` at any layer, matching its append-only model |
-| `collection_tasks.py` | `collection-tasks/` | GET, POST, PATCH | no destroy: `CollectionTask` is a working record, not evidentiary |
+| `collection_tasks.py` | `collection-tasks/` | GET, POST, PATCH | no destroy: `CollectionTask` is a working record, not evidentiary. Each row carries `source_label` (its record system, else its kind, e.g. "Google Workspace (Gmail)"), `records_created`, and `records_unreviewed` for the Collect stage cards (#45) |
 | `correspondence.py` | `correspondence/` | GET list/retrieve; POST draft, approve, queue, cancel, retry; PATCH draft; GET preview and attempts | list payload is PII-minimal; detail is request-authorized; mutations use the correspondence domain services |
 | `correspondence.py` | `correspondence-attachments/` | `POST <id>/download/`; `GET <id>/content/<token>/` | clean-only, five-minute, user-bound download; no storage key is exposed |
 | `correspondence.py` | `clarification-cycles/` | GET list/retrieve; `POST <id>/resolve/` | receiving a response never resolves the cycle; resolution is human-only |
@@ -261,8 +261,10 @@ Router-registered resources, one row per module in `apps/api/resources/`:
 | `preservations.py` | `preservations/` | GET (list, retrieve); `POST preservations/<id>/exclude-camera/` | read-only plus one gated action, see (d) |
 | `record_systems.py` | `record-systems/` | GET, POST, PUT, PATCH; DELETE returns `405` | registry rows are FK-referenced by `CollectionTask`; deactivate with `active=false` instead |
 | `records_misc.py` | `requesters/` | GET, PATCH | no create: requesters only come from intake |
-| `records_misc.py` | `record-items/` | GET (list, retrieve) | read-only |
+| `records_misc.py` | `record-items/` | GET (list, retrieve) | read-only. `?collection_task=<id>` lists one collection's records; filter-mode bulk review carries the same key |
 | `records_misc.py` | `installments/` | GET (list, retrieve); `POST installments/`, `POST installments/<id>/set-items/`, `prepare/`, `generate-exemption-log/`, `assess-fee/`, `record-payment/`, `release/`, `release-and-send/`, `revoke/`, `set-access-code/`, `clear-access-code/` | Records Officer-only. Create takes a request number and record ids; membership may change only while no package is prepared. `release-and-send/` and `revoke/` are human-only and hand a token caller an explicit handoff. When the release commits but the notice cannot be sent (transport disabled, installment revoked meanwhile), `release-and-send/` answers `409` with `code: installment_notice_unsent` and the installment row: the release stands, the notice stays a draft, and pressing again once the cause is resolved sends it. No response ever carries the download token or the access code |
+| `decision_batches.py` | `decision-batches/` | GET (list `?state=proposed|approved|rejected&request=`, retrieve); `POST decision-batches/` (propose); `POST decision-batches/<id>/approve/`, `reject/` | Decision batches (#43). Records Officers and reviewers see the kinds their roles can decide. Proposing records the batch (kind, items, evidence, proposer) and changes nothing else; an attributed personal token may propose. Approve and reject are human-only: a token gets `403 human_approval_required`. Approval runs the kind's existing service as the approver (`bulk_review_records`, `supersede_collection`, `queue_vault_collection` or `rescope`, `create_redaction_batch` -- which only opens the sampled check -- and `merge_requests` or `close_email_non_request`). Proposal and decision are append-only. Token callers are handed off on the endpoints a batch replaces: record review and id-list bulk review, collection supersede, Vault collection start, re-scope, merge, and non-request closure |
+| `requests.py` | `requests/<number>/release-package/` | `POST` (`installments.build_package`, #47) | Records Officer-only. The Releases tab's **Build package**: opens an installment from every release-ready record no live installment claims, or, when one is already open, finishes that installment as chosen without adding records to it (the tab shows how many ready records are left for the next package); generates the exemption log when the installment needs one, and prepares the package, each through the existing service. It never releases or sends. A blocker an officer fixes elsewhere is checked before anything changes and answers `400` with `{detail, blocker: {code, tab}}`: `request_closed` (overview), `deposit_required` (releases), `no_ready_records` (review). Building again returns the prepared package unchanged |
 | `records_misc.py` | `time-entries/` | GET, POST, PUT, PATCH, DELETE | full CRUD |
 | `requests.py` | `requests/` | GET, PATCH; `POST requests/intake/`, `POST requests/<number>/transition/`, `POST requests/<number>/close-non-request/`, `POST requests/<number>/close/` | Intake Clerk/Records Officer intake is actor-scoped and idempotent through the canonical pipeline; lookup uses `number`, not id; the not-a-records-request closure is Records Officer-only, reasoned, and limited to retained auto-created email evidence; `close/` records only withdrawal or abandonment, is open to every workflow staff role, and still demands a substantive reason; estimate revisions use correspondence and there is no direct request estimate-revision action |
 
@@ -527,7 +529,7 @@ client remain available and retain their existing authorization boundaries.
 
 ## (c) MCP server
 
-Hosted `/mcp` exposes exactly three attributed personal-token draft/proposal
+Hosted `/mcp` exposes exactly five attributed personal-token draft/proposal
 tools; standalone stdio and the shared nonstaff MCP identity remain read-only.
 
 `integrations/mcp/` is an MCP facade (`PRRClient`) over the staff API from
@@ -555,14 +557,16 @@ is the number to report, while `count` is how many rows came back. Only
 the envelope then carries a `warning` sentence saying so. Treat that case as
 a sample, not a statutory total.
 
-Hosted HTTP additionally exposes three tools after counsel and Records Officer
-sign-off: `psd_prr_clarification_letter_draft`,
+Hosted HTTP additionally exposes five gated tools after counsel and Records Officer
+sign-off: `psd_prr_acknowledgment_draft`,
+`psd_prr_clarification_letter_draft`,
 `psd_prr_collection_task_notes_propose`, and
 `psd_prr_exemption_citations_suggest`. They require an attributed personal
 token.
-Drafting calls only the existing clarification-draft REST primitive; the other
-two read authoritative rows and return `applied: false` proposals for a human
-to accept through normal staff workflow. The standalone stdio deployment
+The two drafting tools call only the existing acknowledgment- and
+clarification-draft REST primitives; the other two read authoritative rows and
+return `applied: false` proposals for a human to accept through normal staff
+workflow. The standalone stdio deployment
 registers none of these tools and remains safe for the shared read-only service
 identity. See (d) for the exact gates.
 
@@ -610,7 +614,7 @@ claude mcp add --env PRR_BASE_URL=https://prr.psd401.net \
 ```
 
 Then `claude mcp list` to confirm it connects. Hosted personal-token clients
-see the eight read tools and three draft/proposal tools; stdio sees only the
+see the eight read tools, four role-gated reads, and five draft/proposal tools; stdio sees only the
 eight reads. The guardrails in (d) remain binding on every result and handoff.
 
 Static-token v1 is not MCP OAuth. Claude.ai and Claude Desktop's remote
@@ -697,12 +701,13 @@ line an agent, or the human directing one, has to hold on its own.
 
 Following counsel confirmation that the human gates remain real and Records
 Officer confirmation that the workflow matches office practice, hosted `/mcp`
-exposes these three personal-token tools. The shared stdio deployment remains
+exposes these five personal-token tools. The shared stdio deployment remains
 read-only, and the dedicated read-only identity is rejected by every tool in
 this table.
 
 | Tool | What it does | Human gate |
 |---|---|---|
+| `psd_prr_acknowledgment_draft` | Calls the existing attributed `POST /api/staff/correspondence/drafts/acknowledgment/` primitive and stores an editable acknowledgment draft rendered from the versioned statutory template. It does not change status, set `acknowledgment_sent_at`, revise a published estimate, or reach the requester, so drafting it neither satisfies nor defers the RCW 42.56.520 five-business-day response. There is no batch form: one call drafts one case. The tool's response confirms the draft and withholds the letter text: the acknowledgment template quotes `request.description` in full, which is unbounded requester wording and can name a student, and a tool result leaves for the caller's model provider. | A Records Officer reviews the stored draft and completes approval and queueing through the interactive staff session; `acknowledged` is applied only by the correspondence service after confirmed delivery. |
 | `psd_prr_clarification_letter_draft` | Calls the existing attributed `POST /api/staff/correspondence/drafts/clarification/` primitive and stores an editable clarification-request draft. It does not change status or reach the requester. | A Records Officer reviews the stored draft and completes approval and queueing through the interactive staff session; token execution is rejected by those endpoints. |
 | `psd_prr_collection_task_notes_propose` | Reads the current `CollectionTask` and returns current/proposed `instructions` plus `applied: false`. It does not PATCH the task. | The assigned custodian or officer reviews and accepts the proposed note via the normal `PATCH /api/staff/collection-tasks/<id>/`. |
 | `psd_prr_exemption_citations_suggest` | Reads the `RecordItem`, validates the proposed citation IDs against active `ExemptionCitation` rows, and returns `applied: false`. It does not change review state or attach evidence. | A reviewer confirms each citation before attaching it to a redaction or withholding. Rule 3 requires every redaction to carry a real exemption FK, and a wrong citation is itself a defect in the RCW 42.56.210(3) exemption log. |

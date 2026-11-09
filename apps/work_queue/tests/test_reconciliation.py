@@ -484,23 +484,26 @@ class InboundWorkItemReconciliationTests(TestCase):
 class CaseworkFixtureWorkItemContractTests(TestCase):
     def test_every_eligible_receipt_in_two_thousand_message_fixture_has_one_item(self):
         call_command("seed_casework_test_fixture", stdout=StringIO())
-        # The 2000 on the primary case, plus the single retained email that
-        # opened PRR-E2E-0006 automatically.
+        # The 2000 on the primary case, the single retained email that
+        # opened PRR-E2E-0006 automatically, the system-prepared
+        # interpretation-and-estimate draft on PRR-E2E-0010, and the spam
+        # email that opened PRR-E2E-0017, which the system closed (#34).
         self.assertEqual(
             Correspondence.objects.count(),
-            FIXTURE_MESSAGE_COUNT + 1,
+            FIXTURE_MESSAGE_COUNT + 3,
         )
         self.assertEqual(
             WorkItem.objects.filter(
                 source_type=WorkItem.SourceType.INBOUND_RECEIPT,
             ).count(),
-            3,
+            4,
         )
         # Five on the 2000-message case, the request-action items on the two
         # cases that owe a five-business-day response (PRR-E2E-0005 and the
         # forwarded-requester case PRR-E2E-0008), and the receipt-backed item
-        # on the auto-created email case PRR-E2E-0006.
-        self.assertEqual(WorkItem.objects.count(), 8)
+        # on each auto-created email case: PRR-E2E-0006, and PRR-E2E-0017,
+        # which the system closed as spam without an officer (#34).
+        self.assertEqual(WorkItem.objects.count(), 9)
         self.assertEqual(
             WorkItem.objects.filter(
                 work_kind=WorkItem.WorkKind.REQUEST_ACTION,
@@ -516,7 +519,7 @@ class CaseworkFixtureWorkItemContractTests(TestCase):
                 "delivery_notifications"
             )
         )
-        self.assertEqual(len(receipts), 4)
+        self.assertEqual(len(receipts), 5)
         self.assertEqual(first.created, 0)
         self.assertEqual(second.created, 0)
         for receipt in receipts:

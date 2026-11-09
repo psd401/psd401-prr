@@ -64,12 +64,39 @@ Automated estimate-kicking is a Yousoufian penalty aggravator. Never invert this
 acknowledgment/estimate asymmetry.
 
 The `scope_clarification` letter ("your request matched N items, here are three
-narrower options") is human-only for the same reason, AST-guarded by
-`scope-ast-guard` in `test_compliance`: its clarification form tolls the
-RCW 42.56.520(3) clock on delivery and its informational form explicitly does
-not, and choosing between them is a judgment with an accountable name on it.
-Only that clarification form and the original `clarification_request` may open
-the tolled CLARIFICATION status.
+narrower options") is *sent* only by a person. Since the CIO's decision of
+2026-11-08 the system may *draft* it, in its informational form only:
+`apps/records/scope_letters.prepare_scope_letters`
+(`PRR_AI_AUTOMATIC_SCOPE_LETTER_ENABLED`, an in-app setting, off by default)
+drafts it as a system-prepared draft once a Vault count has finished and
+before any records are pulled, from the latest count and the AI's reading of
+the request. `create_system_scope_letter_draft` has no `form` argument and
+always writes the informational form, which leaves the RCW 42.56.520(3) clock
+running; the clarification form tolls it on delivery, so choosing it remains a
+judgment with an accountable name on it (`create_scope_clarification_draft`,
+which no task may call: `scope-ast-guard`). `scope-letter-ast-guard` in
+`test_compliance` forbids the drafting path from calling any approve, queue,
+send, state-change, estimate, or fee function. A draft a person deletes is not
+redrafted for the same count (`VaultCountRun.scope_letter_prepared_at`). Only
+the clarification form and the original `clarification_request` may open the
+tolled CLARIFICATION status.
+
+The interpretation-and-estimate letter (#42) is drafted by the system and sent
+only by a person. `apps/records/estimate_letters.prepare_estimate_letters`
+(`PRR_AI_AUTOMATIC_ESTIMATE_LETTER_ENABLED`, an in-app setting, off by default)
+computes a `RecordsEstimate` and drafts the letter as a *system-prepared*
+draft: no author, never `automated`, and never approved, queued, or sent by the
+system. `SYSTEM_PREPARED_DRAFT_KINDS` holds only that kind and the
+informational scope letter above, the database
+constraint `correspondence_system_prepared_kind_allowed` holds the same line,
+and `estimate-letter-ast-guard` in `test_compliance` forbids the drafting path
+from calling any approve, queue, send, transition, estimate-revision, or
+deposit function. A Records Officer approves and sends it
+(`correspondence.approve_and_send`); its delivery records the stated date as an
+`EstimateRevision` revised by that officer, whose reason names the computed
+estimate holding every input. The acknowledgment/estimate asymmetry above is
+unchanged: no estimate reaches a requester, or moves `estimated_completion`,
+without a named person's approval.
 
 The intake-time intent advisory and the Vault count it enables
 (`PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED`, an in-app setting, off by default)
@@ -154,17 +181,75 @@ echo. Every other business/data API requires an explicit identity.
 Shared stdio MCP uses a separate nonstaff token with only
 `records.read_staff_api`; hosted MCP uses attributed personal staff tokens and
 never that shared identity for its gated tools. Hosted `/mcp` exposes exactly
-three attributed personal-token draft/proposal tools; standalone stdio and the
-shared nonstaff MCP identity remain read-only. Never put tokens in source or
+five attributed personal-token draft/proposal tools -- an acknowledgment draft,
+a clarification draft, two proposals that apply nothing, and a decision-batch
+proposal (#43, rule 11 amendment) that records a batch for a person to approve;
+standalone stdio and the shared nonstaff MCP identity remain read-only. Drafting
+is not delivery: every one of them stops short of approving, queueing, or
+sending, so the surface never widens rule 6's two automated requester-facing
+paths.
+
+Decision batches (#43): only a person with the batch kind's role approves or
+rejects a batch, in the staff application (`decision_batches.approve`/`reject`
+are human-only; a token gets `human_approval_required`), and approval runs the
+same service the staff UI runs. Proposal and decision are append-only rows. For
+token callers, the `human_confirmation` endpoints a batch replaces -- record
+review and id-list bulk review, collection supersede, Vault collection start and
+re-scope, case merge, and non-request closure -- now answer 403
+`human_approval_required`; browser sessions are unchanged, and other
+`human_confirmation` endpoints keep accepting tokens. Never put tokens in source or
 `.env.example`.
 
 The one unattended Vault action is authorized by district decision
 (2026-09-23): with the in-app `PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED` setting
 on, a completed automatic intent proposal that maps a request to an active
-Vault-backed system runs one entire-organization Gmail *count* with the proposed
-query, no accountable actor, and `trigger=automatic`. It may create the count's
-Vault matter; it never holds, exports, collects, changes status, or reaches the
-requester. It has no volume cap of its own, also by district decision: web-form
+Vault-backed system runs *counts* of Gmail, Drive, and Chat with the proposed
+query, no accountable actor, and `trigger=automatic`: the first across the
+entire organization (Drive and Chat across the in-app staff organizational
+unit, `PRR_VAULT_STAFF_ORG_UNIT_ID`, since Vault searches only Gmail
+organization-wide), or only the district mailboxes the proposal names (#36);
+then, under iterative scoping (`apps/records/scoping.py`), at most
+`PRR_INTENT_MAX_COUNT_ITERATIONS` (in-app, default 4, 1 turns refinement off)
+counts in all, each a tighter query the agent proposed after reading the
+previous total and custodian breakdown. Every one is still a count.
+
+Each source has its own count method. Gmail uses `matters.count`. Vault's
+`matters.count` rejects Drive and Chat (HTTP 400 "Corpus type ... is not
+supported", production probe of 2026-11-08), so those two are counted with a
+count-only export, never downloaded, deleted once its count is read: its
+`stats.totalArtifactCount` is read when Vault reports it COMPLETED, then
+`matters.exports.delete` removes it. A refusal (for example, an identity
+without Drive or Chat export rights) shows that source as unavailable with a
+plain reason. The district accepted this, on the automatic count path too (CIO decision,
+2026-11-08). A count-only export never holds, never becomes a `RecordItem`,
+and never starts a collection; `count-export-ast-guard`
+(`test_compliance.test_a_vault_count_never_downloads_holds_collects_or_makes_records`)
+pins that the count path cannot call a download, a hold, a collection export,
+or `RecordItem`, and that only the count path creates or deletes a count-only
+export. Each source ends counted with a number or unavailable with a plain
+reason, never silently skipped.
+
+Collection from the approved scope (#37, rule 11 amendment, district decision
+of the epic #27 plan). A Records Officer approves the proposed scope and
+starts the Vault collection in one action from the Scope stage
+(`requests.vault_collection.start`). With the in-app `PRR_TRUST_SCOPE_MODE`
+set to `auto` (default `suggest`), the export also starts unattended -- and
+only then: from the final completed count of a finished *automatic* scoping
+session, on a request with no Vault collection yet, with no actor and
+`CollectionTask.trigger=automatic`, which the Collect stage shows. It is the
+same collection an officer would start -- one export each for Gmail, Drive,
+and Chat, including a Drive or Chat source Vault could not count, since a
+missing count is not evidence that nothing is there (CIO decision,
+2026-11-08) -- with the same deposit gate, the same Gmail targeted hold for named
+district mailboxes and no organization-wide hold, and the same export into
+review. Drive and Chat holds are placed only when a person starts the
+collection; the automatic collection adds none (holds unchanged). An officer's re-run never collects by itself;
+re-scoping (`requests.rescope`) is an officer's approval with a reason that
+collects the new scope and supersedes the previous finished collection's
+unreviewed records. `test_compliance` pins the only caller of the automatic
+path. It may create the count's
+Vault matter and a count-only export as described above; it never holds,
+collects, changes status, or reaches the requester. It has no volume cap of its own, also by district decision: web-form
 requests are bounded only by the public-intake throttles, and emailed requests
 by nothing beyond one request per Gmail message and the blocked-sender-domain
 list. Do not widen it to any other Vault operation.

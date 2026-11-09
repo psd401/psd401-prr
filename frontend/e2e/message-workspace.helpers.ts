@@ -29,7 +29,7 @@ export async function openFixtureRequest(page: Page) {
     .first()
     .click()
   await expect(page).toHaveURL(
-    new RegExp(`/requests/${fixtureRequestNumber}/overview$`),
+    new RegExp(`/requests/${fixtureRequestNumber}/intake$`),
   )
   await page.getByRole('link', { name: 'Messages' }).click()
   await expect(page).toHaveURL(

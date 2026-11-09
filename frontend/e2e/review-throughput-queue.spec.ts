@@ -10,8 +10,8 @@ import { fixtureRequestNumber, login } from './message-workspace.helpers.js'
 test('review-throughput-queue', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page)
-  await page.goto(`/requests/${fixtureRequestNumber}/records`)
-  await expect(page.getByRole('heading', { name: 'Records', level: 2 })).toBeFocused()
+  await page.goto(`/requests/${fixtureRequestNumber}/review?view=records`)
+  await expect(page.getByRole('heading', { name: 'Review', level: 2, exact: true })).toBeFocused()
 
   // One record collected from two mailboxes appears once, naming both.
   const deduplicated = page
@@ -22,7 +22,7 @@ test('review-throughput-queue', async ({ page }) => {
 
   // The tag is a fact read off the message headers, and its facet count
   // describes the set the filter will return.
-  const tagFilter = page.getByLabel('Tag')
+  const tagFilter = page.getByLabel('Tag', { exact: true })
   await expect(tagFilter.getByRole('option', { name: /Automatic reply \(3\)/ })).toBeAttached()
   await tagFilter.selectOption('auto_reply')
   await expect(page).toHaveURL(/tag=auto_reply/)
@@ -35,6 +35,21 @@ test('review-throughput-queue', async ({ page }) => {
     path: path.resolve('../.verification/review-throughput-auto-reply-filter.png'),
     fullPage: false,
   })
+
+  // The same filtered set, grouped into clusters across every page (#38).
+  await page.getByLabel('Group by').selectOption('cluster')
+  await page.getByLabel('Cluster by').selectOption('sender')
+  const clusters = page.getByRole('list', { name: 'Record clusters' })
+  await expect(clusters.getByRole('heading', { name: 'psd401.net' })).toBeVisible()
+  await expect(clusters.getByText('3 records')).toBeVisible()
+  await expect(
+    clusters.getByRole('list', { name: 'Sample records in psd401.net' }).getByRole('button'),
+  ).toHaveCount(3)
+  await page.screenshot({
+    path: path.resolve('../.verification/review-throughput-clusters.png'),
+    fullPage: false,
+  })
+  await page.getByLabel('Group by').selectOption('')
 
   // One confirmation over the visible, explicitly selected set.
   await page.getByLabel('Select every record on this page').check()
@@ -66,6 +81,16 @@ test('review-throughput-queue', async ({ page }) => {
 
   await page.screenshot({
     path: path.resolve('../.verification/review-throughput-bulk-reviewed.png'),
+    fullPage: false,
+  })
+
+  // Every decision is stored with the suggestion it was shown -- here none --
+  // so the case's agreement report counts them.
+  await page.goto(`/oversight/ai-agreement?case=${fixtureRequestNumber}`)
+  await expect(page.getByText(`Case ${fixtureRequestNumber}`)).toBeVisible()
+  await expect(page.getByText(/decided with no suggestion shown/)).toBeVisible()
+  await page.screenshot({
+    path: path.resolve('../.verification/review-throughput-ai-agreement.png'),
     fullPage: false,
   })
 })

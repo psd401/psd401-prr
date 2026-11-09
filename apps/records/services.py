@@ -550,9 +550,9 @@ def _retire_inbox_rows_on_closure(
     row and clicked Mark handled. The officer who closed the case is the one
     who handled them, and each row records that attribution.
 
-    A closure without an accountable officer (none exists today; every
-    terminal transition already requires one) leaves the rows alone rather
-    than inventing a handler.
+    A closure without an accountable officer (only the automatic intake
+    closure, ``auto_close_non_request``) leaves the rows alone rather than
+    inventing a handler.
     """
     if actor is None or getattr(actor, "pk", None) is None:
         return
@@ -635,6 +635,7 @@ def transition(
     occurred_at=None,
     confirmed_correspondence_id=None,
     _clarification_exit_evidence=None,
+    _system_closure_note=None,
 ) -> PublicRecordsRequest:
     if to_status not in RequestStatus.values:
         raise ValidationError("The destination must be a valid request status.")
@@ -680,7 +681,12 @@ def transition(
                 "delivery timestamp."
             )
     if to_status in CLOSED_STATUSES:
-        if to_status != RequestStatus.DENIED:
+        if _system_closure_note is not None:
+            # auto_close_non_request: the one closure with no human actor.
+            if to_status != RequestStatus.CLOSED_NON_REQUEST:
+                raise ValidationError("The system may only close a case as non-request.")
+            actor, note = None, _system_closure_note
+        elif to_status != RequestStatus.DENIED:
             actor, note = _require_terminal_action_actor(
                 actor=actor,
                 reason=note,
@@ -1666,17 +1672,10 @@ def close_case(
     return transition(prr, to_status, actor=actor, note=reason)
 
 
-@transaction.atomic
-def close_email_non_request(
-    prr: PublicRecordsRequest,
-    *,
-    actor,
-    reason: str,
-) -> PublicRecordsRequest:
-    """Close only a canonical auto-created email case, retaining all evidence."""
+def _require_email_intake_case(prr: PublicRecordsRequest) -> None:
+    """Refuse a case that was not auto-created from an unmatched email."""
     from apps.correspondence.models import InboundCorrespondenceReceipt
 
-    prr = PublicRecordsRequest.objects.select_for_update().get(pk=prr.pk)
     receipt = (
         InboundCorrespondenceReceipt.objects.select_for_update()
         .filter(
@@ -1695,6 +1694,49 @@ def close_email_non_request(
         raise EmailIntakeClosureRequired(
             "Only a request auto-created from unmatched email may use this closure."
         )
+
+
+@transaction.atomic
+def auto_close_non_request(
+    prr: PublicRecordsRequest,
+    *,
+    note: str,
+) -> StatusEvent:
+    """The system closes a new email case as non-request, with no human (#34).
+
+    The only caller is ``intake_trust.auto_apply_intake_label``, under a spam
+    or non-request label's ``auto`` trust mode (``test_compliance`` pins it).
+    It is narrower than the officer's closure: the case must still be
+    ``received`` -- nobody has worked it -- and must have been auto-created
+    from email, so a web-form request is never closed this way. Nothing is
+    sent to the requester, and ``reopen_request`` undoes it.
+    """
+    prr = PublicRecordsRequest.objects.select_for_update().get(pk=prr.pk)
+    if prr.status != RequestStatus.RECEIVED:
+        raise ValidationError(
+            "Only a case nobody has worked yet can be closed automatically."
+        )
+    _require_email_intake_case(prr)
+    transition(
+        prr,
+        RequestStatus.CLOSED_NON_REQUEST,
+        _system_closure_note=note,
+    )
+    return StatusEvent.objects.filter(
+        request=prr, to_status=RequestStatus.CLOSED_NON_REQUEST,
+    ).latest("occurred_at")
+
+
+@transaction.atomic
+def close_email_non_request(
+    prr: PublicRecordsRequest,
+    *,
+    actor,
+    reason: str,
+) -> PublicRecordsRequest:
+    """Close only a canonical auto-created email case, retaining all evidence."""
+    prr = PublicRecordsRequest.objects.select_for_update().get(pk=prr.pk)
+    _require_email_intake_case(prr)
     if prr.status == RequestStatus.CLARIFICATION:
         return close_open_clarification(
             prr,

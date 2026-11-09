@@ -6,14 +6,14 @@ tags: [architecture, frontend, routing, react, access-control]
 openwiki:
   roles: [architecture, integration]
   change_kinds: [route, navigation, frontend-api-client]
-  source_paths: [frontend/src/App.tsx, frontend/src/nav.ts, frontend/src/api/client.ts, frontend/src/layout/AppLayout.tsx, frontend/src/statutory.ts, frontend/src/vaultQuery.ts, frontend/src/scopeCountNotice.ts, frontend/src/caseSort.ts, frontend/src/queueCounts.tsx, frontend/src/messages/MessageWorkspace.tsx, frontend/src/messages/boundedInfiniteCache.ts, frontend/vite.config.ts, frontend/package.json, apps/api/spa.py, apps/api/resources/correspondence.py]
-  symbols: [App, StaffApp, AuthorizedRoute, routeIsAuthorized, defaultLanding, PRIMARY_NAV, CONFIGURATION_NAV, OVERSIGHT_NAV, CASE_TAB_ROLES, api, ApiError, index, MessageWorkspace, invalidateBoundedInfiniteQueries, markBoundedInfiniteQueriesStale, thread_messages]
-  test_paths: [frontend/src/App.test.tsx, frontend/src/AppAuthorizedRoutes.test.tsx, frontend/src/nav.test.ts, frontend/src/layout/AppLayout.test.tsx, frontend/src/case/CaseWorkspace.test.tsx, frontend/src/vaultQuery.test.ts, frontend/src/scopeCountNotice.test.ts, frontend/src/caseSort.test.ts, frontend/src/queueCounts.test.tsx, frontend/src/messages/MessageWorkspace.test.tsx, frontend/src/messages/boundedInfiniteCache.test.ts]
+  source_paths: [frontend/src/App.tsx, frontend/src/nav.ts, frontend/src/api/client.ts, frontend/src/today.ts, frontend/src/pages/Today.tsx, frontend/src/pages/AgentAccess.tsx, frontend/src/pages/Reporting.tsx, frontend/src/pages/Registry.tsx, frontend/src/pages/WorkItem.tsx, frontend/src/pages/Tasks.tsx, frontend/src/case/CaseWorkspace.tsx, frontend/src/case/AiFirstPass.tsx, frontend/src/case/CollectionCards.tsx, frontend/src/layout/AppLayout.tsx, frontend/src/caseStatus.ts, frontend/src/work.ts, frontend/src/statutory.ts, frontend/src/vaultQuery.ts, frontend/src/scopeCountNotice.ts, frontend/src/caseSort.ts, frontend/src/queueCounts.tsx, frontend/src/messages/MessageWorkspace.tsx, frontend/src/messages/boundedInfiniteCache.ts, frontend/src/theme.ts, frontend/src/main.tsx, frontend/src/ui/ThemePicker.tsx, frontend/src/index.css, frontend/src/nexus/SOURCE.txt, frontend/vite.config.ts, frontend/package.json, apps/api/spa.py, apps/api/resources/correspondence.py, apps/api/resources/work_items.py]
+  symbols: [App, StaffApp, AuthorizedRoute, routeIsAuthorized, defaultLanding, PRIMARY_NAV, LINKED_ROUTES, CONFIGURATION_NAV, OVERSIGHT_NAV, Today, nextStep, dueLabel, CASE_TAB_ROLES, STAGE_ROLES, LEGACY_CASE_TABS, caseTabPath, stageLabel, CaseWorkspace, StageRail, api, ApiError, index, MessageWorkspace, invalidateBoundedInfiniteQueries, markBoundedInfiniteQueriesStale, thread_messages, statusLabel, statusTone, isTerminalStatus, CASE_STATUS_CHOICES, WorkItemDetail, DISPOSITION_LABELS, THEMES, resolveTheme, applyTheme, startTheme, ThemePicker]
+  test_paths: [frontend/src/App.test.tsx, frontend/src/AppAuthorizedRoutes.test.tsx, frontend/src/nav.test.ts, frontend/src/pages/Today.test.tsx, frontend/src/pages/AgentAccess.test.tsx, frontend/src/layout/AppLayout.test.tsx, frontend/src/case/CaseWorkspace.test.tsx, frontend/src/vaultQuery.test.ts, frontend/src/scopeCountNotice.test.ts, frontend/src/caseSort.test.ts, frontend/src/queueCounts.test.tsx, frontend/src/messages/MessageWorkspace.test.tsx, frontend/src/messages/boundedInfiniteCache.test.ts, frontend/src/pages/RequestDetail.test.tsx, frontend/src/pages/Inbox.test.tsx, frontend/src/theme.test.ts, frontend/src/nexus-foundation.test.ts, frontend/src/ui/TrustFooter.test.tsx]
   invariants:
     - Route and navigation roles are a client-side convenience; every API endpoint enforces its own role check.
     - Compliance logic stays in Django; the SPA only renders and submits.
     - Non-GET API calls send the Django CSRF token from the csrftoken cookie.
-    - Every role-restricted case tab is listed in CASE_TAB_ROLES and enforced by routeIsAuthorized.
+    - Every role-restricted case segment (stage or side view) is listed in CASE_TAB_ROLES and enforced by routeIsAuthorized and CaseWorkspace.
   validation_commands: ["cd frontend && bun run test", "cd frontend && bun run lint"]
 ---
 
@@ -61,29 +61,58 @@ navigation lists, and `ROUTE_ROLES` is built from them:
 
 | Registry | What it covers | Source |
 |---|---|---|
-| `PRIMARY_NAV` | Inbox, Review, Staff Intake, Oversight, Configuration | `nav.ts` |
-| `CONFIGURATION_NAV` | Agent access, identity, registry, templates, exemptions, counsel domains, settings, message operations | `nav.ts` |
-| `OVERSIGHT_NAV` | JLARC reporting, audit log | `nav.ts` |
+| `PRIMARY_NAV` | Today (the home screen, see [Today](#today-the-home-screen)), New request (`/staff-intake`), and Settings (`/configuration`) | `nav.ts` |
+| `LINKED_ROUTES` | Routes reached from Today or Settings rather than the menu: Inbox, Review, Decisions (see [decision batches](../domain/decision-batches.md)), and the Oversight index | `nav.ts` (not exported) |
+| `CONFIGURATION_NAV` | Agent access, identity, registry, templates, exemptions, knowledge pack ([knowledge pack](../domain/knowledge-pack.md)), counsel domains, settings, message operations | `nav.ts` |
+| `OVERSIGHT_NAV` | JLARC reporting, audit log ([audit trail](../domain/compliance.md#audit-trail)), AI evaluation ([advisory model comparison](../domain/advisory-evaluation.md), Records Officer only), and AI agreement ([AI-human agreement](../domain/advisory-ai.md#ai-human-agreement), Records Officer only) | `nav.ts` |
 
 - `visibleNav(items, roles)` filters a list to the items that share a role with the user.
 - `routeIsAuthorized(path, roles)` checks the path pattern (`/work/:id`,
   `/requests/:number`, or an exact registry path). A case path such as
   `/requests/<number>/<tab>` is checked against `CASE_TAB_ROLES`. An unknown tab is denied.
-- `defaultLanding(roles)` chooses the first screen. Records officers and liaisons land on
-  `/inbox`, reviewers on `/review`, intake clerks on `/staff-intake`, and admins on
-  `/configuration`.
+- `defaultLanding(roles)` chooses the first screen. Any workflow role other than admin
+  (records officer, liaison, reviewer) lands on `/today`, intake clerks on
+  `/staff-intake`, and admins on `/configuration`. The `nav.test.ts` role table pins each
+  case.
 
 Role names come from `StaffRole` in `frontend/src/api/auth.ts`. Current values are
 `records_officer`, `liaison`, `reviewer`, `intake_clerk`, and `admin`. Those names must match the
 server's roles. `nav.ts` says that API role policies remain authoritative.
 
-### Case tabs
+### Case stages and views
 
-A case opens at `/requests/:number/:tab`. `CASE_TAB_ROLES` gives each tab its roles:
-`overview`, `messages`, `collection`, `records`, `releases`, and `activity`. A
-liaison, for example, sees messages and collection but not records or releases. A
-direct URL to a tab the user cannot use shows a denial and does not mount the tab
-(`CaseWorkspace.test.tsx`, "shows a useful denial without mounting an unauthorized direct tab").
+A case opens at `/requests/:number/:segment`. `CaseWorkspace` in
+`frontend/src/case/CaseWorkspace.tsx` accepts seven stage segments (`intake`, `scope`,
+`collect`, `review`, `redact`, `release`, `close`) and two side views (`messages`,
+`activity`). The stage rail that orders them is derived on the server
+([case stage rail](../domain/case-workspace.md#case-stage-rail)).
+
+- **Roles.** `CASE_TAB_ROLES` in `nav.ts` gives each segment its roles. Stage roles come
+  from `STAGE_ROLES`, so `scope` is Records Officer only, and `review` is Records Officer,
+  Reviewer, and Admin. `messages` is Records Officer and Liaison. `activity` is every
+  workflow role.
+- **Shown, not linked.** The rail lists every stage so progress reads the same for
+  everyone. A stage the viewer cannot open renders without a link (`StageRail` and
+  `roleCanOpen`).
+- **Direct URLs.** A direct URL to a segment the user cannot use shows a "Not authorized"
+  screen and does not mount the content (`CaseWorkspace.test.tsx`, "shows a useful denial
+  without mounting an unauthorized direct tab").
+- **What each stage mounts.** `TabContent` picks one stage's screens. Intake shows
+  `RequestDetail` in overview mode, with the running log and the time-entries panel. Scope
+  shows the scoping trail and the Vault count form. Collect shows `CollectionCards`,
+  Tasks, Preservations, and the upload panel. Review shows `ReviewFlight` by default, or
+  the record list with `?view=records`. `ReviewFlight` is the keyboard-first screen, limited
+  to Records Officers and Reviewers
+  ([record review](../domain/record-review-and-handling.md#keyboard-review-in-the-case-review-tab)).
+  Redact shows `RedactionProposals`, and Release shows `Installments`. Close shows the
+  closure readiness card and the close-mode `RequestDetail`. Messages mounts
+  `CorrespondencePanel`, and Activity mounts `CaseActivityFeed` in full.
+- **Server tab names.** Some server payloads still name pre-rail tabs (`next_action.tab`,
+  closure blockers). `caseTabPath()` maps them to stage URLs, and `?view=records` is kept
+  for the record list. `stageLabel()` gives the rail name for either form.
+
+Each stage's decision card shows its state and open count. Only the current or blocked
+stage asks for a call, and the card links to the evidence below it (`#stage-evidence`).
 
 ### Retired URLs
 
@@ -91,9 +120,71 @@ direct URL to a tab the user cannot use shows a denial and does not mount the ta
 `/cases` and `/requests` go to `/inbox?view=cases`, `/my-work` to the personal
 queue in the Inbox, `/intake` to `/staff-intake`, `/registry` and other configuration
 paths to `/configuration/...`, and `/reporting` and `/audit` to `/oversight/...`.
+Pre-rail case tabs redirect to their stage. `LEGACY_CASE_TABS` maps `overview` to
+`intake`, `collection` to `collect`, `records` to `review`, and `releases` to `release`.
+`CaseWorkspace` keeps the query string, so `?view=records` still opens the record list.
 Legacy case-scoped correspondence URLs are handled by `LegacyScopedRoutes.tsx`. Its
 tests in `frontend/src/case/LegacyScopedRoutes.test.tsx` cover filter preservation and
 dropped filters.
+
+### Today, the home screen
+
+`/today` is the default landing for workflow roles. `frontend/src/pages/Today.tsx`
+lists every open case, most urgent first, and gives each one next step.
+`frontend/src/today.ts` holds the presentation rules:
+
+- **Cases.** The list calls `GET /api/staff/requests/?status=open&ordering=due`. A search
+  box switches it to `?search=…&ordering=due`. Each row carries the `stage` object the
+  server computes for the case rail ([case stage rail](../domain/case-workspace.md#case-stage-rail)).
+  The ordering is the server's due-date sort (`CASE_ORDERINGS` in
+  [`apps/api/resources/requests.py`](../../apps/api/resources/requests.py)).
+- **Next step.** `nextStep(row)` turns the current stage into one action and route.
+  An intake case for a `public_records` matter offers "Send acknowledgment" in Messages,
+  because only that matter kind owes a requester acknowledgment (rule 13 in
+  [`AGENTS.md`](../../AGENTS.md)). A blocked scope or release stage is shown as waiting
+  on the requester or the deposit, with a secondary button.
+- **Due labels.** `dueLabel` renders the due date relative to the Pacific date
+  (`pacificDateString` in `frontend/src/date.ts`): "3 days late", "Due tomorrow", or a
+  calendar date. Deadline math itself stays in [compliance](../domain/compliance.md).
+- **Needs you.** Chips come from `GET /api/staff/work-items/counts/` (unmatched email,
+  quarantined email, delivery exceptions) and from the count of proposed decision batches
+  ([decision batches](../domain/decision-batches.md)). Each chip links into the Inbox
+  view or the Decisions queue ([work queue](../domain/work-queue.md)).
+
+Today decides nothing. It reads server state and links to the stage that owns the next
+call. Focused test: `frontend/src/pages/Today.test.tsx`. Run
+`cd frontend && bun run test -- src/pages/Today.test.tsx`.
+
+### Screen map
+
+Every route in `App.tsx` mounts one screen behind `guard(...)`. The owning domain page
+holds the rules that screen displays.
+
+| Route | Screen (`frontend/src/pages/` unless noted) | Owning page |
+|---|---|---|
+| `/today` | `Today.tsx` | this page, [case workspace](../domain/case-workspace.md) |
+| `/inbox`, `/work/:id` | `Inbox.tsx`, `WorkItem.tsx` | [work queue](../domain/work-queue.md) |
+| `/review` | `Review.tsx` | [record review](../domain/record-review-and-handling.md) |
+| `/decisions` | `Decisions.tsx` | [decision batches](../domain/decision-batches.md) |
+| `/staff-intake` | `StaffIntake.tsx` | [requests](../domain/requests.md#intake-and-triage), [case workspace](../domain/case-workspace.md) |
+| `/requests/:number/:tab` | `case/CaseWorkspace.tsx` (stage tabs mount `Tasks.tsx`, `Installments.tsx`, `RecordItems.tsx`, `case/RedactWorkspace.tsx` for the Redact stage, and others) | [case workspace](../domain/case-workspace.md), [Redact stage](../domain/record-review-and-handling.md#the-redact-stage) |
+| `/oversight/reporting` | `Reporting.tsx` | [JLARC annual reporting](../domain/jlarc-reporting.md) |
+| `/oversight/audit` | `Audit.tsx` | [audit trail](../domain/compliance.md#audit-trail) |
+| `/oversight/ai-evaluation` | `AiEvaluation.tsx` | [advisory model comparison](../domain/advisory-evaluation.md) |
+| `/oversight/ai-agreement` | `AiAgreement.tsx` | [AI-human agreement](../domain/advisory-ai.md#ai-human-agreement) |
+| `/configuration/agent-access` | `AgentAccess.tsx` | [personal access tokens](personal-access-tokens.md) |
+| `/configuration/identity` | `IdentitySettings.tsx` | [Google identity](google-identity.md) |
+| `/configuration/registry` | `Registry.tsx` | [collection and Vault](../domain/collection-and-vault.md) |
+| `/configuration/message-templates` | `MessageTemplates.tsx` | [message templates](../domain/message-templates.md) |
+| `/configuration/exemptions` | `Exemptions.tsx` | [compliance](../domain/compliance.md#exemption-taxonomy) |
+| `/configuration/knowledge` | `Knowledge.tsx` | [district knowledge pack](../domain/knowledge-pack.md) |
+| `/configuration/counsel-domains` | `CounselDomains.tsx` | [record facts and tags](../domain/record-facts-and-tags.md) |
+| `/configuration/settings` | `DistrictSettings.tsx` | [configuration](configuration.md) |
+| `/configuration/correspondence` | `Correspondence.tsx` | [correspondence](../domain/correspondence.md#operations-and-readiness) |
+
+Retired paths redirect to these routes (see [retired URLs](#retired-urls)). The screen
+does not decide access. `ROUTE_ROLES` in `nav.ts` gates each one, and the API still checks
+every call.
 
 ## Serving and build
 
@@ -107,6 +198,34 @@ dropped filters.
   Django static path.
 - **Development.** `bun run dev` serves Vite and proxies `/api` to `http://127.0.0.1:8000`,
   the Django process ([deployment](../operations/deployment.md)).
+
+## Themes and design tokens
+
+The look of the shell comes from a vendored design system, not from app code. The
+Nexus tokens and bundle are copied into `frontend/src/nexus/` and imported by
+`frontend/src/index.css` (`tokens.css` in the base layer, `bundle.css` in the
+components layer). `frontend/src/nexus/SOURCE.txt` pins the upstream commit, and the
+folder must not be edited by hand; `frontend/src/nexus-foundation.test.ts` checks that
+the pin and the files exist. [`frontend/README.md`](../../frontend/README.md) describes
+how to copy a newer export.
+
+`frontend/src/theme.ts` chooses a `data-theme` value on `<html>` from five themes:
+`nexus`, `commons`, `dark`, `commons-dark`, and `high-contrast`. A user picks one in
+`ThemePicker` (`frontend/src/ui/ThemePicker.tsx`, mounted in the shell by
+`layout/AppLayout.tsx`), or leaves it on "Match this device". In that mode,
+`resolveTheme` reads `prefers-contrast: more` and then `prefers-color-scheme: dark`,
+and falls back to `nexus`.
+
+- The choice is a browser preference stored under `prr-theme` in local storage. It is
+  never a district setting, so it does not go through [configuration](configuration.md).
+- `main.tsx` calls `startTheme()` before the app mounts. That applies the stored
+  choice and listens for device changes while the choice is "system".
+- Storage that is blocked falls back to the device setting for the page.
+
+Focused tests: `frontend/src/theme.test.ts` (resolution, persistence, and listeners),
+`frontend/src/ui/TrustFooter.test.tsx` (its footer test loops over all five themes), and
+`frontend/src/nexus-foundation.test.ts` (the vendored files). Run one with
+`cd frontend && bun run test -- src/theme.test.ts`.
 
 ## API client contract
 
@@ -122,7 +241,7 @@ dropped filters.
 
 ## Case message workspace
 
-The case Messages tab renders `CorrespondencePanel`, which mounts `MessageWorkspace`
+The case Messages view renders `CorrespondencePanel`, which mounts `MessageWorkspace`
 (`frontend/src/messages/MessageWorkspace.tsx`) for one request. The workspace is a
 browser over that request's correspondence. The server decides which rows exist and
 which actions a role may take, as described in [correspondence](../domain/correspondence.md#staff-rest-api).
@@ -155,16 +274,24 @@ trim behavior in `boundedInfiniteCache.ts` in step with any change to the paging
 
 ## Helpers that mirror server contracts
 
-Some frontend modules restate a server rule so the screen can display it. Four of the five
+Some frontend modules restate a server rule so the screen can display it. Five of the six
 have a server-side twin; the queue-count announcer has none. Where a twin exists, a shared
-fixture or a server test pins the rule, except `statutory.ts`, which has no dedicated unit
-test and is covered through the screen tests listed below. The screens never decide legal
-outcomes with them.
+fixture or a server test pins the rule, except `statutory.ts` and `caseStatus.ts`, which have no
+dedicated unit test and are covered through the screen tests listed below. The screens never
+decide legal outcomes with them.
+
+`frontend/src/work.ts` is the other side of this boundary: it declares the PII-minimal
+work-item response types (`WorkItemSummary`, `WorkItemDetail`, `WorkItemCounts`) and
+`DISPOSITION_LABELS`. Those shapes follow the serializers in
+[`apps/api/resources/work_items.py`](../../apps/api/resources/work_items.py), and the queue
+semantics are in [work queue](../domain/work-queue.md).
 
 | Module | What it mirrors | Invariant | Tests |
 |---|---|---|---|
+| `frontend/src/caseStatus.ts` | `RequestStatus` in `apps/records/models.py` | `statusLabel` and `statusTone` are the only label and colour source for a request status, so the case workspace, the Inbox, and the request detail agree. A closed case is neutral, a denial is red, and an unknown status falls back to neutral rather than active blue. `TERMINAL_STATUSES` is the no-work-owed set. See [requests](../domain/requests.md). | `pages/RequestDetail.test.tsx`, `pages/Inbox.test.tsx`, `case/CaseWorkspace.test.tsx` |
 | `frontend/src/statutory.ts` | The initial-response ladder in `apps/api/resources/requests.py` | Labels and tones name the outstanding step. A draft, an approval, or a queued message is never shown as a delivered response. `outstandingStatutoryStep()` returns no step for a terminal state or for the provider's `deliver` step. See [initial response](../domain/initial-response.md). | `CorrespondencePanel.test.tsx`, `RequestDetail.test.tsx`, `Inbox.test.tsx` |
 | `frontend/src/vaultQuery.ts` | `vault_query_from_intent()` in `apps/records/vault_counts.py` | Required terms are AND-ed and alternatives form one OR group, so the Count button and the automatic count scope the same search. Both read `frontend/src/vaultQueryCases.json`. See [collection and Vault](../domain/collection-and-vault.md#query-construction). | `vaultQuery.test.ts`, `apps/records/tests/test_scope_conversation.py` (`VaultQueryFromIntentTests`) |
+| `frontend/src/vaultSources.ts` | `source_count_summary()` in `apps/records/vault_counts.py` and the Vault task kinds in `apps/records/models.py` | Each Google source (Gmail, Drive, Chat) reads as counting, as a number, or as not available with a plain reason. A source is never silently left out. A count from before Drive and Chat keeps the Gmail-only headline. `VaultSourceCounts.tsx` renders the rows on the request detail page, and `ScopingTrail.tsx` uses the same text. See [collection and Vault](../domain/collection-and-vault.md#count). | `vaultSources.test.ts`, `case/VaultSourceCounts.test.tsx`, `apps/records/tests/test_vault_source_counts.py` |
 | `frontend/src/scopeCountNotice.ts` | The latest Vault count from `apps/records/vault_counts.py` | Warns when a typed count differs from the latest complete count or while one is running. It never blocks sending. | `scopeCountNotice.test.ts` |
 | `frontend/src/caseSort.ts` | `CASE_ORDERINGS` in `apps/api/resources/requests.py` | `CASE_SORT_KEYS` must match the server whitelist. An unknown `?sort=` value is dropped, not sent. Sorting is server-side. The cycle is ascending, descending, then the view's default order. | `caseSort.test.ts`, `RequestsOrderingTests` in `apps/api/tests/test_requests.py` |
 | `frontend/src/queueCounts.tsx` | The shell's work-item counts | `QueueCountStatus` announces changed counts politely to screen readers. The first render stays silent. | `queueCounts.test.tsx` |
@@ -178,7 +305,8 @@ role can use it.
 
 - **New screen.** Add the page under `frontend/src/pages/`, mount it in `App.tsx` inside
   `guard(...)`, and add a `NavItem` with the roles to the right registry in `nav.ts`.
-  Without the `ROUTE_ROLES` entry, `routeIsAuthorized` denies the route. Update the
+  Add a row to the [screen map](#screen-map). Without the `ROUTE_ROLES` entry,
+  `routeIsAuthorized` denies the route. Update the
   capability registry too ([agent parity](agent-parity.md), rule 10 in `AGENTS.md`).
 - **Changed role for a screen.** Change it in `nav.ts` and in the server policy together.
   The server check is the only real control. Add tests for both the visible item and
@@ -198,6 +326,10 @@ role can use it.
 - [GUI and agent parity](agent-parity.md): the capability registry that screens and
   agents must both use.
 - [Google identity](google-identity.md): the sign-in and role refresh that `useMe` reflects.
+- [Case workspace](../domain/case-workspace.md): the screens behind `/requests/:number/:tab`.
+- [Work queue](../domain/work-queue.md): the Inbox and work item screens.
+- [Configuration](configuration.md): the `PRR_AUTH_MODE` setting that `spa.py` reads.
+t `useMe` reflects.
 - [Case workspace](../domain/case-workspace.md): the screens behind `/requests/:number/:tab`.
 - [Work queue](../domain/work-queue.md): the Inbox and work item screens.
 - [Configuration](configuration.md): the `PRR_AUTH_MODE` setting that `spa.py` reads.

@@ -39,9 +39,14 @@ from apps.records.models import (
     AdvisoryRun,
     Channel,
     CollectionTask,
+    EvaluationRun,
+    EvaluationSet,
+    KnowledgeRoleAccount,
     PublicRecordsRequest,
     RecordItem,
     RecordItemCustodian,
+    RecordsEstimate,
+    RecordSystem,
     Requester,
     RequestStatus,
     StatusEvent,
@@ -94,6 +99,59 @@ FIXTURE_REDIRECT_TARGET_REQUEST_NUMBER = "PRR-E2E-0007"
 #: its identity and sending its acknowledgment must not move a case another
 #: flow counts on being in the day-5 backlog.
 FIXTURE_FORWARDED_REQUEST_NUMBER = "PRR-E2E-0008"
+#: A case whose completed Vault collection swept in mail nobody has reviewed.
+#: It exists to prove superseding a collection end to end, and is isolated so
+#: taking its records out of review moves no count another flow depends on.
+FIXTURE_SUPERSEDE_REQUEST_NUMBER = "PRR-E2E-0009"
+FIXTURE_SUPERSEDE_DESCRIPTION = (
+    "Email about the spring facilities survey between March 1 and March 31, "
+    "2026."
+)
+FIXTURE_SUPERSEDE_RECORD_COUNT = 3
+#: A case whose interpretation-and-estimate letter the system has drafted
+#: (#42). Isolated so sending it changes no count another flow reads.
+FIXTURE_ESTIMATE_LETTER_REQUEST_NUMBER = "PRR-E2E-0010"
+#: A case whose records carry AI suggestions for the trust-ladder flows (#39):
+#: a newsletter cluster below the discard floor, for sampled cluster approval,
+#: and a high-confidence non-responsive pile, for the elusion sign-off.
+FIXTURE_TRUST_REQUEST_NUMBER = "PRR-E2E-0011"
+FIXTURE_TRUST_CLUSTER_DOMAIN = "newsletter.example"
+FIXTURE_TRUST_CLUSTER_COUNT = 4
+FIXTURE_TRUST_DISCARD_DOMAIN = "vendor-ads.example"
+FIXTURE_TRUST_DISCARD_COUNT = 5
+#: A case whose responsive records carry AI redaction proposals (#40), for
+#: the group-acceptance flow. Its PDFs live in the e2e filesystem store.
+FIXTURE_REDACTION_REQUEST_NUMBER = "PRR-E2E-0012"
+FIXTURE_REDACTION_RECORD_COUNT = 3
+#: A case of unreviewed PDFs with AI suggestions for the keyboard Review tab
+#: (#46). Its PDFs live in the e2e filesystem store.
+FIXTURE_FLIGHT_REQUEST_NUMBER = "PRR-E2E-0013"
+FIXTURE_FLIGHT_RECORDS = (
+    ("flight-bus-video", "Route 12 bus video request log, March 3.", "responsive", 0.94),
+    ("flight-lunch-menu", "Cafeteria lunch menu for the week of March 2.", "non_responsive", 0.97),
+    ("flight-route-memo", "Memo about route 12 driver staffing.", "responsive", 0.71),
+)
+#: A case with a finished Vault collection and a newer, narrower proposed
+#: scope, for the re-scope flow (#37).
+FIXTURE_RESCOPE_REQUEST_NUMBER = "PRR-E2E-0014"
+# One-step release (#47): reviewed records waiting for "Build package".
+FIXTURE_RELEASE_REQUEST_NUMBER = "PRR-E2E-0015"
+# Decision batches (#43): a review batch an agent proposed, waiting for a person.
+FIXTURE_DECISION_REQUEST_NUMBER = "PRR-E2E-0016"
+# Trust ladder for intake (#34): an email case the system closed as spam.
+FIXTURE_AUTO_CLOSED_REQUEST_NUMBER = "PRR-E2E-0017"
+FIXTURE_ESTIMATE_LETTER_INTENT = (
+    "Route 12 bus video from March 3, 2026, between 3 and 4 p.m."
+)
+#: Uploaded (not Vault-collected) mail on the same isolated case, from one
+#: sender domain, so the bulk-review-by-filter flow has a set to decide that
+#: superseding the Vault collection never touches.
+FIXTURE_BULK_FILTER_DOMAIN = "bulk.example.org"
+FIXTURE_BULK_FILTER_RECORD_COUNT = 3
+#: A synthetic registry system and one role account for the knowledge-pack
+#: flow. The system has no triage keywords, so it routes no fixture case.
+FIXTURE_KNOWLEDGE_SYSTEM_SLUG = "fixture-shared-mailbox"
+FIXTURE_KNOWLEDGE_ROLE = "Principal, Fixture Elementary"
 FIXTURE_FORWARDED_DESCRIPTION = (
     "Copies of the traffic-safety study for the Harborview crossing, and any "
     "district correspondence about it from February 2026."
@@ -867,6 +925,790 @@ def _seed_awaiting_statutory_response_case(officer):
             "request-action work item."
         )
     return request
+
+
+def _seed_supersede_case(officer):
+    """Seed one case with a completed Vault collection and unreviewed mail.
+
+    Records are deliberately not reconciled into the work queue; the fixture's
+    work-queue shape is asserted elsewhere and is not what this case proves.
+    """
+    requester, _ = Requester.objects.get_or_create(
+        email="survey@example.org",
+        defaults={
+            "id": _fixture_uuid("supersede-requester"),
+            "name": "Survey Requester",
+        },
+    )
+    request, _ = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_SUPERSEDE_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("supersede-request"),
+            "requester": requester,
+            "description": FIXTURE_SUPERSEDE_DESCRIPTION,
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    task, _ = CollectionTask.objects.get_or_create(
+        request=request,
+        kind=CollectionTask.Kind.VAULT_MAIL,
+        defaults={
+            "state": CollectionTask.State.COMPLETE,
+            "completed_at": _BASE_TIME,
+            "instructions": "Create the confirmed Google Vault Gmail export.",
+            "search_terms": '"facilities survey"',
+        },
+    )
+    for index in range(FIXTURE_SUPERSEDE_RECORD_COUNT):
+        label = f"supersede-newsletter-{index}"
+        filename = f"synthetic-{label}.eml"
+        RecordItem.objects.get_or_create(
+            pk=_fixture_uuid(label),
+            defaults={
+                "request": request,
+                "collection_task": task,
+                "source_system": "fixture",
+                "original_filename": filename,
+                "storage_key": f"fixtures/{filename}",
+                "content_length": 128,
+                "content_type": "application/octet-stream",
+                "sha256": hashlib.sha256(label.encode("utf-8")).hexdigest(),
+                "email_sender_domain": "example.org",
+            },
+        )
+    for index in range(FIXTURE_BULK_FILTER_RECORD_COUNT):
+        label = f"bulk-filter-{index}"
+        filename = f"synthetic-{label}.eml"
+        RecordItem.objects.get_or_create(
+            pk=_fixture_uuid(label),
+            defaults={
+                "request": request,
+                "source_system": "upload",
+                "original_filename": filename,
+                "storage_key": f"fixtures/{filename}",
+                "content_length": 128,
+                "content_type": "application/octet-stream",
+                "sha256": hashlib.sha256(label.encode("utf-8")).hexdigest(),
+                "email_sender_domain": FIXTURE_BULK_FILTER_DOMAIN,
+            },
+        )
+    return request
+
+
+def _seed_estimate_letter_case(officer):
+    """Seed a case with a system-prepared interpretation-and-estimate draft.
+
+    AI is off in acceptance runs, so the intent summary and the estimate are
+    written rather than computed; the draft itself goes through the real
+    drafting service, exactly as the hourly task would call it.
+    """
+    from apps.correspondence.services import create_interpretation_estimate_draft
+
+    requester, _ = Requester.objects.get_or_create(
+        email="bus-video@example.org",
+        defaults={"id": _fixture_uuid("estimate-letter-requester"), "name": "Bus Video Requester"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_ESTIMATE_LETTER_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("estimate-letter-request"),
+            "requester": requester,
+            "description": "Any bus video from route 12 on March 3, 2026.",
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    if not created:
+        return request
+    AdvisoryRun.objects.create(
+        kind=AdvisoryRun.Kind.REQUEST_INTENT,
+        request=request,
+        model_identifier="synthetic-intent-model",
+        input_sha256=hashlib.sha256(b"estimate-letter-intent").hexdigest(),
+        state=AdvisoryRun.State.COMPLETE,
+        requested_by=officer,
+        proposal={"summary": FIXTURE_ESTIMATE_LETTER_INTENT},
+    )
+
+    def fee(total, files):
+        return {"files": files, "lines": [], "total": total, "deposit": "0.00",
+                "flat_fee_available": False, "below_waiver_floor": False}
+
+    estimate = RecordsEstimate.objects.create(
+        request=request,
+        as_of=_BASE_TIME.date(),
+        inputs={"synthetic": True},
+        result={
+            "responsive": {"low": 2, "expected": 3, "high": 5,
+                           "reviewed_responsive": 1, "unreviewed": 4},
+            "fee": {"low": fee("0.10", 2), "expected": fee("0.15", 3), "high": fee("0.25", 5)},
+            "completion_date": (_BASE_TIME + timedelta(days=21)).date().isoformat(),
+            "notes": [],
+        },
+    )
+    create_interpretation_estimate_draft(request, estimate=estimate)
+    return request
+
+
+def _seed_scoping_session(officer, request):
+    """A finished two-count scoping session (#36), written rather than run:
+    Vault and AI are off in acceptance runs. Counts only."""
+    from apps.records.models import ScopeIteration, ScopingSession
+
+    session = ScopingSession.objects.create(
+        request=request,
+        trigger=ScopingSession.Trigger.AUTOMATIC,
+        state=ScopingSession.State.COMPLETE,
+        max_iterations=4,
+        stop_reason="The scope is now specific to enrollment planning mail.",
+        completed_at=_BASE_TIME,
+    )
+    steps = (
+        (1, '"enrollment plan" AND ("spring" OR "projection")', "entire_org", [], 2340,
+         [{"email": "communications@psd401.net", "count": 1510}, {"email": "enrollment@psd401.net", "count": 610}],
+         "The request asks about spring enrollment planning."),
+        (2, '"enrollment plan" AND ("spring" OR "projection") AND -from:newsletter.example',
+         "accounts", ["enrollment@psd401.net"], 412,
+         [{"email": "enrollment@psd401.net", "count": 412}],
+         ("Most matches were the district newsletter in the communications mailbox; "
+         "count the enrollment office and leave the newsletter out.")),
+    )
+    for number, terms, scope, custodians, total, accounts, reason in steps:
+        run = VaultCountRun.objects.create(
+            request=request,
+            trigger=VaultCountRun.Trigger.AUTOMATIC,
+            state=VaultCountRun.State.COMPLETE,
+            search_scope=scope,
+            terms=terms,
+            custodian_emails=custodians,
+            input_sha256=hashlib.sha256(terms.encode()).hexdigest(),
+            vault_matter_id=f"e2e-matter-{request.number}",
+            total_count=total,
+            account_counts=accounts,
+            completed_at=_BASE_TIME,
+        )
+        ScopeIteration.objects.create(
+            session=session, number=number, count_run=run, reason=reason,
+            custodians=custodians,
+        )
+    AdvisoryRun.objects.create(
+        kind=AdvisoryRun.Kind.REQUEST_INTENT,
+        request=request,
+        model_identifier="synthetic-intent-model",
+        input_sha256=hashlib.sha256(b"trust-intent").hexdigest(),
+        state=AdvisoryRun.State.COMPLETE,
+        requested_by=officer,
+        proposal={"summary": "Spring enrollment planning mail.",
+                  "required_search_terms": ["enrollment plan"], "search_terms": ["spring"]},
+    )
+
+
+def _seed_rescope_case(officer):
+    """A finished Vault collection from a broad count, two unreviewed records
+    from it, and a newer officer re-run whose final count is narrower."""
+    from apps.records.models import ScopeIteration, ScopingSession
+
+    requester, _ = Requester.objects.get_or_create(
+        email="rescope@example.org",
+        defaults={"id": _fixture_uuid("rescope-requester"), "name": "Rescope Requester"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_RESCOPE_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("rescope-request"),
+            "requester": requester,
+            "description": "Board budget workshop email, February 2026.",
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    if not created:
+        return request
+
+    def count(terms, scope, custodians, total):
+        return VaultCountRun.objects.create(
+            request=request,
+            trigger=VaultCountRun.Trigger.AUTOMATIC,
+            state=VaultCountRun.State.COMPLETE,
+            search_scope=scope,
+            terms=terms,
+            custodian_emails=custodians,
+            input_sha256=hashlib.sha256(terms.encode()).hexdigest(),
+            vault_matter_id=f"e2e-matter-{request.number}",
+            total_count=total,
+            completed_at=_BASE_TIME,
+        )
+
+    broad = count('"budget workshop"', "entire_org", [], 2340)
+    task = CollectionTask.objects.create(
+        request=request,
+        kind=CollectionTask.Kind.VAULT_MAIL,
+        state=CollectionTask.State.COMPLETE,
+        source_vault_count=broad,
+        completed_at=_BASE_TIME,
+        instructions="Create the confirmed Google Vault Gmail export.",
+        search_terms=broad.terms,
+    )
+    for index in range(2):
+        label = f"rescope-mail-{index}"
+        RecordItem.objects.create(
+            pk=_fixture_uuid(label),
+            request=request,
+            collection_task=task,
+            source_system="fixture",
+            original_filename=f"synthetic-{label}.eml",
+            storage_key=f"fixtures/synthetic-{label}.eml",
+            content_length=128,
+            content_type="application/octet-stream",
+            sha256=hashlib.sha256(label.encode()).hexdigest(),
+        )
+    session = ScopingSession.objects.create(
+        request=request,
+        trigger=ScopingSession.Trigger.MANUAL,
+        actor=officer,
+        reason="The broad search pulled in the district newsletter.",
+        state=ScopingSession.State.COMPLETE,
+        max_iterations=4,
+        stop_reason="The scope is now the board office.",
+        completed_at=_BASE_TIME,
+    )
+    narrow = count(
+        '"budget workshop" AND -from:newsletter.example', "accounts", ["board@psd401.net"], 412,
+    )
+    ScopeIteration.objects.create(
+        session=session, number=1, count_run=narrow,
+        reason="Count the board office and leave the newsletter out.",
+        custodians=["board@psd401.net"],
+    )
+    return request
+
+
+def _seed_trust_ladder_case(officer):
+    """Seed the case the sampled-batch and elusion flows decide.
+
+    AI is off in acceptance runs, so the suggestions are written as completed
+    runs. Nothing here reviews a record; the flows do, in a reviewer's name.
+    """
+    requester, _ = Requester.objects.get_or_create(
+        email="trust-ladder@example.org",
+        defaults={"id": _fixture_uuid("trust-requester"), "name": "Trust Ladder Requester"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_TRUST_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("trust-request"),
+            "requester": requester,
+            "description": "Email about the spring enrollment plan, March 2026.",
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    if not created:
+        return request
+    _seed_scoping_session(officer, request)
+    sets = (
+        ("trust-newsletter", FIXTURE_TRUST_CLUSTER_DOMAIN, FIXTURE_TRUST_CLUSTER_COUNT, 0.6),
+        ("trust-ad", FIXTURE_TRUST_DISCARD_DOMAIN, FIXTURE_TRUST_DISCARD_COUNT, 0.97),
+    )
+    for prefix, domain, count, confidence in sets:
+        for index in range(count):
+            label = f"{prefix}-{index}"
+            item = RecordItem.objects.create(
+                pk=_fixture_uuid(label),
+                request=request,
+                source_system="fixture",
+                original_filename=f"synthetic-{label}.eml",
+                storage_key=f"fixtures/synthetic-{label}.eml",
+                content_length=128,
+                content_type="application/octet-stream",
+                sha256=hashlib.sha256(label.encode()).hexdigest(),
+                email_message_id=f"<{label}@{domain}>",
+                email_from=f"news@{domain}",
+                email_sender_domain=domain,
+                email_sent_at=_BASE_TIME,
+            )
+            AdvisoryRun.objects.create(
+                kind=AdvisoryRun.Kind.RECORD_RESPONSIVENESS,
+                request=request,
+                record_item=item,
+                model_identifier="synthetic-review-model",
+                input_sha256=hashlib.sha256(f"{label}-run".encode()).hexdigest(),
+                state=AdvisoryRun.State.COMPLETE,
+                requested_by=officer,
+                proposal={"suggested_state": "non_responsive", "confidence": confidence,
+                          "matched_terms": [], "rationale": "Synthetic newsletter."},
+            )
+    return request
+
+
+def _seed_redaction_proposal_case(officer):
+    """Seed responsive PDFs with pending phone-number redaction proposals.
+
+    The PDFs are real and stored in the e2e filesystem object store, and each
+    proposal's advisory run carries the input fingerprint the live builder
+    computes, so accepting one goes through the real create_redaction.
+    """
+    import io
+
+    import pymupdf as fitz
+    from django.conf import settings as django_settings
+
+    # The PDFs need somewhere to live. Only the browser run has the local
+    # store; the fixture's own unit tests seed without this case.
+    if not getattr(django_settings, "PRR_E2E_FILESYSTEM_OBJECT_STORE", ""):
+        return None
+
+    from apps.records.advisory_ai import advisory_input_sha256
+    from apps.records.models import ExemptionCitation, RedactionProposal
+    from apps.records.storage import generated_record_storage_key
+    from apps.secure_files import _object_store_client
+
+    requester, _ = Requester.objects.get_or_create(
+        email="staff-phones@example.org",
+        defaults={"id": _fixture_uuid("redaction-requester"), "name": "Staff Phones Requester"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_REDACTION_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("redaction-request"),
+            "requester": requester,
+            "description": "Coaching staff contact lists for spring 2026.",
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    if not created:
+        return request
+    exemption, _ = ExemptionCitation.objects.get_or_create(
+        citation="RCW 42.56.250(4)",
+        defaults={"short_name": "Employee personal contact information"},
+    )
+    client = _object_store_client()
+    for index in range(FIXTURE_REDACTION_RECORD_COUNT):
+        label = f"redaction-roster-{index}"
+        document = fitz.open()
+        page = document.new_page(width=612, height=792)
+        page.insert_text((72, 96), f"Coach roster {index}: cell 555-01{index:02d}.", fontsize=12)
+        pdf = document.tobytes()
+        document.close()
+        # A fresh generated key per seed, as ingest would make, so a store
+        # left over from an earlier run never collides.
+        key = generated_record_storage_key(request.pk, original_filename=f"{label}.pdf")
+        client.put_object(
+            Bucket=django_settings.OBJECT_STORE["bucket"], Key=key,
+            Body=io.BytesIO(pdf), IfNoneMatch="*",
+        )
+        item = RecordItem.objects.create(
+            pk=_fixture_uuid(label),
+            request=request,
+            source_system="fixture",
+            original_filename=f"synthetic-{label}.pdf",
+            storage_key=key,
+            content_length=len(pdf),
+            content_type="application/pdf",
+            sha256=hashlib.sha256(pdf).hexdigest(),
+            review_state=RecordItem.ReviewState.RESPONSIVE,
+            reviewed_by=officer,
+            reviewed_at=_BASE_TIME,
+        )
+        run = AdvisoryRun(
+            kind=AdvisoryRun.Kind.RECORD_REDACTIONS,
+            request=request,
+            record_item=item,
+            model_identifier="synthetic-redaction-model",
+            input_sha256="",
+            state=AdvisoryRun.State.COMPLETE,
+            requested_by=officer,
+        )
+        run.input_sha256 = advisory_input_sha256(run)
+        run.save()
+        RedactionProposal.objects.create(
+            advisory_run=run,
+            record_item=item,
+            page_number=1,
+            x0=0.1, y0=0.1, x1=0.5, y1=0.15,
+            exemption=exemption,
+            pattern=RedactionProposal.Pattern.PHONE,
+            confidence=0.93,
+            rationale="An employee's personal cell number.",
+            source_span_ids=["p1s1"],
+            source_text_sha256=hashlib.sha256(label.encode()).hexdigest(),
+        )
+    return request
+
+
+def _seed_release_case(officer):
+    """Seed a case whose reviewed records wait for "Build package" (#47).
+
+    Two responsive PDFs and one withheld record with its citation, stored in
+    the e2e filesystem object store, so the one-step build generates a real
+    exemption log and prepares a real package.
+    """
+    import io
+
+    import pymupdf as fitz
+    from django.conf import settings as django_settings
+
+    if not getattr(django_settings, "PRR_E2E_FILESYSTEM_OBJECT_STORE", ""):
+        return None
+
+    from apps.records.models import ExemptionCitation
+    from apps.records.storage import generated_record_storage_key
+    from apps.secure_files import _object_store_client
+
+    requester, _ = Requester.objects.get_or_create(
+        email="release@example.org",
+        defaults={"id": _fixture_uuid("release-requester"), "name": "Release Requester"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_RELEASE_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("release-request"),
+            "requester": requester,
+            "description": "Facilities committee agendas for spring 2026.",
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    if not created:
+        return request
+    exemption, _ = ExemptionCitation.objects.get_or_create(
+        citation="RCW 42.56.250(4)",
+        defaults={"short_name": "Employee personal contact information"},
+    )
+    client = _object_store_client()
+    for index, state in enumerate((
+        RecordItem.ReviewState.RESPONSIVE,
+        RecordItem.ReviewState.RESPONSIVE,
+        RecordItem.ReviewState.WITHHELD,
+    )):
+        label = f"release-agenda-{index}"
+        document = fitz.open()
+        page = document.new_page(width=612, height=792)
+        page.insert_text((72, 96), f"Facilities committee agenda {index}.", fontsize=12)
+        pdf = document.tobytes()
+        document.close()
+        key = generated_record_storage_key(request.pk, original_filename=f"{label}.pdf")
+        client.put_object(
+            Bucket=django_settings.OBJECT_STORE["bucket"], Key=key,
+            Body=io.BytesIO(pdf), IfNoneMatch="*",
+        )
+        RecordItem.objects.create(
+            pk=_fixture_uuid(label),
+            request=request,
+            source_system="fixture",
+            original_filename=f"synthetic-{label}.pdf",
+            storage_key=key,
+            content_length=len(pdf),
+            content_type="application/pdf",
+            sha256=hashlib.sha256(pdf).hexdigest(),
+            review_state=state,
+            withholding_exemption=exemption if state == RecordItem.ReviewState.WITHHELD else None,
+            reviewed_by=officer,
+            reviewed_at=_BASE_TIME,
+        )
+    return request
+
+
+def _seed_decision_batch_case(officer):
+    """Seed a case whose two unreviewed records an agent proposed marking
+    non-responsive, waiting in the Decisions queue (#43)."""
+    from apps.records.decision_batches import propose_decision_batch
+    from apps.records.models import DecisionBatch
+
+    requester, _ = Requester.objects.get_or_create(
+        email="decisions@example.org",
+        defaults={"id": _fixture_uuid("decision-requester"), "name": "Decision Requester"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_DECISION_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("decision-request"),
+            "requester": requester,
+            "description": "Transportation committee minutes for spring 2026.",
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    if not created:
+        return request
+    items = []
+    for index in range(2):
+        label = f"decision-newsletter-{index}"
+        items.append(RecordItem.objects.create(
+            pk=_fixture_uuid(label),
+            request=request,
+            source_system="fixture",
+            original_filename=f"synthetic-{label}.eml",
+            storage_key=f"fixtures/synthetic-{label}.eml",
+            content_length=64,
+            content_type="message/rfc822",
+            sha256=hashlib.sha256(label.encode()).hexdigest(),
+        ))
+    propose_decision_batch(
+        DecisionBatch.Kind.REVIEW,
+        {"record_item_ids": [str(item.pk) for item in items], "state": "non_responsive"},
+        actor=officer,
+        evidence_summary=(
+            "Both messages are the district newsletter sent to every staff "
+            "mailbox; neither mentions the transportation committee."
+        ),
+    )
+    return request
+
+
+def _seed_auto_closed_intake_case(officer, inbound_transport):
+    """Seed an email-created case the system closed as spam under the
+    intake trust ladder (#34), for the officer's one-click undo."""
+    from django.test import override_settings
+
+    from apps.configuration import runtime
+    from apps.records.intake_trust import auto_apply_intake_label
+    from apps.records.models import AdvisoryRun, IntakeAutoApplication
+
+    requester, _ = Requester.objects.get_or_create(
+        email="prize-desk@example.org",
+        defaults={"id": _fixture_uuid("auto-closed-requester"), "name": "Prize Desk"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_AUTO_CLOSED_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("auto-closed-request"),
+            "requester": requester,
+            "description": "Congratulations! Claim your synthetic cruise prize today.",
+            "channel": Channel.EMAIL,
+            "status": RequestStatus.RECEIVED,
+            "received_at": _BASE_TIME - timedelta(days=3),
+        },
+    )
+    if not created:
+        return request
+    received_at = _BASE_TIME - timedelta(days=3)
+    message = Correspondence.objects.create(
+        id=_fixture_uuid("auto-closed-correspondence"),
+        request=request,
+        direction=Correspondence.Direction.INBOUND,
+        kind=Correspondence.Kind.GENERAL,
+        status=Correspondence.Status.RECEIVED,
+        received_subject="You have won",
+        received_body=request.description,
+        received_sender="Prize Desk <prize-desk@example.org>",
+        received_recipients=["publicrecords@example.org"],
+        received_at=received_at,
+        matched_at=received_at,
+        provider="gmail",
+        provider_account="default",
+        provider_message_id="fixture-auto-closed-message",
+        provider_thread_id="fixture-auto-closed-thread",
+        created_by=inbound_transport,
+    )
+    raw_hash = hashlib.sha256(b"synthetic auto-closed message").hexdigest()
+    InboundCorrespondenceReceipt.objects.create(
+        id=_fixture_uuid("auto-closed-receipt"),
+        provider=message.provider,
+        provider_account=message.provider_account,
+        provider_message_id=message.provider_message_id,
+        provider_thread_id=message.provider_thread_id,
+        received_at=received_at,
+        envelope_sender=message.received_sender,
+        envelope_recipients=message.received_recipients,
+        parsing_status=InboundCorrespondenceReceipt.ParsingStatus.PARSED,
+        matching_status=InboundCorrespondenceReceipt.MatchingStatus.MATCHED,
+        match_method=InboundCorrespondenceReceipt.MatchMethod.EMAIL_INTAKE,
+        matched_request=request,
+        matched_correspondence=message,
+        matched_at=received_at,
+        quarantined=False,
+        raw_message_size=29,
+        raw_message_sha256=raw_hash,
+        payload_sha256=hashlib.sha256(b"auto-closed payload").hexdigest(),
+        idempotency_key="casework-e2e-auto-closed-receipt",
+        submitted_by=inbound_transport,
+        completed_at=received_at,
+    )
+    # As in production: the email that opened the case has its work item.
+    # The system's closure has no officer, so it leaves that item open.
+    reconcile_inbound_receipt(_fixture_uuid("auto-closed-receipt"))
+    run = AdvisoryRun.objects.create(
+        id=_fixture_uuid("auto-closed-advisory"),
+        kind=AdvisoryRun.Kind.INTAKE_CLASSIFICATION,
+        request=request,
+        trigger=AdvisoryRun.Trigger.AUTOMATIC,
+        model_identifier="fixture-intake-model",
+        input_sha256="0" * 64,
+        state=AdvisoryRun.State.COMPLETE,
+        completed_at=received_at,
+        proposal={
+            "label": "spam",
+            "target_case_number": None,
+            "confidence": 0.99,
+            "evidence": "Unsolicited prize offer; asks for no district records.",
+        },
+    )
+    keys = (
+        "PRR_TRUST_INTAKE_SPAM_MODE",
+        "PRR_TRUST_INTAKE_AUTO_MIN_CONFIDENCE",
+    )
+    with override_settings(
+        PRR_TRUST_INTAKE_SPAM_MODE="auto",
+        PRR_TRUST_INTAKE_AUTO_MIN_CONFIDENCE=95,
+    ):
+        for key in keys:
+            runtime.invalidate(key)
+        auto_apply_intake_label(run.pk)
+    for key in keys:
+        runtime.invalidate(key)
+    if not IntakeAutoApplication.objects.filter(request=request).exists():
+        raise CommandError(
+            f"{FIXTURE_AUTO_CLOSED_REQUEST_NUMBER} was not closed automatically; "
+            "a stored intake trust setting may be overriding the fixture."
+        )
+    return request
+
+
+def _seed_review_flight_case(officer):
+    """Seed unreviewed PDFs with written AI suggestions for keyboard review.
+
+    Seeded only when the e2e filesystem store exists, like the redaction
+    case; nothing here reviews a record.
+    """
+    import io
+
+    import pymupdf as fitz
+    from django.conf import settings as django_settings
+
+    if not getattr(django_settings, "PRR_E2E_FILESYSTEM_OBJECT_STORE", ""):
+        return None
+
+    from apps.records.storage import generated_record_storage_key
+    from apps.secure_files import _object_store_client
+
+    requester, _ = Requester.objects.get_or_create(
+        email="bus-route@example.org",
+        defaults={"id": _fixture_uuid("flight-requester"), "name": "Bus Route Requester"},
+    )
+    request, created = PublicRecordsRequest.objects.get_or_create(
+        number=FIXTURE_FLIGHT_REQUEST_NUMBER,
+        defaults={
+            "id": _fixture_uuid("flight-request"),
+            "requester": requester,
+            "description": "Records about route 12 in March 2026.",
+            "channel": Channel.PORTAL,
+            "status": RequestStatus.ACKNOWLEDGED,
+            "received_at": _BASE_TIME,
+            "assigned_officer": officer,
+        },
+    )
+    if not created:
+        return request
+    client = _object_store_client()
+    for label, text, suggested, confidence in FIXTURE_FLIGHT_RECORDS:
+        document = fitz.open()
+        page = document.new_page(width=612, height=792)
+        page.insert_text((72, 96), text, fontsize=12)
+        pdf = document.tobytes()
+        document.close()
+        key = generated_record_storage_key(request.pk, original_filename=f"{label}.pdf")
+        client.put_object(
+            Bucket=django_settings.OBJECT_STORE["bucket"], Key=key,
+            Body=io.BytesIO(pdf), IfNoneMatch="*",
+        )
+        item = RecordItem.objects.create(
+            pk=_fixture_uuid(label),
+            request=request,
+            source_system="fixture",
+            original_filename=f"synthetic-{label}.pdf",
+            storage_key=key,
+            content_length=len(pdf),
+            content_type="application/pdf",
+            sha256=hashlib.sha256(pdf).hexdigest(),
+        )
+        AdvisoryRun.objects.create(
+            kind=AdvisoryRun.Kind.RECORD_RESPONSIVENESS,
+            request=request,
+            record_item=item,
+            model_identifier="synthetic-review-model",
+            input_sha256=hashlib.sha256(f"{label}-run".encode()).hexdigest(),
+            state=AdvisoryRun.State.COMPLETE,
+            requested_by=officer,
+            proposal={"suggested_state": suggested, "confidence": confidence,
+                      "matched_terms": [], "rationale": f"Synthetic: {text}"},
+        )
+    return request
+
+
+def _seed_evaluation_run(officer, request):
+    """One synthetic model-comparison run for the AI evaluation screen.
+
+    AI is off in acceptance runs, so the metrics are written, not measured.
+    The set references a fixture case and carries no text.
+    """
+    evaluation_set, _ = EvaluationSet.objects.get_or_create(
+        pk=_fixture_uuid("evaluation-set"),
+        defaults={
+            "kind": EvaluationSet.Kind.INTAKE,
+            "examples": [
+                {"request_id": str(request.pk), "label": "new", "target_case_number": None},
+            ],
+            "label_counts": {"new": 1},
+            "created_by": officer,
+        },
+    )
+    result = {
+        "items": 1, "errors": 0, "safety_recall": 1.0, "target_accuracy": None,
+        "confusion": {"new": {"new": 1}}, "input_tokens_mean": 1200,
+        "output_tokens_mean": 80, "latency_p50_ms": 900, "latency_p95_ms": 900,
+        "predictions": [],
+    }
+    EvaluationRun.objects.get_or_create(
+        pk=_fixture_uuid("evaluation-run"),
+        defaults={
+            "evaluation_set": evaluation_set,
+            "model_identifiers": ["synthetic-model-a", "synthetic-model-b"],
+            "results": {
+                "synthetic-model-a": {**result, "accuracy": 1.0, "cost_per_item_usd": 0.0048},
+                "synthetic-model-b": {**result, "accuracy": 1.0, "cost_per_item_usd": None},
+            },
+            "created_by": officer,
+        },
+    )
+
+
+def _seed_knowledge_pack():
+    """Seed what the knowledge-pack flow edits: one registry system with no
+    search notes yet and one open-ended role account. Neither touches a case
+    or the work queue."""
+    RecordSystem.objects.get_or_create(
+        slug=FIXTURE_KNOWLEDGE_SYSTEM_SLUG,
+        defaults={
+            "name": "Fixture shared mailbox",
+            "category": "Email & documents",
+            "custodian_title": "Fixture office manager",
+            "triage_keywords": [],
+        },
+    )
+    KnowledgeRoleAccount.objects.get_or_create(
+        role=FIXTURE_KNOWLEDGE_ROLE,
+        defaults={
+            "account_email": "fixture.principal@example.org",
+            "starts_on": date(2024, 7, 1),
+        },
+    )
 
 
 def _seed_forwarded_requester_case(officer):
@@ -2374,6 +3216,17 @@ class Command(BaseCommand):
                 )
             _seed_awaiting_statutory_response_case(officer)
             _seed_forwarded_requester_case(officer)
+            supersede_request = _seed_supersede_case(officer)
+            _seed_evaluation_run(officer, supersede_request)
+            _seed_knowledge_pack()
+            _seed_estimate_letter_case(officer)
+            _seed_trust_ladder_case(officer)
+            _seed_redaction_proposal_case(officer)
+            _seed_review_flight_case(officer)
+            _seed_rescope_case(officer)
+            _seed_release_case(officer)
+            _seed_decision_batch_case(officer)
+            _seed_auto_closed_intake_case(officer, inbound_transport)
             _seed_email_intake_redirect_cases(officer, inbound_transport)
             _reconcile_fixture_inbound_work(request)
             _seed_role_work(

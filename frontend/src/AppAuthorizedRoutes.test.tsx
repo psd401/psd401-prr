@@ -33,7 +33,9 @@ vi.mock('./pages/WorkItem', () => ({
 }))
 vi.mock('./pages/Requests', () => ({ Requests: () => <h1>Cases child</h1> }))
 vi.mock('./pages/Inbox', () => ({ Inbox: () => <h1>Inbox child</h1> }))
+vi.mock('./pages/Today', () => ({ Today: () => <h1>Today child</h1> }))
 vi.mock('./pages/Review', () => ({ Review: () => <h1>Review child</h1> }))
+vi.mock('./pages/Decisions', () => ({ Decisions: () => <h1>Decisions child</h1> }))
 vi.mock('./pages/StaffIntake', () => ({
   StaffIntake: () => <h1>Staff Intake child</h1>,
 }))
@@ -56,6 +58,9 @@ vi.mock('./pages/MessageTemplates', () => ({
 vi.mock('./pages/Exemptions', () => ({
   Exemptions: () => <h1>Exemptions child</h1>,
 }))
+vi.mock('./pages/Knowledge', () => ({
+  Knowledge: () => <h1>Knowledge child</h1>,
+}))
 vi.mock('./pages/CounselDomains', () => ({
   CounselDomains: () => <h1>District counsel domains child</h1>,
 }))
@@ -70,8 +75,10 @@ import App from './App'
 
 const HEADING_BY_ROUTE: Record<string, string> = {
   '/cases': 'Cases child',
+  '/today': 'Today child',
   '/inbox': 'Inbox child',
   '/review': 'Review child',
+  '/decisions': 'Decisions child',
   '/staff-intake': 'Staff Intake child',
   '/oversight': 'Oversight child',
   '/configuration': 'Configuration child',
@@ -80,6 +87,7 @@ const HEADING_BY_ROUTE: Record<string, string> = {
   '/configuration/registry': 'System registry child',
   '/configuration/message-templates': 'Message templates child',
   '/configuration/exemptions': 'Exemptions child',
+  '/configuration/knowledge': 'Knowledge child',
   '/configuration/counsel-domains': 'District counsel domains child',
   '/configuration/settings': 'District settings child',
   '/configuration/correspondence': 'Message operations child',

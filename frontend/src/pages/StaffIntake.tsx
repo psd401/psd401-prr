@@ -161,8 +161,8 @@ export function StaffIntake() {
       <>
         <PageHeader title="Staff intake" />
         <Card>
-          <div role="alert" className="space-y-4 text-pacific">
-            <p className="font-heading text-sm font-semibold uppercase tracking-wide text-red-700">
+          <div role="alert" className="space-y-4 text-ink">
+            <p className="font-heading text-sm font-semibold uppercase tracking-wide text-danger-ink">
               Request retained; follow-up required
             </p>
             <p className="font-mono text-3xl font-bold">{processingFailureNumber}</p>
@@ -181,8 +181,8 @@ export function StaffIntake() {
       <>
         <PageHeader title="Staff intake" />
         <Card>
-          <div role="status" className="space-y-4 text-pacific">
-            <p className="font-heading text-sm font-semibold uppercase tracking-wide text-cedar">
+          <div role="status" className="space-y-4 text-ink">
+            <p className="font-heading text-sm font-semibold uppercase tracking-wide text-success-ink">
               Request logged
             </p>
             <p className="font-mono text-3xl font-bold">{createdNumber}</p>
@@ -271,7 +271,7 @@ export function StaffIntake() {
         </Card>
 
         <Card title="Response information">
-          <p className="mb-4 text-sm text-pacific/80">
+          <p className="mb-4 text-sm text-ink-muted">
             Provide at least one response method. Do not ask for identity or purpose beyond what is needed to respond.
           </p>
           <div className="grid gap-4 md:grid-cols-2">

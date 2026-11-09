@@ -6,7 +6,7 @@ tags: [architecture, authentication, api-tokens, agent, security]
 openwiki:
   roles: [architecture, integration]
   change_kinds: [authentication, token-lifecycle, public-api]
-  source_paths: [apps/api/access_tokens.py, apps/api/authentication.py, apps/api/models.py, apps/api/throttles.py, apps/api/urls.py, apps/configuration/registry.py]
+  source_paths: [apps/api/access_tokens.py, apps/api/authentication.py, apps/api/models.py, apps/api/throttles.py, apps/api/urls.py, apps/configuration/registry.py, frontend/src/pages/AgentAccess.tsx]
   symbols: [PersonalAccessTokenAuthentication, PersonalAccessTokenCollectionView, PersonalAccessTokenRotateView, PersonalAccessTokenDetailView, PersonalAccessTokenPermission, _create_token, _ensure_active_capacity, PersonalAccessToken, PersonalAccessTokenCreateThrottle]
   test_paths: [apps/api/tests/test_personal_api_tokens.py, apps/api/tests/test_personal_api_tokens_concurrency.py, apps/api/tests/test_agent_capabilities.py]
   invariants:
@@ -44,6 +44,14 @@ a prefix collides.
 
 The routes are in [`apps/api/urls.py`](../../apps/api/urls.py) under `/api/staff/auth/api-tokens/`.
 [`apps/api/access_tokens.py`](../../apps/api/access_tokens.py) implements them.
+
+Staff manage their own tokens on the Agent access screen at `/configuration/agent-access`
+(`frontend/src/pages/AgentAccess.tsx`, reachable by every staff role). It lists metadata,
+creates, rotates, and revokes through the routes above, and shows the presented secret
+once. The same screen reads the capability catalog from `/api/staff/capabilities/` to show
+which operations are direct, need human confirmation, or are human-only
+([agent parity](agent-parity.md#execution-policies)). The screen is a view over these
+rules. The server enforces the limits and the audit rows described below.
 
 | Operation | Route | Capability id | Effect |
 |---|---|---|---|
@@ -124,5 +132,13 @@ scoped service tokens, and the old plaintext self-service route is removed
   revalidation. `test_personal_api_tokens_concurrency` covers the active limit under races.
   Run the concurrency lane only when you change the locking or the count. Use
   `test_agent_capabilities` when you change the capability rows.
+- **Screen confirmations.** `frontend/src/pages/CredentialConfirmations.test.tsx` holds the
+  regression checks for destructive credential actions. It asserts that rotating or revoking
+  a personal token asks for confirmation before any `DELETE` or rotate request, in the Agent
+  access screen (`frontend/src/pages/AgentAccess.tsx`). It also asserts that a one-time
+  integration token shown after issue in `frontend/src/pages/IdentitySettings.tsx` is not
+  dismissed by a backdrop click or Escape. The screen does not enforce the rule, so a change
+  that drops the confirmation is a UI regression only, and the API still authorizes the call.
+  Run `cd frontend && bun run test -- src/pages/CredentialConfirmations.test.tsx`.
 - **Minimal validation.** `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_personal_api_tokens --settings=config.test_settings`.
   The concurrency label is `apps.api.tests.test_personal_api_tokens_concurrency`.

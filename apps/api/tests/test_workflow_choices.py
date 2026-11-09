@@ -68,9 +68,9 @@ class WorkflowChoiceApiTests(TestCase):
         self.assertEqual(
             capability["ui_routes"],
             [
-                "/requests/:number/overview",
+                "/requests/:number/intake",
                 "/requests/:number/messages",
-                "/requests/:number/collection",
+                "/requests/:number/collect",
             ],
         )
 

@@ -268,6 +268,22 @@ class NoRecordsClosureTests(OutboundDeliveryServiceTestCase):
         with self.assertRaisesMessage(ValidationError, "responsive records"):
             self.create_draft()
 
+    def test_records_from_a_superseded_collection_allow_a_no_records_closure(self):
+        RecordItem.objects.create(
+            request=self.prr,
+            storage_key=f"records/{self.prr.pk}/superseded.pdf",
+            sha256="c" * 64,
+            content_length=1,
+            content_type="application/pdf",
+            review_state=RecordItem.ReviewState.SUPERSEDED,
+            reviewed_by=self.officer,
+            reviewed_at=timezone.now(),
+        )
+
+        draft = self.create_draft()
+
+        self.assertEqual(draft.kind, draft.Kind.NO_RECORDS_CLOSURE)
+
     def test_approval_revalidates_candidate_record_snapshot(self):
         draft = self.create_draft()
         RecordItem.objects.create(

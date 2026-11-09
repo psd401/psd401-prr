@@ -11,13 +11,17 @@ import {
   LegacyRequestRedirect,
 } from './case/LegacyScopedRoutes'
 import { AgentAccess } from './pages/AgentAccess'
+import { AiAgreement } from './pages/AiAgreement'
+import { AiEvaluation } from './pages/AiEvaluation'
 import { Audit } from './pages/Audit'
 import { Correspondence } from './pages/Correspondence'
+import { Decisions } from './pages/Decisions'
 import { Exemptions } from './pages/Exemptions'
 import { CounselDomains } from './pages/CounselDomains'
 import { DistrictSettings } from './pages/DistrictSettings'
 import { Inbox } from './pages/Inbox'
 import { IdentitySettings } from './pages/IdentitySettings'
+import { Knowledge } from './pages/Knowledge'
 import { Login } from './pages/Login'
 import { MessageTemplates } from './pages/MessageTemplates'
 import { WorkItemDetail } from './pages/WorkItem'
@@ -27,6 +31,7 @@ import { Registry } from './pages/Registry'
 import { Reporting } from './pages/Reporting'
 import { Review } from './pages/Review'
 import { ConfigurationIndex, OversightIndex } from './pages/SectionIndex'
+import { Today } from './pages/Today'
 import { StaffIntake } from './pages/StaffIntake'
 import { EmptyState, Spinner } from './ui'
 
@@ -78,13 +83,17 @@ function StaffApp() {
           path="requests/:number/:tab"
           element={guard(<CaseWorkspace roles={user.roles} />)}
         />
+        <Route path="today" element={guard(<Today />)} />
         <Route path="inbox" element={guard(<Inbox roles={user.roles} />)} />
         <Route path="review" element={guard(<Review />)} />
+        <Route path="decisions" element={guard(<Decisions />)} />
         <Route path="staff-intake" element={guard(<StaffIntake />)} />
 
         <Route path="oversight" element={guard(<OversightIndex roles={user.roles} />)} />
         <Route path="oversight/reporting" element={guard(<Reporting roles={user.roles} />)} />
         <Route path="oversight/audit" element={guard(<Audit />)} />
+        <Route path="oversight/ai-evaluation" element={guard(<AiEvaluation />)} />
+        <Route path="oversight/ai-agreement" element={guard(<AiAgreement />)} />
 
         <Route
           path="configuration"
@@ -104,6 +113,7 @@ function StaffApp() {
           path="configuration/exemptions"
           element={guard(<Exemptions roles={user.roles} />)}
         />
+        <Route path="configuration/knowledge" element={guard(<Knowledge />)} />
         <Route path="configuration/counsel-domains" element={guard(<CounselDomains />)} />
         <Route path="configuration/settings" element={guard(<DistrictSettings />)} />
         <Route

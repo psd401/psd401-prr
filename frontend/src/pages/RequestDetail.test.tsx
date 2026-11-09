@@ -87,7 +87,8 @@ function fakeResponse(body: unknown, status = 200): Response {
 
 function renderPage(
   roles: StaffRole[] = ['records_officer'],
-  mode: 'overview' | 'collection' = 'overview',
+  mode: 'overview' | 'scope' | 'collection' | 'close' = 'overview',
+  entry = '/requests/PRR-2026-0001',
 ) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -95,7 +96,7 @@ function renderPage(
   const rendered = render(
     <QueryClientProvider client={qc}>
       <ToastProvider>
-        <MemoryRouter initialEntries={['/requests/PRR-2026-0001']}>
+        <MemoryRouter initialEntries={[entry]}>
           <Routes>
             <Route
               path="/requests/:number"
@@ -109,12 +110,12 @@ function renderPage(
   return { ...rendered, queryClient: qc }
 }
 
-// The advisory and Vault-scoping surfaces live on the Collection tab.
-function renderCollection(roles: StaffRole[] = ['records_officer']) {
-  return renderPage(roles, 'collection')
+// The advisory and Vault-scoping surfaces live on the Scope stage (#45).
+function renderScope(roles: StaffRole[] = ['records_officer']) {
+  return renderPage(roles, 'scope')
 }
 
-// A Collection tab with no advisory proposal and no recorded Vault count,
+// A Scope stage with no advisory proposal and no recorded Vault count,
 // where queueing a count is accepted. The end-date tests only differ in what
 // the officer does with the form.
 function vaultCountFetchMock(countId: string) {
@@ -186,6 +187,42 @@ describe('RequestDetail', () => {
       expect(screen.queryByText(/unknown/i)).not.toBeInTheDocument()
     },
   )
+
+  it('folds a long request to its opening and shows all of it on request', async () => {
+    const thread = Array.from({ length: 30 }, (_, line) => `Quoted line ${line + 1}`).join('\n')
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') {
+        return fakeResponse({ ...DETAIL, description: thread })
+      }
+      if (url.endsWith('/advisory-intent/')) return fakeResponse({ enabled: true, latest: null })
+      if (url.endsWith('/vault-counts/')) return fakeResponse({ enabled: true, corpus: 'MAIL', latest: null })
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    }))
+    const user = userEvent.setup()
+    renderPage()
+
+    const toggle = await screen.findByRole('button', { name: 'Show full request' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    // The whole text is always in the page, unaltered; folding only clips it.
+    expect(screen.getByText(/Quoted line 30/)).toBeInTheDocument()
+    await user.click(toggle)
+    expect(screen.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('shows a short request whole, with nothing to unfold', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url.endsWith('/advisory-intent/')) return fakeResponse({ enabled: true, latest: null })
+      if (url.endsWith('/vault-counts/')) return fakeResponse({ enabled: true, corpus: 'MAIL', latest: null })
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    }))
+    renderPage()
+
+    expect(await screen.findByText('All emails about the bond levy.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Show full request' })).not.toBeInTheDocument()
+  })
 
   it('explains the five-day safety-net schedule on the case itself', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -323,7 +360,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
     expect(await screen.findByText(/permanently not applied/i)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Run advisory' }))
 
@@ -376,7 +413,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
     const query = await screen.findByLabelText('Vault search query')
     expect(query).toHaveValue(
       '"Jordan Sample" AND ("educational records" OR "counseling records")',
@@ -385,7 +422,7 @@ describe('RequestDetail', () => {
     await user.type(screen.getByLabelText('Start date'), '2026-01-01')
     await user.clear(screen.getByLabelText('End date'))
     await user.type(screen.getByLabelText('End date'), '2026-06-30')
-    await user.click(screen.getByRole('button', { name: 'Count possible messages' }))
+    await user.click(screen.getByRole('button', { name: 'Count possible items' }))
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/staff/requests/PRR-2026-0001/vault-counts/',
@@ -400,7 +437,69 @@ describe('RequestDetail', () => {
         }),
       }),
     )
-    expect(screen.getByText(/does not create an export, hold, collection task/i)).toBeInTheDocument()
+    expect(screen.getByText(/does not create a hold, collection task/i)).toBeInTheDocument()
+  })
+
+  it('fills the Vault dates and accounts from the AI reading of the request', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url.endsWith('/advisory-intent/')) {
+        return fakeResponse({
+          enabled: true,
+          latest: {
+            id: 'advisory-2', state: 'complete', model_identifier: 'approved-model-v1',
+            input_sha256: 'e'.repeat(64), input_truncated: false, applied: false,
+            proposal: {
+              required_search_terms: ['bus route'],
+              search_terms: [],
+              custodians: ['transport@psd401.net', 'principal@psd401.net'],
+              // An end past receipt is held to the receipt date.
+              date_range: { start: '2026-01-01', end: '2026-12-31' },
+            },
+            failure_detail: '',
+          },
+        })
+      }
+      if (url.endsWith('/vault-counts/')) return fakeResponse({ enabled: true, corpus: 'MAIL', latest: null })
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderScope()
+
+    await waitFor(() => expect(screen.getByLabelText('Start date')).toHaveValue('2026-01-01'))
+    expect(screen.getByLabelText('End date')).toHaveValue('2026-07-01')
+    expect(screen.getByLabelText('Custodian accounts')).toHaveValue(
+      'transport@psd401.net\nprincipal@psd401.net',
+    )
+  })
+
+  it('uses an AI end date that falls before the receipt date', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url.endsWith('/advisory-intent/')) {
+        return fakeResponse({
+          enabled: true,
+          latest: {
+            id: 'advisory-3', state: 'complete', model_identifier: 'approved-model-v1',
+            input_sha256: 'e'.repeat(64), input_truncated: false, applied: false,
+            proposal: { required_search_terms: ['bus route'], search_terms: [],
+              date_range: { start: null, end: '2026-03-31' } },
+            failure_detail: '',
+          },
+        })
+      }
+      if (url.endsWith('/vault-counts/')) return fakeResponse({ enabled: true, corpus: 'MAIL', latest: null })
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderScope()
+
+    await waitFor(() => expect(screen.getByLabelText('End date')).toHaveValue('2026-03-31'))
+    expect(screen.getByLabelText('Start date')).toHaveValue('')
   })
 
   it('defaults the Vault end date to the receipt date and sends it unedited', async () => {
@@ -408,7 +507,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
 
     // Responsive records are those in existence when the request arrived, so
     // the officer should not have to retype the case's own receipt date.
@@ -417,7 +516,7 @@ describe('RequestDetail', () => {
 
     await user.type(screen.getByLabelText('Vault search query'), 'contract')
     await user.type(screen.getByLabelText('Custodian accounts'), 'superintendent@psd401.net')
-    await user.click(screen.getByRole('button', { name: 'Count possible messages' }))
+    await user.click(screen.getByRole('button', { name: 'Count possible items' }))
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/staff/requests/PRR-2026-0001/vault-counts/',
@@ -434,19 +533,59 @@ describe('RequestDetail', () => {
     )
   })
 
+  it('never overwrites Vault fields the officer changed before the AI reading arrived', async () => {
+    let reads = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url.endsWith('/advisory-intent/')) {
+        reads += 1
+        const done = reads > 1
+        return fakeResponse({
+          enabled: true,
+          latest: {
+            id: 'advisory-4', state: done ? 'complete' : 'running', model_identifier: 'approved-model-v1',
+            input_sha256: 'e'.repeat(64), input_truncated: false, applied: false,
+            proposal: done
+              ? { required_search_terms: ['bus route'], search_terms: [],
+                  custodians: ['transport@psd401.net'],
+                  date_range: { start: '2026-01-01', end: '2026-03-31' } }
+              : {},
+            failure_detail: '',
+          },
+        })
+      }
+      if (url.endsWith('/vault-counts/')) return fakeResponse({ enabled: true, corpus: 'MAIL', latest: null })
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderScope()
+    await user.clear(await screen.findByLabelText('End date'))
+    await user.type(screen.getByLabelText('Start date'), '2025-09-01')
+    await user.type(screen.getByLabelText('Custodian accounts'), 'clerk@psd401.net')
+
+    await waitFor(() => expect(reads).toBeGreaterThan(1), { timeout: 4000 })
+    await waitFor(() => expect(screen.getByLabelText('Vault search query')).toHaveValue('"bus route"'))
+    expect(screen.getByLabelText('End date')).toHaveValue('')
+    expect(screen.getByLabelText('Start date')).toHaveValue('2025-09-01')
+    expect(screen.getByLabelText('Custodian accounts')).toHaveValue('clerk@psd401.net')
+  })
+
   it('keeps an officer-cleared Vault end date empty', async () => {
     const fetchMock = vaultCountFetchMock('count-3')
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
 
     // The default is a starting point, not a floor: clearing it must stick
     // rather than be refilled by the effect that supplied it.
     await user.clear(await screen.findByLabelText('End date'))
     await user.type(screen.getByLabelText('Vault search query'), 'contract')
     await user.type(screen.getByLabelText('Custodian accounts'), 'superintendent@psd401.net')
-    await user.click(screen.getByRole('button', { name: 'Count possible messages' }))
+    await user.click(screen.getByRole('button', { name: 'Count possible items' }))
 
     expect(screen.getByLabelText('End date')).toHaveValue('')
     expect(fetchMock).toHaveBeenCalledWith(
@@ -504,10 +643,10 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
     await screen.findByLabelText('Vault search query')
     await user.click(screen.getByRole('radio', { name: 'All district accounts' }))
-    const button = screen.getByRole('button', { name: 'Count possible messages' })
+    const button = screen.getByRole('button', { name: 'Count possible items' })
     expect(button).toBeEnabled()
     await user.click(button)
 
@@ -551,10 +690,98 @@ describe('RequestDetail', () => {
       return fakeResponse({ count: 0, next: null, previous: null, results: [] })
     }))
 
-    renderCollection()
+    renderScope()
 
     expect(await screen.findByText('1,842 possible Gmail messages')).toBeInTheDocument()
     expect(screen.getAllByText(/not a responsiveness determination/i)).toHaveLength(2)
+  })
+
+  it('shows a total per source and offers collection when only Drive is uncounted', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url.endsWith('/vault-counts/')) {
+        return fakeResponse({
+          enabled: true, corpus: 'MAIL', sources: ['mail', 'drive', 'chat'], latest: {
+            id: 'count-3', state: 'complete', corpus: 'MAIL', terms: 'project',
+            sources: ['mail', 'drive', 'chat'],
+            source_counts: [
+              { source: 'mail', label: 'Gmail', state: 'counted', count: 0, reason: '' },
+              {
+                source: 'drive', label: 'Drive', state: 'unavailable', count: null,
+                reason: 'Google Vault could not count Drive files.',
+              },
+              { source: 'chat', label: 'Chat', state: 'counted', count: 0, reason: '' },
+            ],
+            collectable: true,
+            collection_tasks: [],
+            custodian_emails: ['superintendent@psd401.net'],
+            date_range_start: null, date_range_end: null,
+            input_sha256: 'f'.repeat(64), requested_by_username: 'officer',
+            collection_task_id: null, collection_task_state: null,
+            collection_task_retryable: false,
+            total_count: 0, queried_accounts_count: 1,
+            matching_accounts_count: 0, non_queryable_accounts_count: 0,
+            accounts_with_errors_count: 0, failure_code: '', failure_detail: '',
+            created_at: '2026-08-10T12:00:00Z',
+            started_at: '2026-08-10T12:00:01Z', completed_at: '2026-08-10T12:00:10Z',
+          },
+        })
+      }
+      if (url.endsWith('/advisory-intent/')) {
+        return fakeResponse({ enabled: true, latest: null })
+      }
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    }))
+
+    renderScope()
+
+    expect(
+      await screen.findByText('0 possible items across Gmail, Drive, and Chat'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('Not available: Google Vault could not count Drive files.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Start Vault collection' })).toBeInTheDocument()
+  })
+
+  it('shows each source while a count is still running', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/staff/requests/PRR-2026-0001/') return fakeResponse(DETAIL)
+      if (url.endsWith('/vault-counts/')) {
+        return fakeResponse({
+          enabled: true, corpus: 'MAIL', latest: {
+            id: 'count-4', state: 'running', corpus: 'MAIL', terms: 'project',
+            sources: ['mail', 'drive', 'chat'],
+            source_counts: [
+              { source: 'mail', label: 'Gmail', state: 'counted', count: 12, reason: '' },
+              { source: 'drive', label: 'Drive', state: 'counting', count: null, reason: '' },
+              { source: 'chat', label: 'Chat', state: 'counting', count: null, reason: '' },
+            ],
+            collectable: false, collection_tasks: [],
+            custodian_emails: ['superintendent@psd401.net'],
+            date_range_start: null, date_range_end: null,
+            input_sha256: 'f'.repeat(64), requested_by_username: 'officer',
+            collection_task_id: null, collection_task_state: null,
+            collection_task_retryable: false,
+            total_count: null, queried_accounts_count: null,
+            matching_accounts_count: null, non_queryable_accounts_count: null,
+            accounts_with_errors_count: null, failure_code: '', failure_detail: '',
+            created_at: '2026-08-10T12:00:00Z', started_at: null, completed_at: null,
+          },
+        })
+      }
+      if (url.endsWith('/advisory-intent/')) {
+        return fakeResponse({ enabled: true, latest: null })
+      }
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    }))
+
+    renderScope()
+
+    expect(await screen.findByText('12 messages')).toBeInTheDocument()
+    expect(screen.getAllByText('Counting…')).toHaveLength(2)
   })
 
   it('requires explicit confirmation before turning the reviewed count into collection work', async () => {
@@ -598,7 +825,7 @@ describe('RequestDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderCollection()
+    renderScope()
     await screen.findByText('1,842 possible Gmail messages')
     await user.click(screen.getByRole('button', { name: 'Start Vault collection' }))
 
@@ -651,7 +878,7 @@ describe('RequestDetail', () => {
       return fakeResponse({ count: 0, next: null, previous: null, results: [] })
     }))
 
-    renderCollection()
+    renderScope()
 
     expect(await screen.findByText(/failed before a Vault export was recorded/i))
       .toBeInTheDocument()
@@ -1410,7 +1637,7 @@ describe('a matter governed by other law', () => {
       .toBeInTheDocument()
     // The 45-day FERPA date is shown; the five-day RCW row is not there at all.
     expect(screen.getByText('FERPA access due (45 days)')).toBeInTheDocument()
-    expect(screen.getByText('2026-08-15')).toBeInTheDocument()
+    expect(screen.getByText('Aug 15, 2026')).toBeInTheDocument()
     expect(screen.queryByText('Statutory response due')).not.toBeInTheDocument()
     expect(screen.queryByText('Tolled business days')).not.toBeInTheDocument()
     // The safety net never sees this matter, so the card must not claim it
@@ -1542,5 +1769,71 @@ describe('a first response sent outside this system', () => {
     expect(
       screen.queryByRole('button', { name: 'Record a response sent outside this system…' }),
     ).not.toBeInTheDocument()
+  })
+  it('a confirmed duplicate label opens the merge dialog prefilled', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/advisory-intake/feedback/')) {
+        expect(init?.method).toBe('POST')
+        return fakeResponse({ outcome: 'confirmed' }, 201)
+      }
+      if (url.endsWith('/advisory-intake/')) {
+        return fakeResponse({
+          enabled: true,
+          latest: {
+            id: 'run-1',
+            state: 'complete',
+            model_identifier: 'us.anthropic.claude-opus-5-5',
+            proposal: {
+              label: 'duplicate_of',
+              target_case_number: 'PRR-2026-0048',
+              confidence: 0.9,
+              evidence: 'Same wording.',
+            },
+            failure_detail: '',
+          },
+          feedback: null,
+        })
+      }
+      return fakeResponse(DETAIL)
+    }))
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Correct' }))
+
+    const heading = await screen.findByRole('heading', { name: 'Merge into case' })
+    const dialog = heading.closest('dialog') as HTMLElement
+    expect(within(dialog).getByLabelText(/^Merge into case number/)).toHaveValue('PRR-2026-0048')
+    expect(
+      (within(dialog).getByLabelText(/^Reason/) as HTMLTextAreaElement).value,
+    ).toContain('duplicate of PRR-2026-0048')
+  })
+
+  it('opens the prefilled action when Correct was pressed on the Inbox row', async () => {
+    // #33: Inbox Correct already recorded agreement; the case opens the same
+    // prefilled dialog, and the officer still reads and submits it.
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/advisory-intake/')) {
+        return fakeResponse({ enabled: true, latest: null, feedback: null, auto_applied: null })
+      }
+      return fakeResponse(DETAIL)
+    }))
+    renderPage(
+      ['records_officer'],
+      'overview',
+      '/requests/PRR-2026-0001?intake_action=duplicate_of&intake_target=PRR-2026-0048',
+    )
+
+    const heading = await screen.findByRole('heading', { name: 'Merge into case' })
+    const dialog = heading.closest('dialog') as HTMLElement
+    expect(within(dialog).getByLabelText(/^Merge into case number/)).toHaveValue('PRR-2026-0048')
+  })
+
+  it('ignores an Inbox action for someone who is not a Records Officer', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse({ ...DETAIL, requester: null })))
+    renderPage(['liaison'], 'overview', '/requests/PRR-2026-0001?intake_action=duplicate_of&intake_target=PRR-2026-0048')
+    await screen.findByText('Running log')
+    expect(screen.queryByRole('heading', { name: 'Merge into case' })).not.toBeInTheDocument()
   })
 })

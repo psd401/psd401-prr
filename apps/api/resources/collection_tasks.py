@@ -3,14 +3,23 @@
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
-from django.db.models import F
+from django.db.models import Count, F, Q
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import mixins, serializers, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
+from apps.api.handoffs import human_only_handoff
 from apps.api.identity import StaffRole, has_staff_role
+from apps.records.collection_supersession import supersede_collection
 from apps.records.fees import assert_deposit_gate_clear
-from apps.records.models import CollectionTask, FeeDepositGate, VaultIngestRun
+from apps.records.models import (
+    CollectionTask,
+    FeeDepositGate,
+    RecordItem,
+    VaultIngestRun,
+)
 
 User = get_user_model()
 
@@ -36,6 +45,14 @@ class VaultIngestProgressSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+SOURCE_LABELS = {
+    CollectionTask.Kind.VAULT_MAIL: "Google Workspace (Gmail)",
+    CollectionTask.Kind.VAULT_DRIVE: "Google Workspace (Drive)",
+    CollectionTask.Kind.VAULT_CHAT: "Google Workspace (Chat)",
+    CollectionTask.Kind.MANUAL: "Manual / department",
+}
+
+
 class CollectionTaskSerializer(serializers.ModelSerializer):
     request_number = serializers.CharField(source="request.number", read_only=True)
     system_name = serializers.SerializerMethodField()
@@ -50,18 +67,22 @@ class CollectionTaskSerializer(serializers.ModelSerializer):
     assigned_to_username = serializers.SerializerMethodField()
     source_vault_count_id = serializers.UUIDField(read_only=True)
     vault_ingest = serializers.SerializerMethodField()
+    source_label = serializers.SerializerMethodField()
+    records_created = serializers.SerializerMethodField()
+    records_unreviewed = serializers.SerializerMethodField()
 
     class Meta:
         model = CollectionTask
         fields = [
             "id", "request", "request_number",
             "system_name", "system_slug", "system_urgent_hold",
-            "kind", "state", "instructions", "custodian_emails", "search_terms",
+            "kind", "state", "trigger", "instructions", "custodian_emails", "search_terms",
             "date_range_start", "date_range_end",
             "source_vault_count_id",
             "assigned_to_id", "assigned_to_username", "due_date",
             "vault_matter_id", "vault_hold_id", "vault_export_id",
             "vault_ingest", "created_at", "completed_at",
+            "source_label", "records_created", "records_unreviewed",
         ]
         read_only_fields = [
             "id", "source_vault_count_id",
@@ -84,6 +105,31 @@ class CollectionTaskSerializer(serializers.ModelSerializer):
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_assigned_to_username(self, obj):
         return obj.assigned_to.username if obj.assigned_to_id else None
+
+    @extend_schema_field(serializers.CharField())
+    def get_source_label(self, obj):
+        """Where the collection searched: its record system, else its kind.
+
+        A Vault task has no record system; naming it from its kind keeps the
+        Collect stage card from showing a dash (#45).
+        """
+        if obj.system_id:
+            return obj.system.name
+        return SOURCE_LABELS.get(obj.kind, obj.get_kind_display())
+
+    @extend_schema_field(serializers.IntegerField())
+    def get_records_created(self, obj):
+        counted = getattr(obj, "_records_created", None)
+        return counted if counted is not None else obj.recorditem_set.count()
+
+    @extend_schema_field(serializers.IntegerField())
+    def get_records_unreviewed(self, obj):
+        counted = getattr(obj, "_records_unreviewed", None)
+        if counted is not None:
+            return counted
+        return obj.recorditem_set.filter(
+            review_state=RecordItem.ReviewState.UNREVIEWED,
+        ).count()
 
     @extend_schema_field(VaultIngestProgressSerializer(allow_null=True))
     def get_vault_ingest(self, obj):
@@ -109,10 +155,7 @@ class CollectionTaskSerializer(serializers.ModelSerializer):
                 {"state": "Ingesting is managed by the Vault export poller."}
             )
         instance = self.instance
-        vault_kinds = {
-            CollectionTask.Kind.VAULT_MAIL,
-            CollectionTask.Kind.VAULT_DRIVE,
-        }
+        vault_kinds = set(CollectionTask.VAULT_KINDS)
         kind = attrs.get("kind", instance.kind if instance else CollectionTask.Kind.MANUAL)
         if instance is None and kind in vault_kinds:
             raise serializers.ValidationError(
@@ -273,6 +316,10 @@ class CollectionTaskSerializer(serializers.ModelSerializer):
         )
 
 
+class SupersedeCollectionInputSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=2000)
+
+
 class CollectionTaskViewSet(mixins.ListModelMixin,
                              mixins.RetrieveModelMixin,
                              mixins.CreateModelMixin,
@@ -287,11 +334,19 @@ class CollectionTaskViewSet(mixins.ListModelMixin,
         "retrieve": {StaffRole.RECORDS_OFFICER, StaffRole.LIAISON, StaffRole.ADMIN},
         "create": {StaffRole.RECORDS_OFFICER},
         "partial_update": {StaffRole.RECORDS_OFFICER, StaffRole.LIAISON},
+        "supersede": {StaffRole.RECORDS_OFFICER},
     }
 
     def get_queryset(self):
         qs = CollectionTask.objects.select_related(
             "request", "system", "assigned_to", "vault_ingest_run"
+        ).annotate(
+            _records_created=Count("recorditem", distinct=True),
+            _records_unreviewed=Count(
+                "recorditem",
+                filter=Q(recorditem__review_state=RecordItem.ReviewState.UNREVIEWED),
+                distinct=True,
+            ),
         )
         if has_staff_role(self.request.user, StaffRole.LIAISON) and not has_staff_role(
             self.request.user, StaffRole.RECORDS_OFFICER
@@ -311,6 +366,41 @@ class CollectionTaskViewSet(mixins.ListModelMixin,
             qs = qs.filter(system__urgent_hold=True)
 
         return qs.order_by(F("due_date").asc(nulls_last=True), "id")
+
+    @action(detail=True, methods=["post"], url_path="supersede")
+    def supersede(self, request, pk=None):
+        """Take this collection's unreviewed records out of review.
+
+        Nothing is deleted. Records a reviewer already decided are untouched;
+        the rest leave the review and release queues with a recorded reason.
+        """
+        # A decision batch replaces this for token callers (#43): an agent
+        # proposes, the accountable person approves in the staff application.
+        handoff = human_only_handoff(
+            request,
+            capability_id="collection_tasks.supersede",
+            action="Propose a supersede decision batch, or supersede in the staff application.",
+            required_role="records_officer",
+        )
+        if handoff is not None:
+            return handoff
+        payload = SupersedeCollectionInputSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        task = self.get_object()
+        try:
+            result = supersede_collection(
+                task.pk,
+                actor=request.user,
+                reason=payload.validated_data["reason"],
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                getattr(exc, "message_dict", None) or exc.messages
+            ) from exc
+        return Response({
+            "collection_task_id": result.collection_task_id,
+            "record_count": result.record_count,
+        })
 
 
 def register(router):

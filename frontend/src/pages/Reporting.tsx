@@ -141,9 +141,9 @@ function ClaimBreakdown({
 
   return (
     <fieldset className="space-y-2">
-      <legend className="font-heading text-sm font-semibold text-pacific">{label}</legend>
+      <legend className="font-heading text-sm font-semibold text-ink">{label}</legend>
       {rows.length === 0 && (
-        <p className="text-sm text-pacific/80">None recorded.</p>
+        <p className="text-sm text-ink-muted">None recorded.</p>
       )}
       {rows.map(([key, count], index) => (
         <div key={index} className="flex flex-wrap items-end gap-2">
@@ -292,7 +292,7 @@ export function Reporting({ roles }: { roles: StaffRole[] }) {
         <Card title="Annual inputs required">
           <div className="space-y-3">
             <ErrorNote error={report.error} />
-            <p className="text-sm text-pacific/80">
+            <p className="text-sm text-ink-muted">
               Finance, HR, risk-management, litigation, retention, and unallocated-time totals cannot be inferred safely. A Records Officer must record their reconciled source and methodology before the worksheet is generated.
             </p>
           </div>
@@ -303,14 +303,14 @@ export function Reporting({ roles }: { roles: StaffRole[] }) {
             title={`${year} JLARC worksheet`}
             actions={(
               <a
-                className="inline-flex rounded-lg bg-cedar px-3.5 py-2 font-heading text-sm font-semibold text-white hover:bg-pacific"
+                className="inline-flex rounded-lg bg-action px-3.5 py-2 font-heading text-sm font-semibold text-on-action hover:bg-action-hover"
                 href={`/api/staff/jlarc-reports/${year}/export-csv/`}
               >
                 Download transfer worksheet
               </a>
             )}
           >
-            <div className="space-y-3 text-sm text-pacific">
+            <div className="space-y-3 text-sm text-ink">
               <p>{report.data.guidance.submission}</p>
               <p>
                 <Badge tone="blue">Supplement revision {report.data.supplement.revision}</Badge>{' '}
@@ -322,7 +322,7 @@ export function Reporting({ roles }: { roles: StaffRole[] }) {
 
           {report.data.quality_warnings.length > 0 && (
             <Card title="Data quality review">
-              <ul className="list-disc space-y-2 pl-5 text-sm text-amber-900">
+              <ul className="list-disc space-y-2 pl-5 text-sm text-warning-ink">
                 {report.data.quality_warnings.map((warning) => <li key={warning}>{warning}</li>)}
               </ul>
             </Card>
@@ -331,9 +331,9 @@ export function Reporting({ roles }: { roles: StaffRole[] }) {
           <Card title="Baseline">
             <dl className="grid gap-3 md:grid-cols-5">
               {Object.entries(report.data.baseline).map(([field, value]) => (
-                <div key={field} className="rounded-lg bg-skylight p-3">
-                  <dt className="text-xs text-pacific/80">{field.replaceAll('_', ' ')}</dt>
-                  <dd className="font-mono text-2xl font-bold text-pacific">{value}</dd>
+                <div key={field} className="rounded-lg bg-surface-sunken p-3">
+                  <dt className="text-xs text-ink-muted">{field.replaceAll('_', ' ')}</dt>
+                  <dd className="font-mono text-2xl font-bold text-ink">{value}</dd>
                 </div>
               ))}
             </dl>
@@ -342,12 +342,12 @@ export function Reporting({ roles }: { roles: StaffRole[] }) {
           <div className="grid gap-4 lg:grid-cols-2">
             {Object.entries(report.data.metrics).map(([metricId, metric]) => (
               <Card key={metricId} title={metric.label}>
-                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-pacific/80">Metric {metricId}</p>
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">Metric {metricId}</p>
                 <dl className="space-y-2 text-sm">
                   {Object.entries(metric).filter(([field]) => field !== 'label').map(([field, value]) => (
-                    <div key={field} className="flex justify-between gap-4 border-b border-driftwood/30 pb-1">
-                      <dt className="text-pacific/80">{field.replaceAll('_', ' ')}</dt>
-                      <dd className="max-w-[60%] text-right font-mono text-pacific">{displayValue(value)}</dd>
+                    <div key={field} className="flex justify-between gap-4 border-b border-line pb-1">
+                      <dt className="text-ink-muted">{field.replaceAll('_', ' ')}</dt>
+                      <dd className="max-w-[60%] text-right font-mono text-ink">{displayValue(value)}</dd>
                     </div>
                   ))}
                 </dl>
@@ -390,7 +390,7 @@ export function Reporting({ roles }: { roles: StaffRole[] }) {
         onClose={() => setRecordingInputs(false)}
       >
         <form className="space-y-5" onSubmit={submitSupplement}>
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             Record reconciled totals for {year}. This creates an immutable revision; it does not submit anything to JLARC.
           </p>
           <div className="grid gap-4 md:grid-cols-3">
@@ -446,7 +446,7 @@ export function Reporting({ roles }: { roles: StaffRole[] }) {
               onChange={(event) => setSupplement({ ...supplement, methodology_notes: event.target.value })}
             />
           </Field>
-          {formError && <p role="alert" className="text-sm text-red-800">{formError}</p>}
+          {formError && <p role="alert" className="text-sm text-danger-ink">{formError}</p>}
           {saveSupplement.isError && <ErrorNote error={saveSupplement.error} />}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setRecordingInputs(false)}>Cancel</Button>
@@ -469,7 +469,7 @@ export function Reporting({ roles }: { roles: StaffRole[] }) {
             if (classifying) saveClassification.mutate({ row: classifying, body: classification })
           }}
         >
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             Use only information already volunteered or established by the file. Do not contact or prompt the requester for identity or requester type.
           </p>
           <Field label="Requester type">
@@ -502,7 +502,7 @@ export function Reporting({ roles }: { roles: StaffRole[] }) {
               <option value="no_records_or_other">No records or otherwise closed without fulfillment</option>
             </Select>
           </Field>
-          <label className="flex gap-2 text-sm text-pacific">
+          <label className="flex gap-2 text-sm text-ink">
             <input
               type="checkbox"
               checked={classification.scanned_physical}

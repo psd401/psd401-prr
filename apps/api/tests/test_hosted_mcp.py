@@ -31,7 +31,11 @@ from config.asgi import create_application
 from integrations.mcp.client import PRRClient
 from integrations.mcp.hosted import DjangoPRRClient
 from integrations.mcp.server import mcp as stdio_mcp
-from integrations.mcp.tools import READ_TOOL_NAMES, WRITE_TOOL_NAMES
+from integrations.mcp.tools import (
+    HOSTED_READ_TOOL_NAMES,
+    READ_TOOL_NAMES,
+    WRITE_TOOL_NAMES,
+)
 
 
 class MCPDocumentationContractTests(SimpleTestCase):
@@ -39,13 +43,15 @@ class MCPDocumentationContractTests(SimpleTestCase):
         text = (Path(settings.BASE_DIR) / relative_path).read_text()
         return " ".join(text.split())
 
-    def test_write_tool_registry_is_the_three_draft_proposal_operations(self):
+    def test_write_tool_registry_is_the_draft_proposal_operations(self):
         self.assertSetEqual(
             set(WRITE_TOOL_NAMES),
             {
+                "psd_prr_acknowledgment_draft",
                 "psd_prr_clarification_letter_draft",
                 "psd_prr_collection_task_notes_propose",
                 "psd_prr_exemption_citations_suggest",
+                "psd_prr_decision_batch_propose",
             },
         )
 
@@ -63,7 +69,7 @@ class MCPDocumentationContractTests(SimpleTestCase):
             security,
         )
         self.assertIn(
-            "the three draft/proposal tools require an attributed personal token",
+            "the five draft/proposal tools require an attributed personal token",
             security,
         )
 
@@ -77,17 +83,17 @@ class MCPDocumentationContractTests(SimpleTestCase):
                 "hosted MCP uses attributed personal staff tokens",
                 "never that shared identity for its gated tools",
                 (
-                    "Hosted `/mcp` exposes exactly three attributed personal-token "
+                    "Hosted `/mcp` exposes exactly five attributed personal-token "
                     "draft/proposal tools"
                 ),
             ),
             "README.md": (
-                "Hosted `/mcp` adds exactly three personal-token draft/proposal tools",
+                "Hosted `/mcp` adds exactly five personal-token draft/proposal tools",
                 "standalone stdio and the dedicated nonstaff MCP identity remain read-only",
             ),
             "docs/security.md": (
                 "both identities may use the eight reads",
-                "three gated draft/proposal tools require a personal token",
+                "five gated draft/proposal tools require a personal token",
             ),
             "docs/project-status.md": (
                 "MCP transports",
@@ -253,7 +259,7 @@ class HostedMCPTransportTests(TransactionTestCase):
                         listed = await session.list_tools()
                         self.assertSetEqual(
                             {tool.name for tool in listed.tools},
-                            set(READ_TOOL_NAMES).union(WRITE_TOOL_NAMES),
+                            set(READ_TOOL_NAMES).union(HOSTED_READ_TOOL_NAMES, WRITE_TOOL_NAMES),
                         )
                         calls = {
                             "psd_prr_requests_list": {},
@@ -306,7 +312,7 @@ class HostedMCPTransportTests(TransactionTestCase):
         self.assertSetEqual(stdio_names, set(READ_TOOL_NAMES))
         self.assertSetEqual(
             hosted_names,
-            set(READ_TOOL_NAMES).union(WRITE_TOOL_NAMES),
+            set(READ_TOOL_NAMES).union(HOSTED_READ_TOOL_NAMES, WRITE_TOOL_NAMES),
         )
         # The registry's shape -- namespacing, and which REST method each
         # tool reaches -- is asserted in test_mcp_tool_contract.py, which

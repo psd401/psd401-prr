@@ -148,7 +148,7 @@ def _validate_candidates(
     validated = []
     used_span_ids: set[str] = set()
     for candidate in candidates:
-        required = {"span_ids", "exemption_id", "confidence", "rationale"}
+        required = {"span_ids", "exemption_id", "pattern", "confidence", "rationale"}
         if not isinstance(candidate, dict) or set(candidate) != required:
             raise AdvisoryOutputInvalid("A redaction candidate has unexpected fields.")
         span_ids = candidate["span_ids"]
@@ -171,6 +171,9 @@ def _validate_candidates(
             or exemption_id not in exemption_map
         ):
             raise AdvisoryOutputInvalid("The model proposed an unknown exemption.")
+        pattern = candidate["pattern"]
+        if not isinstance(pattern, str) or pattern not in RedactionProposal.Pattern.values:
+            raise AdvisoryOutputInvalid("The model proposed an unknown pattern.")
         confidence = candidate["confidence"]
         if (
             isinstance(confidence, bool)
@@ -188,6 +191,7 @@ def _validate_candidates(
                 "span_ids": span_ids,
                 "spans": selected,
                 "exemption": exemption_map[exemption_id],
+                "pattern": pattern,
                 "confidence": round(float(confidence), 4),
                 "rationale": _bounded_text(
                     candidate["rationale"],
@@ -246,6 +250,7 @@ def generate_redaction_proposals(
                             {"id": span.id, "text": span.text} for span in chunk
                         ],
                     },
+                    model_identifier=run.model_identifier,
                 )
                 grounded.extend(
                     _validate_candidates(
@@ -281,6 +286,7 @@ def generate_redaction_proposals(
             exemption=candidate["exemption"],
             confidence=candidate["confidence"],
             rationale=candidate["rationale"],
+            pattern=candidate["pattern"],
             source_span_ids=candidate["span_ids"],
             source_text_sha256=hashlib.sha256(
                 _canonical_json(span_evidence)

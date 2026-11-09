@@ -107,7 +107,7 @@ class RequestsListTests(StaffApiTestCase):
             "next_due", "next_due_basis",
             "latest_note",
             "inbox_needs_attention", "latest_inbound_at",
-            "subject", "subject_source",
+            "subject", "subject_source", "intake_suggestion", "stage",
         }
         self.assertEqual(set(row.keys()), expected_keys)
         # Nothing has been sent on r1, so the next thing it owes is still the

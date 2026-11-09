@@ -43,7 +43,22 @@
     "complete-officer-case-journey",
     "complete-liaison-handoff",
     "complete-reviewer-journey",
-    "accessibility-audit"
+    "accessibility-audit",
+    "officer-supersede-collection",
+    "reviewer-bulk-review-by-filter",
+    "officer-ai-evaluation-report",
+    "officer-knowledge-pack-edit",
+    "officer-approve-estimate-letter",
+    "reviewer-cluster-approve-sampled",
+    "reviewer-elusion-signoff",
+    "reviewer-redaction-group-accept",
+    "reviewer-keyboard-flight",
+    "officer-scope-iterations",
+    "officer-approve-and-collect",
+    "officer-rescope",
+    "officer-one-step-release",
+    "officer-approve-decision-batch",
+    "officer-intake-auto-apply-undo"
   ],
   "e2e_screenshots": {
     "staff-login-open-case": [
@@ -79,7 +94,8 @@
       "officer-new-case-overview.png",
       "officer-case-collection.png",
       "officer-case-records.png",
-      "officer-case-releases.png"
+      "officer-case-releases.png",
+      "officer-case-close.png"
     ],
     "officer-clarification-response": [
       "officer-clarification-response.png"
@@ -159,7 +175,9 @@
       "review-throughput-auto-reply-filter.png",
       "review-throughput-bulk-selection.png",
       "review-throughput-bulk-confirm.png",
-      "review-throughput-bulk-reviewed.png"
+      "review-throughput-bulk-reviewed.png",
+      "review-throughput-clusters.png",
+      "review-throughput-ai-agreement.png"
     ],
     "admin-district-settings": [
       "admin-district-settings.png",
@@ -200,6 +218,66 @@
     ],
     "officer-case-table-fits-1280": [
       "officer-all-cases-table-1280.png"
+    ],
+    "officer-supersede-collection": [
+      "officer-supersede-collection-confirm.png",
+      "officer-supersede-collection-filter.png"
+    ],
+    "reviewer-bulk-review-by-filter": [
+      "reviewer-bulk-review-by-filter-confirm.png",
+      "reviewer-bulk-review-by-filter-result.png"
+    ],
+    "officer-ai-evaluation-report": [
+      "officer-ai-evaluation-report.png"
+    ],
+    "officer-knowledge-pack-edit": [
+      "officer-knowledge-pack-edit.png",
+      "officer-knowledge-pack-saved.png"
+    ],
+    "officer-approve-estimate-letter": [
+      "officer-approve-estimate-letter.png",
+      "officer-approve-estimate-letter-sent.png"
+    ],
+    "reviewer-cluster-approve-sampled": [
+      "reviewer-cluster-approve-sample.png",
+      "reviewer-cluster-approve-applied.png"
+    ],
+    "reviewer-elusion-signoff": [
+      "reviewer-elusion-sample.png",
+      "reviewer-elusion-signed-off.png"
+    ],
+    "reviewer-redaction-group-accept": [
+      "reviewer-redaction-groups.png",
+      "reviewer-redaction-group-sample.png",
+      "reviewer-redaction-group-built.png"
+    ],
+    "reviewer-keyboard-flight": [
+      "reviewer-keyboard-flight.png",
+      "reviewer-keyboard-flight-decided.png"
+    ],
+    "officer-scope-iterations": [
+      "officer-scope-iterations.png",
+      "officer-scope-rerun.png"
+    ],
+    "officer-approve-and-collect": [
+      "officer-approve-and-collect.png",
+      "officer-approve-and-collect-started.png"
+    ],
+    "officer-rescope": [
+      "officer-rescope-diff.png",
+      "officer-rescope-superseded.png"
+    ],
+    "officer-one-step-release": [
+      "officer-one-step-release-ready.png",
+      "officer-one-step-release-preview.png"
+    ],
+    "officer-approve-decision-batch": [
+      "officer-approve-decision-batch-queue.png",
+      "officer-approve-decision-batch-approved.png"
+    ],
+    "officer-intake-auto-apply-undo": [
+      "officer-intake-auto-apply-undo-closed.png",
+      "officer-intake-auto-apply-undo-reopened.png"
     ]
   },
   "strictness": "block",

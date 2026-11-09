@@ -20,10 +20,10 @@ from .client import CONCISE, PRRClient
 #: they sit behind one gateway.
 TOOL_NAMESPACE = "psd_prr_"
 
-#: Build standard 3's ceiling. The count is a gate, not a guideline: a server
-#: past it stops being a workflow surface and becomes an API mirror, and the
-#: tool list itself starts crowding a model's context.
-MAX_TOOLS = 15
+#: psd-dev-standards standards/07 build standard 3 asks for about 15 tools
+#: per server ("<= ~15"): past that a server becomes an API mirror and its
+#: tool list crowds a model's context. It is guidance reviewed per change,
+#: not a hard count gate (decided 2026-11-04 with #43).
 
 # One symbol per tool, used by both the registration and the dispatch below.
 # Naming the wire string once is what makes the two impossible to desynchronize:
@@ -37,9 +37,15 @@ RECORD_SYSTEMS_LIST = "psd_prr_record_systems_list"
 EXEMPTIONS_LIST = "psd_prr_exemptions_list"
 AUDIT_LOG_SEARCH = "psd_prr_audit_log_search"
 CAPABILITIES_LIST = "psd_prr_capabilities_list"
+ACKNOWLEDGMENT_DRAFT = "psd_prr_acknowledgment_draft"
 CLARIFICATION_LETTER_DRAFT = "psd_prr_clarification_letter_draft"
 COLLECTION_TASK_NOTES_PROPOSE = "psd_prr_collection_task_notes_propose"
 EXEMPTION_CITATIONS_SUGGEST = "psd_prr_exemption_citations_suggest"
+RECORD_ITEMS_LIST = "psd_prr_record_items_list"
+RECORD_CLUSTERS_LIST = "psd_prr_record_clusters_list"
+ADVISORIES_GET = "psd_prr_advisories_get"
+DECISION_BATCH_GET = "psd_prr_decision_batch_get"
+DECISION_BATCH_PROPOSE = "psd_prr_decision_batch_propose"
 
 READ_TOOL_NAMES = (
     REQUESTS_LIST,
@@ -52,10 +58,22 @@ READ_TOOL_NAMES = (
     CAPABILITIES_LIST,
 )
 
+#: Reads only an attributed personal token may make (#43): records,
+#: clusters, advisories, and decision batches belong to reviewer and Records
+#: Officer roles, which the shared read-only MCP identity does not hold.
+HOSTED_READ_TOOL_NAMES = (
+    RECORD_ITEMS_LIST,
+    RECORD_CLUSTERS_LIST,
+    ADVISORIES_GET,
+    DECISION_BATCH_GET,
+)
+
 WRITE_TOOL_NAMES = (
+    ACKNOWLEDGMENT_DRAFT,
     CLARIFICATION_LETTER_DRAFT,
     COLLECTION_TASK_NOTES_PROPOSE,
     EXEMPTION_CITATIONS_SUGGEST,
+    DECISION_BATCH_PROPOSE,
 )
 
 #: Wire tool name -> the ``PRRClient`` method that answers it.
@@ -80,9 +98,15 @@ TOOL_CLIENT_METHODS = {
     EXEMPTIONS_LIST: "list_exemptions",
     AUDIT_LOG_SEARCH: "search_audit_log",
     CAPABILITIES_LIST: "list_capabilities",
+    ACKNOWLEDGMENT_DRAFT: "draft_acknowledgment",
     CLARIFICATION_LETTER_DRAFT: "draft_clarification_letter",
     COLLECTION_TASK_NOTES_PROPOSE: "update_collection_task_notes",
     EXEMPTION_CITATIONS_SUGGEST: "suggest_exemption_citations",
+    RECORD_ITEMS_LIST: "list_record_items",
+    RECORD_CLUSTERS_LIST: "list_record_clusters",
+    ADVISORIES_GET: "get_advisories",
+    DECISION_BATCH_GET: "get_decision_batch",
+    DECISION_BATCH_PROPOSE: "propose_decision_batch",
 }
 
 
@@ -106,9 +130,9 @@ def _read_annotations(title: str) -> ToolAnnotations:
 
 
 def _proposal_annotations(title: str, *, idempotent: bool) -> ToolAnnotations:
-    """Annotate one of the three hosted draft/proposal tools.
+    """Annotate one of the five hosted draft/proposal tools.
 
-    ``readOnlyHint`` is false on all three even though two of them only read
+    ``readOnlyHint`` is false on all five even though two of them only read
     and return a proposal. That is deliberate: these are the tools a gateway
     must route through an approval flow, and the honest-but-weaker hint would
     let a future gateway auto-approve them. ``destructiveHint`` stays false
@@ -134,11 +158,14 @@ READ_INSTRUCTIONS = (
 
 HOSTED_INSTRUCTIONS = (
     "Attributed access to the PSD401 Public Records Request system. Read tools "
-    "inspect staff state. Three personal-token tools may create a clarification "
-    "draft or return task-note and exemption-citation proposals. They never "
-    "approve, queue, send, change request status, apply an estimate, attach a "
-    "citation, resolve a clarification, deny a request, or exclude a camera. "
-    "Every legal effect remains an accountable-human handoff in the staff UI."
+    "inspect staff state, including one request's records, clusters, AI "
+    "advisories, and decision batches. Five personal-token tools may create an "
+    "acknowledgment or clarification draft, return task-note and "
+    "exemption-citation proposals, or propose a decision batch for a person to "
+    "approve. They never approve, queue, send, change request status, apply an "
+    "estimate, attach a citation, resolve a clarification, deny a request, or "
+    "exclude a camera. Every legal effect remains an accountable-human handoff "
+    "in the staff UI."
 )
 
 ClientProvider = Callable[[Context], PRRClient]
@@ -316,6 +343,161 @@ def create_mcp_server(
         return await call(CAPABILITIES_LIST, ctx)
 
     if include_write_tools:
+
+        @mcp.tool(
+            name=RECORD_ITEMS_LIST,
+            annotations=_read_annotations("List one request's records"),
+        )
+        async def list_record_items(
+            ctx: Context,
+            request_number: str,
+            review_state: str | None = None,
+            page: int | None = None,
+        ) -> dict:
+            """List one public records request's collected records, 50 per
+            page, to decide what to propose in a decision batch. Each row has
+            the record id, custodian, sender domain, review state
+            (unreviewed, responsive, non_responsive, duplicate, withheld,
+            superseded), redaction count, tags, and the standing AI
+            suggestion with its confidence. Filter by `review_state`. Rows
+            never include record text, filenames, people's addresses, or
+            model rationale; a person sees filenames in the staff UI. Requires
+            a reviewer or Records Officer token."""
+            return await call(
+                RECORD_ITEMS_LIST, ctx,
+                request_number=request_number, review_state=review_state, page=page,
+            )
+
+        @mcp.tool(
+            name=RECORD_CLUSTERS_LIST,
+            annotations=_read_annotations("Cluster one request's records"),
+        )
+        async def list_record_clusters(
+            ctx: Context,
+            request_number: str,
+            group_by: Literal["thread", "sender", "tag"] = "thread",
+        ) -> dict:
+            """Group one request's records by email thread, sender, or tag.
+            Each cluster gives its size, the AI majority suggestion, and its
+            record ids (not its label, which is a filename or address), so a
+            whole cluster can be proposed as one review batch. A view of the
+            records, not a decision."""
+            return await call(RECORD_CLUSTERS_LIST, ctx, request_number=request_number, group_by=group_by)
+
+        @mcp.tool(
+            name=ADVISORIES_GET,
+            annotations=_read_annotations("Get one record's AI advisories"),
+        )
+        async def get_advisories(record_item_id: str, ctx: Context) -> dict:
+            """The latest AI advisories for one record: the responsiveness
+            suggestion (suggested state, confidence, matched search terms)
+            and redaction candidates (exemption id, pattern, confidence).
+            Advisories are suggestions for a person; the model's rationale
+            and the record's text are not returned."""
+            return await call(ADVISORIES_GET, ctx, record_item_id=record_item_id)
+
+        @mcp.tool(
+            name=DECISION_BATCH_GET,
+            annotations=_read_annotations("Get decision batches"),
+        )
+        async def get_decision_batch(
+            ctx: Context,
+            batch_id: str | None = None,
+            request_number: str | None = None,
+            state: Literal["proposed", "approved", "rejected"] | None = None,
+        ) -> dict:
+            """Get one decision batch by `batch_id`, or list batches filtered
+            by `request_number` and `state`. A batch shows its kind, items,
+            evidence, who proposed it, its records by id and review state,
+            and -- once a person decided it -- approved or rejected, by whom,
+            why, and the result."""
+            return await call(
+                DECISION_BATCH_GET, ctx,
+                batch_id=batch_id, request_number=request_number, state=state,
+            )
+
+        @mcp.tool(
+            name=DECISION_BATCH_PROPOSE,
+            annotations=_proposal_annotations(
+                "Propose a decision batch for a person to approve",
+                # Each call stores another proposal, so a retry is not free.
+                idempotent=False,
+            ),
+        )
+        async def propose_decision_batch(
+            kind: Literal["review", "supersede", "scope_and_collect", "redaction_group", "intake_label"],
+            payload: dict,
+            evidence_summary: str,
+            ctx: Context,
+        ) -> dict:
+            """Propose a batch of decisions with the evidence for them. A
+            person with the kind's role approves or rejects it in the staff
+            application's Decisions queue; this tool changes nothing else.
+            Requires an attributed personal token. Payload by kind:
+            review {record_item_ids, state: responsive|non_responsive};
+            supersede {collection_task_id, reason (20+ chars)};
+            scope_and_collect {count_run_id, expected_input_sha256,
+            rescope_reason (optional; 20+ chars to replace a finished
+            collection)}; redaction_group {request_number, exemption_id,
+            pattern} (approval opens the group's sampled check, which a
+            reviewer completes); intake_label {request_number, label:
+            duplicate_of|non_request, target_case_number (duplicate_of),
+            reason}. `evidence_summary` says why, in a few sentences a person
+            can verify; it is shown beside Approve and Reject."""
+            return await call(
+                DECISION_BATCH_PROPOSE, ctx,
+                kind=kind, payload=payload, evidence_summary=evidence_summary,
+            )
+
+        @mcp.tool(
+            name=ACKNOWLEDGMENT_DRAFT,
+            annotations=_proposal_annotations(
+                "Draft a statutory acknowledgment for human review",
+                # Each call stores another draft, so a retry is not free.
+                idempotent=False,
+            ),
+        )
+        # ``ctx`` leads here rather than trailing as it does on the tools
+        # whose parameters are all required: one optional parameter means a
+        # trailing ``ctx`` would follow a default, which Python forbids. This
+        # matches the read tools, which also put it first for that reason.
+        # FastMCP keys its argument model by name and drops ``ctx``, so the
+        # position changes no part of the published schema.
+        async def draft_acknowledgment(
+            ctx: Context,
+            request_number: str,
+            estimated_completion: str | None = None,
+        ) -> dict:
+            """Create the RCW 42.56.520 acknowledgment draft for one request
+            from the district's versioned statutory template, for human
+            review. Requires an attributed personal token. This does not
+            approve, queue, send, or change request status: the request
+            becomes `acknowledged` only after a human approves the draft and
+            delivery is confirmed, so drafting one does not satisfy or defer
+            the five-business-day response.
+
+            `estimated_completion` is optional and must be an ISO date
+            (YYYY-MM-DD). Omit it to use the request's own estimate, or the
+            district default when it has none. A date that disagrees with an
+            estimate already on the request is rejected rather than applied;
+            revising a published estimate is a separate human workflow.
+
+            To work a backlog, call this once per request number; there is no
+            batch form, and each draft is one case a human then reviews.
+
+            The response confirms the draft -- its status, that nothing is
+            approved, queued or sent, and the estimate the letter states --
+            and does not include the letter text. The acknowledgment quotes
+            the request description in full, which is unbounded requester
+            wording and can name a student, so it is not sent to a caller's
+            model provider. Read and approve the letter in the case Messages
+            tab. Report the draft as created; do not claim to have read it."""
+            return await call(
+                ACKNOWLEDGMENT_DRAFT,
+                ctx,
+                request_number=request_number,
+                estimated_completion=estimated_completion,
+            )
 
         @mcp.tool(
             name=CLARIFICATION_LETTER_DRAFT,

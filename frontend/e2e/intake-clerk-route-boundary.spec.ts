@@ -34,7 +34,7 @@ test('intake-clerk-route-boundary', async ({ page }) => {
   await expect.poll(() => protectedRequests).toEqual([])
 
   await page.goto('/staff-intake')
-  await page.getByRole('link', { name: 'Configuration' }).click()
+  await page.getByRole('link', { name: 'Settings' }).click()
   await page.getByRole('link', { name: 'Agent access' }).click()
   await expect(page).toHaveURL(/\/configuration\/agent-access$/)
   await expect(page.getByRole('heading', { name: 'Agent access' })).toBeVisible()

@@ -1,5 +1,5 @@
-// ABOUTME: One dedicated public-records host per environment: an isolated
-// ABOUTME: subnet, a hardened EC2 instance, its buckets, role, and snapshots.
+// ABOUTME: One dedicated public-records host per environment: a hardened EC2
+// ABOUTME: instance in an isolated subnet, its buckets, role, and snapshots.
 
 import * as cdk from "aws-cdk-lib";
 import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
@@ -13,11 +13,12 @@ import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as sns from "aws-cdk-lib/aws-sns";
 import * as snsSubscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 import * as ssm from "aws-cdk-lib/aws-ssm";
-import { DependencyGroup, type Construct } from "constructs";
+import type { Construct } from "constructs";
 import * as path from "node:path";
 
 import { grantAdvisoryBedrockInference } from "./advisory-bedrock";
 import { UBUNTU_2404_AMD64_GP3_SSM_PARAM, type PrrEnvConfig } from "./config";
+import { lookupSharedSubnet } from "./shared-subnet";
 import {
   acknowledgeGuard,
   GUARD_S3_BASELINE,
@@ -69,32 +70,32 @@ export class PrrHostingStack extends cdk.Stack {
       availabilityZones: [config.availabilityZone],
     });
 
-    // A subnet of our own, not one of the VPC's existing ones. Those share a
-    // route table that reaches on-prem over a VPN gateway and two VPC
-    // peerings; an internet-facing host holding student records must not have
-    // those paths. The L2 gives this subnet its own route table, and the
-    // default route below is the only entry we add to it.
-    const subnet = new ec2.Subnet(this, "Subnet", {
-      vpcId: config.vpcId,
-      availabilityZone: config.availabilityZone,
-      cidrBlock: config.subnetCidr,
-      // The host needs outbound internet during user data, before the Elastic
-      // IP association lands. The EIP replaces this ephemeral address.
-      mapPublicIpOnLaunch: true,
+    // The host's subnet belongs to psd-aws-infra, which owns every subnet in a
+    // shared VPC (psd-dev-standards 08 "Shared network";
+    // psd401/psd-aws-infra#42). It is not one of the VPC's other subnets:
+    // those share a route table that reaches on-prem over a VPN gateway and
+    // two VPC peerings, and an internet-facing host holding student records
+    // must not have those paths. This one has its own route table whose only
+    // route goes to the internet gateway, and it assigns a public address at
+    // launch so user data reaches the internet before the Elastic IP lands.
+    // Found by its standard 08 tags, never an ID in code; the answer is
+    // cached in cdk.context.json, and any other subnet would replace the
+    // instance and its PostgreSQL root volume.
+    const sharedSubnet = lookupSharedSubnet(
+      this,
+      config.vpcId,
+      `psd401-prr-${config.envName}`,
+      config.availabilityZone,
+    );
+    const subnet = ec2.Subnet.fromSubnetAttributes(this, "Subnet", {
+      subnetId: sharedSubnet.subnetId,
+      availabilityZone: sharedSubnet.availabilityZone,
     });
-    cdk.Tags.of(subnet).add("Name", `psd401-prr-${config.envName}`);
-    acknowledgeGuard(subnet, {
-      subnet_auto_assign_public_ip_disabled_check:
-        "This subnet holds only the public records host, which is internet " +
-        "facing by design: it serves the public request form. User data " +
-        "needs outbound internet before the Elastic IP association lands, so " +
-        "the launch address is required; the Elastic IP then replaces it. " +
-        "The subnet has its own route table with no VPN or peering route, " +
-        "and the security group opens only 80 and 443.",
-    });
-    // The gateway is already attached to the VPC, so there is no attachment
-    // resource in this stack for the route to wait on.
-    subnet.addDefaultInternetRoute(config.igwId, new DependencyGroup());
+    cdk.Annotations.of(subnet).acknowledgeWarning(
+      "@aws-cdk/aws-ec2:noSubnetRouteTableId",
+      "This stack places the host in the subnet and never reads or adds to " +
+        "its route table, which psd-aws-infra owns.",
+    );
 
     const securityGroup = new ec2.SecurityGroup(this, "SecurityGroup", {
       vpc,
@@ -1576,10 +1577,20 @@ export class PrrHostingStack extends cdk.Stack {
       });
       allocationId = elasticIp.attrAllocationId;
     }
-    new ec2.CfnEIPAssociation(this, "ElasticIpAssociation", {
-      allocationId,
-      instanceId: instance.instanceId,
-    });
+    const elasticIpAssociation = new ec2.CfnEIPAssociation(
+      this,
+      "ElasticIpAssociation",
+      { allocationId, instanceId: instance.instanceId },
+    );
+    // Retain since the subnet handover (psd401/psd-aws-infra#42), when both
+    // left the stack and were imported back: removing either from the stack
+    // keeps the host and its public address.
+    for (const resource of [
+      instance.node.defaultChild as cdk.CfnResource,
+      elasticIpAssociation,
+    ]) {
+      resource.applyRemovalPolicy(cdk.RemovalPolicy.RETAIN);
+    }
 
     const snapshotRole = new iam.Role(this, "SnapshotPolicyRole", {
       assumedBy: new iam.ServicePrincipal("dlm.amazonaws.com"),

@@ -45,6 +45,8 @@ test('officer-fee-estimate-and-deposit', async ({ page }) => {
   await expect(dialog).toBeHidden()
 
   await page.goto(`/requests/${fixtureRequestNumber}/releases`)
+  // No installment carries a fee yet, so the fee panels start folded (#47).
+  await page.getByText('Fees and deposits — no fee applies').click()
   await expect(page.getByRole('heading', { name: 'Fee waiver floor' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Deposit gates' })).toBeVisible()
 

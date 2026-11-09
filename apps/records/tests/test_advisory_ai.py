@@ -576,6 +576,7 @@ class AdvisoryAITests(TestCase):
     )
     def test_bedrock_response_is_rejected_at_the_configured_byte_limit(self):
         with patch("apps.records.advisory_ai.boto3.client") as client_factory:
+            client_factory.return_value.get_account_data_retention.return_value = {"mode": "none"}
             client_factory.return_value.converse.return_value = {
                 "output": {"message": {"content": [{"text": "123456789"}]}}
             }
@@ -583,6 +584,7 @@ class AdvisoryAITests(TestCase):
                 invoke_advisory_model(
                     AdvisoryRun.Kind.REQUEST_INTENT,
                     {"request_description": "Test request"},
+                    model_identifier="us.amazon.nova-2-lite-v1:0",
                 )
         self.assertEqual(raised.exception.code, "invalid_provider_response")
 
@@ -604,6 +606,7 @@ class AdvisoryAITests(TestCase):
             "narrowing_options": [],
         }
         with patch("apps.records.advisory_ai.boto3.client") as client_factory:
+            client_factory.return_value.get_account_data_retention.return_value = {"mode": "none"}
             client_factory.return_value.converse.return_value = {
                 "output": {
                     "message": {"content": [{"text": json.dumps(proposal)}]}
@@ -613,6 +616,7 @@ class AdvisoryAITests(TestCase):
             result = invoke_advisory_model(
                 AdvisoryRun.Kind.REQUEST_INTENT,
                 {"request_description": "Test request"},
+                model_identifier="us.amazon.nova-2-lite-v1:0",
                 attachment_blocks=[
                     {
                         "document": {
@@ -625,13 +629,19 @@ class AdvisoryAITests(TestCase):
             )
 
         self.assertEqual(result, proposal)
-        client_factory.assert_called_once()
-        service_name, = client_factory.call_args.args
-        self.assertEqual(service_name, "bedrock-runtime")
-        self.assertEqual(client_factory.call_args.kwargs["region_name"], "us-west-2")
+        # The control plane is read first (zero retention), then the runtime
+        # is called, both keyless in the advisory Region.
+        self.assertEqual(
+            [call.args for call in client_factory.call_args_list],
+            [("bedrock",), ("bedrock-runtime",)],
+        )
+        self.assertEqual(
+            {call.kwargs["region_name"] for call in client_factory.call_args_list},
+            {"us-west-2"},
+        )
         call = client_factory.return_value.converse.call_args.kwargs
         self.assertEqual(call["modelId"], "us.amazon.nova-2-lite-v1:0")
-        self.assertEqual(call["inferenceConfig"], {"maxTokens": 1000, "temperature": 0})
+        self.assertEqual(call["inferenceConfig"], {"maxTokens": 2000, "temperature": 0})
         self.assertEqual(
             call["messages"][0]["content"][1]["document"]["name"],
             "attachment 1",
@@ -677,6 +687,7 @@ class AdvisoryAITests(TestCase):
         }
         fenced = f"```json\n{json.dumps(proposal)}\n```"
         with patch("apps.records.advisory_ai.boto3.client") as client_factory:
+            client_factory.return_value.get_account_data_retention.return_value = {"mode": "none"}
             client_factory.return_value.converse.return_value = {
                 "output": {"message": {"content": [{"text": fenced}]}}
             }
@@ -684,9 +695,54 @@ class AdvisoryAITests(TestCase):
             result = invoke_advisory_model(
                 AdvisoryRun.Kind.REQUEST_INTENT,
                 {"request_description": "Synthetic request"},
+                model_identifier="us.amazon.nova-2-lite-v1:0",
             )
 
         self.assertEqual(result, proposal)
+
+    def _converse(self, content_blocks, model="us.anthropic.claude-opus-5-5"):
+        with patch("apps.records.advisory_ai.boto3.client") as client_factory:
+            client_factory.return_value.get_account_data_retention.return_value = {"mode": "none"}
+            client_factory.return_value.converse.return_value = {
+                "output": {"message": {"content": content_blocks}}
+            }
+            return invoke_advisory_model(
+                AdvisoryRun.Kind.REQUEST_INTENT,
+                {"request_description": "Synthetic request"},
+                model_identifier=model,
+            )
+
+    @override_settings(
+        PRR_AI_PROVIDER="bedrock",
+        PRR_AI_AWS_REGION="us-west-2",
+        PRR_AI_MODEL="us.amazon.nova-2-lite-v1:0",
+        PRR_AI_MAX_RESPONSE_BYTES=65_536,
+    )
+    def test_reasoning_blocks_are_skipped_and_never_returned(self):
+        # Production, 2026-11-05: Opus 5.5, Haiku 5.5 and GPT-6.1 Sol/Terra
+        # answer with a reasoningContent block, then the JSON text block.
+        reasoning = {"reasoningContent": {"reasoningText": {"text": "Private chain of thought."}}}
+        result = self._converse([reasoning, {"text": '{"summary": "ok"}'}])
+        self.assertEqual(result, {"summary": "ok"})
+        self.assertNotIn("Private chain of thought", json.dumps(result))
+
+    @override_settings(
+        PRR_AI_PROVIDER="bedrock",
+        PRR_AI_AWS_REGION="us-west-2",
+        PRR_AI_MODEL="us.amazon.nova-2-lite-v1:0",
+        PRR_AI_MAX_RESPONSE_BYTES=65_536,
+    )
+    def test_still_exactly_one_answer_and_no_unknown_blocks(self):
+        reasoning = {"reasoningContent": {"reasoningText": {"text": "Thinking."}}}
+        for blocks in (
+            [reasoning],
+            [reasoning, {"text": "{}"}, {"text": "{}"}],
+            [{"toolUse": {"name": "x"}}, {"text": "{}"}],
+            [{"text": "{}", "extra": 1}],
+        ):
+            with self.subTest(blocks=blocks), self.assertRaises(AdvisoryProviderError) as raised:
+                self._converse(blocks)
+            self.assertEqual(raised.exception.code, "invalid_provider_response")
 
     @override_settings(
         PRR_AI_PROVIDER="bedrock",
@@ -697,6 +753,7 @@ class AdvisoryAITests(TestCase):
     def test_bedrock_rejects_fenced_json_with_surrounding_text(self):
         content = 'Here is the result:\n```json\n{"summary":"unsafe"}\n```'
         with patch("apps.records.advisory_ai.boto3.client") as client_factory:
+            client_factory.return_value.get_account_data_retention.return_value = {"mode": "none"}
             client_factory.return_value.converse.return_value = {
                 "output": {"message": {"content": [{"text": content}]}}
             }
@@ -705,6 +762,7 @@ class AdvisoryAITests(TestCase):
                 invoke_advisory_model(
                     AdvisoryRun.Kind.REQUEST_INTENT,
                     {"request_description": "Synthetic request"},
+                    model_identifier="us.amazon.nova-2-lite-v1:0",
                 )
 
         self.assertEqual(raised.exception.code, "invalid_provider_response")

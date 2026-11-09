@@ -7,7 +7,7 @@ from datetime import date, datetime
 from django.core import signing
 from django.db.models import Q
 from rest_framework.exceptions import NotFound
-from rest_framework.pagination import BasePagination
+from rest_framework.pagination import BasePagination, PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
 from rest_framework.utils.urls import replace_query_param
@@ -304,3 +304,15 @@ class ScopedKeysetPagination(BasePagination):
                 "schema": {"type": "string"},
             }
         ]
+
+
+class CaseListPagination(PageNumberPagination):
+    """The case list's page: 50 by default, up to 200 when asked.
+
+    Today shows every open case at once; one request of up to 200 is faster
+    than walking 50-case pages one after another.
+    """
+
+    page_size = 50
+    page_size_query_param = "page_size"
+    max_page_size = 200
