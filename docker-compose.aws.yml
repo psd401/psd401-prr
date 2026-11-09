@@ -142,7 +142,7 @@ services:
   caddy:
     # Pinned to a minor like every other image here: an unattended pull must
     # not change the TLS front end's behavior during a routine redeploy.
-    image: caddy:2.10-alpine
+    image: caddy:2.11-alpine
     restart: *restart
     logging: *logging
     ports:

@@ -55,7 +55,7 @@ jobs:
       # not just the newest tag at the time of writing.
       - name: Run Claude Code
         id: claude
-        uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6  # v1.0.264
+        uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe  # v1.0.269
         env:
           AWS_REGION: us-west-2
           AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.BEDROCK_API_KEY }}
