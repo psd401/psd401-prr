@@ -9,7 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-import httpx
+import httpx2
 from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -168,8 +168,8 @@ async def raw_mcp_initialize(
     if authorization is not None:
         headers["Authorization"] = authorization
     headers.update(extra_headers or {})
-    transport = httpx.ASGITransport(app=application)
-    async with httpx.AsyncClient(
+    transport = httpx2.ASGITransport(app=application)
+    async with httpx2.AsyncClient(
         transport=transport,
         base_url=base_url,
         headers=headers,
@@ -241,9 +241,9 @@ class HostedMCPTransportTests(TransactionTestCase):
 
     async def exercise_all_tools(self):
         application = create_application()
-        transport = httpx.ASGITransport(app=application)
+        transport = httpx2.ASGITransport(app=application)
         async with application.router.lifespan_context(application):
-            async with httpx.AsyncClient(
+            async with httpx2.AsyncClient(
                 transport=transport,
                 base_url="https://localhost",
                 headers={
@@ -253,7 +253,7 @@ class HostedMCPTransportTests(TransactionTestCase):
                 async with streamable_http_client(
                     "https://localhost/mcp",
                     http_client=http_client,
-                ) as (read_stream, write_stream, _):
+                ) as (read_stream, write_stream):
                     async with ClientSession(read_stream, write_stream) as session:
                         await session.initialize()
                         listed = await session.list_tools()
@@ -280,7 +280,7 @@ class HostedMCPTransportTests(TransactionTestCase):
                         results = {}
                         for name, arguments in calls.items():
                             result = await session.call_tool(name, arguments)
-                            self.assertFalse(result.isError, name)
+                            self.assertFalse(result.is_error, name)
                             results[name] = result
                         return results
 
@@ -452,8 +452,8 @@ class ASGIApplicationParityTests(TransactionTestCase):
 
     async def request(self, method, path, **kwargs):
         application = create_application()
-        transport = httpx.ASGITransport(app=application)
-        async with httpx.AsyncClient(
+        transport = httpx2.ASGITransport(app=application)
+        async with httpx2.AsyncClient(
             transport=transport,
             base_url="https://localhost",
         ) as client:
@@ -537,6 +537,6 @@ class ASGIApplicationParityTests(TransactionTestCase):
 
         self.assertIn("uvicorn.workers.UvicornWorker", dockerfile)
         self.assertIn("config.asgi:application", dockerfile)
-        self.assertRegex(pyproject, r'(?m)^\s*"mcp>=1\.29\.1,<2",$')
-        self.assertIn('"mcp>=1.29.1,<2"', stdio_entrypoint)
+        self.assertRegex(pyproject, r'(?m)^\s*"mcp>=2\.3\.0,<3",$')
+        self.assertIn('"mcp>=2.3.0,<3"', stdio_entrypoint)
         self.assertRegex(pyproject, r'(?m)^\s*"uvicorn\[standard\]>=')

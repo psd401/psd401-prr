@@ -26,7 +26,7 @@ dependencies = [
     "gunicorn>=26.2.0",
     "uvicorn[standard]>=0.53.0",
     "whitenoise>=6.12.0",
-    "mcp>=1.29.1,<2",
+    "mcp>=2.3.0,<3",
     "requests>=2.34.2",
     "httpx>=0.28.1,<1",
     "drf-spectacular>=0.30.0",
@@ -56,13 +56,13 @@ dev = [
     # red, and the pyright baseline in `pyright-baseline.json` is only
     # comparable against the version that produced it. Upgrading either is a
     # deliberate commit that re-runs the gate.
-    "ruff==0.17.3",
+    "ruff==0.17.4",
     "pyright==1.1.414",
     # Without these, pyright reads every Django model manager and DRF
     # serializer as untyped: 9,083 errors against 1,848 with them. They are
     # type information only and nothing imports them at runtime.
     "django-stubs==6.1.2",
-    "djangorestframework-stubs==3.18.1",
+    "djangorestframework-stubs==3.18.2",
 ]
 
 [tool.uv]

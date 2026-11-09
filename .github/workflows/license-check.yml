@@ -11,4 +11,4 @@ jobs:
   license-check:
     permissions:
       contents: read
-    uses: PSD401/.github/.github/workflows/reusable-license-check.yml@8c4dbb4e6ae79345ec5f56a96de522e9528e3fb4 # v1.1.0
+    uses: PSD401/.github/.github/workflows/reusable-license-check.yml@d5be9265b78fa3d21c73ea42840bce9148a2d8e3 # v1.2.2

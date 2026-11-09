@@ -1,6 +1,6 @@
 {
   "pyright": "1.1.414",
-  "total": 1763,
+  "total": 1762,
   "files": {
     "apps/api/access_tokens.py": 2,
     "apps/api/advisory.py": 1,
@@ -224,7 +224,6 @@
     "apps/work_queue/tests/test_source_projections.py": 25,
     "config/asgi.py": 1,
     "integrations/cli/prr.py": 7,
-    "integrations/mcp/hosted.py": 1,
     "scripts/mutation_score.py": 5
   }
 }

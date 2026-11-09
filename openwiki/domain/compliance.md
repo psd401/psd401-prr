@@ -121,11 +121,15 @@ this by parsing the source of the letter and task modules for calls.
 | System-drafted scope letter | `test_a_system_scope_letter_is_drafted_never_sent_or_clock_stopping` (`scope-letter-ast-guard`); `create_system_scope_letter_draft` has no `form` argument | The system drafts only the informational form and never sends it. See [correspondence](correspondence.md#scope-conversation-letter) |
 | Submission receipt | `receipt-ast-guard`; non-statutory; cannot set `initial_response_delivered` | Keeps the receipt from acting as a statutory response |
 | Interpretation-and-estimate letter | `test_a_system_prepared_letter_is_drafted_never_sent` (`estimate-letter-ast-guard`); the system drafts it with no actor and never approves or queues it | A Records Officer approves and sends it. See [estimates](estimates.md) |
+| Automatic Vault collection | `test_only_scoping_starts_an_automatic_collection` (`automatic-collection-ast-guard`); only `apps/records/scoping.py` may call `queue_automatic_vault_collection` | Rule 11: the unattended export has one door, a finished automatic scoping session under `PRR_TRUST_SCOPE_MODE=auto`. See [collection and Vault](collection-and-vault.md#iterative-scoping-from-intake-intent) |
+| Vault count path | `test_a_vault_count_never_downloads_holds_collects_or_makes_records` (`count-export-ast-guard`); `apps/records/vault_counts.py` may not call download, hold, collection, or `RecordItem` paths, and `ensure_count_export` and `delete_export` have that module as their only caller | Rule 11: a Drive or Chat count-only export is read for its total and deleted, never downloaded or ingested. See [collection and Vault](collection-and-vault.md#count) |
+| Automatic intake closure | `test_only_the_intake_trust_ladder_closes_a_case_without_a_person` (`intake-auto-close-ast-guard`); only `apps/records/intake_trust.py` calls `auto_close_non_request`, and only `services.transition()` receives `_system_closure_note`; the labels are `spam` and `non_request` | The one closure with no human actor, under trust-scope `auto`. See [trust ladder](trust-ladder.md#automatic-intake-closure) |
 
 The main enforcement test is `test_no_automated_path_exists` in
 [`apps/records/tests/test_compliance.py`](../../apps/records/tests/test_compliance.py).
 The same file holds the companion guards (`fee-ast-guard`,
-`matter-kind-ast-guard`, and `case-title-ast-guard`).
+`matter-kind-ast-guard`, and `case-title-ast-guard`) and the three guards above, which
+apply to unattended Vault actions and the intake closure.
 
 Staff and token actors reach `exclude-camera` through
 `apps/api/handoffs.py`, which returns `human_approval_required` to token callers
@@ -239,10 +243,6 @@ exposure.
 
 - [requests.md](requests.md): request lifecycle and status transitions
 - [matter-kinds.md](matter-kinds.md): which law a matter answers to
-- [footage.md](footage.md): camera footage preservation-first policy
-- [correspondence.md](correspondence.md): letter kinds and send gates
-- [../architecture/overview.md](../architecture/overview.md): architecture
-nswers to
 - [footage.md](footage.md): camera footage preservation-first policy
 - [correspondence.md](correspondence.md): letter kinds and send gates
 - [../architecture/overview.md](../architecture/overview.md): architecture
