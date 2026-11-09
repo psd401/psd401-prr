@@ -16,6 +16,6 @@
     "aws-cdk-lib": "2.275.0",
     "cdk-nag": "3.0.2",
     "constructs": "^10",
-    "typescript": "^5"
+    "typescript": "^7"
   }
 }
