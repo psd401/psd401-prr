@@ -28,7 +28,7 @@ from apps.integrations.avigilon import client
 BASE = "https://example.us4.aware.avasecurity.com"
 API = f"{BASE}/api/v1"
 USERNAME = "prr-holds@example.org"
-PASSWORD = "correct-horse-battery-staple-9"
+PASSWORD = "not-a-real-password"
 
 ALTA_SETTINGS = {
     "ALTA_API_BASE": BASE,
