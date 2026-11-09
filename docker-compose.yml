@@ -44,6 +44,11 @@ services:
   # port stays on the Compose network; clamd has no authentication or TLS.
   clamav:
     image: clamav/clamav:1.5-debian
+    # Same limits as docker-compose.deploy.yml; see the note there.
+    environment:
+      CLAMD_CONF_StreamMaxLength: "500M"
+      CLAMD_CONF_MaxFileSize: "500M"
+      CLAMD_CONF_MaxScanSize: "2048M"
     ports: ["127.0.0.1:3310:3310"]
     volumes: [clamavdata:/var/lib/clamav]
     healthcheck:

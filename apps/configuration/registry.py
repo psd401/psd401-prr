@@ -1535,7 +1535,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="PRR_RECORD_UPLOAD_MAX_BYTES",
         type=values.INTEGER,
-        default=100 * _MIB,
+        default=500 * _MIB,
         minimum=1,
         maximum=500 * _MIB,
         unit="bytes",
@@ -1551,7 +1551,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="PRR_RECORD_UPLOAD_TOTAL_MAX_BYTES",
         type=values.INTEGER,
-        default=250 * _MIB,
+        default=2 * _GIB,
         minimum=1,
         maximum=2 * _GIB,
         unit="bytes",
