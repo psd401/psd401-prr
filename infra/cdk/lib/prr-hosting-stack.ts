@@ -1116,6 +1116,10 @@ export class PrrHostingStack extends cdk.Stack {
       '      rollback_tag="psd401-prr:rollback-${version}"',
       '      docker tag "$previous_image" "$rollback_tag" || true',
       '      export PRR_RELEASE_IMAGE="$rollback_tag"',
+      // Put the previous scanner configuration back. Compose recreates clamav
+      // only if this release changed it, so a rollback after an unchanged
+      // scanner leaves it running.
+      "      compose_previous_runtime up -d --no-deps clamav || true",
       "      compose_previous_runtime up -d --no-deps --force-recreate web worker beat caddy || true",
       "      verify_previous_runtime || true",
       "    else",

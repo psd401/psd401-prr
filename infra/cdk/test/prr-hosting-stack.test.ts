@@ -870,6 +870,18 @@ describe.each(environments)("psd401-prr-%s host", (envName, config) => {
     expect(scanner).toBeGreaterThan(command.indexOf("release_manage verify_settings_secrets"));
     expect(scannerHealthy).toBeGreaterThan(scanner);
     expect(web).toBeGreaterThan(scannerHealthy);
+
+    // A scanner that never turns healthy rolls the deploy back. The rollback
+    // must put the previous scanner configuration back too, or every upload
+    // stays refused under the failed one.
+    const rollback = command.slice(
+      command.indexOf("rollback() {"),
+      command.indexOf("trap rollback ERR"),
+    );
+    const warmBranch = rollback.slice(0, rollback.indexOf("    else"));
+    expect(warmBranch).toContain(
+      "compose_previous_runtime up -d --no-deps clamav || true",
+    );
   });
 
   test("makes the rollback trap reachable, and lets it fire only once", () => {
