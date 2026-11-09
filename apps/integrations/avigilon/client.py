@@ -717,10 +717,6 @@ def _post_bookmark(
             for sid in heads
         ],
     }
-    share_group = (runtime.get("ALTA_BOOKMARK_SHARE_GROUP_ID") or "").strip()
-    if share_group:
-        body["share_all"] = False
-        body["shared_user_groups"] = [{"user_group_id": share_group}]
     try:
         created, location = api.create("/bookmarks", body)
     except AltaWriteUncertain as exc:

@@ -117,22 +117,15 @@ class CreateBookmarkTests(_BookmarkTestCase):
         )
 
     @override_settings(ALTA_BOOKMARK_SHARE_GROUP_ID="0f8e2a4c-1b3d-4e5f-8a9b-0c1d2e3f4a5b")
-    def test_a_configured_share_group_sees_the_hold(self):
+    def test_a_hold_is_shared_with_no_one(self):
+        # Holds exist only under the holds account (CIO decision, 2026-11-09);
+        # a leftover share-group value in the environment changes nothing.
         self._hold()
 
         posted = self._posted()
-        self.assertEqual(
-            posted["shared_user_groups"],
-            [{"user_group_id": "0f8e2a4c-1b3d-4e5f-8a9b-0c1d2e3f4a5b"}],
-        )
-        self.assertIs(posted["share_all"], False)
+        self.assertNotIn("shared_user_groups", posted)
+        self.assertNotIn("share_all", posted)
         self.assertIs(posted["able_to_download"], False)
-
-    def test_no_share_group_shares_with_no_one(self):
-        self._hold()
-
-        self.assertNotIn("shared_user_groups", self._posted())
-        self.assertNotIn("share_all", self._posted())
 
     def test_no_entry_carries_a_source_id(self):
         self._hold(_camera("1", "2"))
