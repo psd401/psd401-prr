@@ -1214,6 +1214,14 @@ export class PrrHostingStack extends cdk.Stack {
       // rollback trap restores the previous release, before the replacement
       // web container takes traffic. Prints counts and key names only.
       "release_manage verify_settings_secrets",
+      // Apply a changed scanner configuration (clamd's size limits live in
+      // the Compose file). Nothing else here touches clamav, and the cold
+      // start above uses --no-recreate. Compose recreates it only when its
+      // configuration changed, so most deploys leave it running; on the ones
+      // that do, uploads fail closed for the seconds it takes to load its
+      // signatures, and web is not replaced until the scanner is healthy.
+      "compose_runtime up -d --no-deps clamav",
+      'await_container_health "$gmail_inbound_mode" clamav healthy replacement_scanner_unavailable',
       "compose_runtime up -d --no-deps --force-recreate web",
       'web_id="$(compose_runtime ps -q web)"',
       'test -n "$web_id"',

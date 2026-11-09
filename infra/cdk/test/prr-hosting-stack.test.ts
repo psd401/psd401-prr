@@ -851,6 +851,27 @@ describe.each(environments)("psd401-prr-%s host", (envName, config) => {
     );
   });
 
+  test("applies a changed scanner configuration before web is replaced", () => {
+    const command = applicationDeploymentCommand(template);
+
+    // Without this, a raised clamd limit never reaches production: a warm
+    // deploy leaves clamav alone and a cold start uses --no-recreate. Compose
+    // recreates it only when its configuration changed, and web waits for a
+    // healthy scanner, so a new release never starts against old limits.
+    const scanner = command.indexOf(
+      "compose_runtime up -d --no-deps clamav\n",
+    );
+    const scannerHealthy = command.indexOf(
+      'await_container_health "$gmail_inbound_mode" clamav healthy replacement_scanner_unavailable',
+    );
+    const web = command.indexOf(
+      "compose_runtime up -d --no-deps --force-recreate web\n",
+    );
+    expect(scanner).toBeGreaterThan(command.indexOf("release_manage verify_settings_secrets"));
+    expect(scannerHealthy).toBeGreaterThan(scanner);
+    expect(web).toBeGreaterThan(scannerHealthy);
+  });
+
   test("makes the rollback trap reachable, and lets it fire only once", () => {
     const command = applicationDeploymentCommand(template);
 
