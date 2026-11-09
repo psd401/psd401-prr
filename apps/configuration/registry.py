@@ -61,6 +61,19 @@ from dataclasses import dataclass
 
 from . import values
 
+#: The Bedrock inference profiles the production grant names
+#: (``infra/cdk/lib/advisory-bedrock.ts``), offered on the model settings.
+#: A test keeps this list and the grant identical.
+BEDROCK_PROFILES = (
+    "us.amazon.nova-2-lite-v1:0",
+    "us.anthropic.claude-opus-5-5",
+    "us.anthropic.claude-fable-5-1",
+    "us.anthropic.claude-sonnet-5-5",
+    "us.anthropic.claude-haiku-5-5",
+    "us.openai.gpt-6.1-sol",
+    "us.openai.gpt-6.1-terra",
+)
+
 
 @dataclass(frozen=True)
 class SettingSpec:
@@ -88,6 +101,9 @@ class SettingSpec:
     periods: tuple[str, ...] = ()
     #: What the number counts, for the Settings page to render beside it.
     unit: str = ""
+    #: Known good values for a ``text`` setting, offered as a pick list. Not
+    #: an allow-list: validation still runs on ``pattern``.
+    suggestions: tuple[str, ...] = ()
     #: Variables this key used to take its default from before it moved into
     #: the store. Consulted only by the one-time bootstrap, and only when the
     #: key's own environment variable is unset.
@@ -100,6 +116,8 @@ class SettingSpec:
             raise ValueError(f"{self.key} is a choice with no choices.")
         if self.type != values.CHOICE and self.choices:
             raise ValueError(f"{self.key} lists choices but is not a choice.")
+        if self.suggestions and self.type != values.TEXT:
+            raise ValueError(f"{self.key} offers suggestions but is not text.")
         if self.type == values.SECRET and self.default != "":
             # A shipped default for a secret would be a credential in source.
             raise ValueError(f"{self.key} is a secret and may not carry a default.")
@@ -250,13 +268,30 @@ SETTINGS: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED",
         type=values.BOOLEAN,
-        default=False,
+        # On by default (CIO decision, 2026-11-08): the first pass is how
+        # review and redaction start. It still applies nothing.
+        default=True,
         category=CATEGORY_ADVISORY_AI,
         label="Prepare record proposals automatically",
         consequence=(
             "On, a record's advisory proposal is prepared as the record "
             "arrives instead of when a reviewer clicks Run. Off, a reviewer "
             "asks for each one. Nothing is applied either way."
+        ),
+        requires=("PRR_AI_ADVISORY_ENABLED",),
+    ),
+    SettingSpec(
+        key="PRR_AI_AUTOMATIC_SCOPE_LETTER_ENABLED",
+        type=values.BOOLEAN,
+        default=False,
+        category=CATEGORY_ADVISORY_AI,
+        label="Draft scope letters automatically",
+        consequence=(
+            "On, when a Gmail count finishes and nothing has been pulled yet, "
+            "the system drafts the informational letter telling the requester "
+            "how many items matched and how they could narrow it. A person "
+            "approves and sends it; the system never sends it. Off, staff "
+            "write each one."
         ),
         requires=("PRR_AI_ADVISORY_ENABLED",),
     ),
@@ -276,6 +311,195 @@ SETTINGS: tuple[SettingSpec, ...] = (
         requires=("PRR_AI_ADVISORY_ENABLED",),
     ),
     SettingSpec(
+        key="PRR_TRUST_RESPONSIVE_MODE",
+        type=values.CHOICE,
+        default="suggest",
+        choices=("suggest", "batch"),
+        category=CATEGORY_ADVISORY_AI,
+        label="Trust ladder: responsive",
+        consequence=(
+            "Suggest: a reviewer decides each record. Batch: a reviewer may "
+            "approve a whole cluster as responsive after judging a random "
+            "sample; one disagreement blocks the batch. There is no automatic "
+            "mode for responsive: a responsive decision always stays with a "
+            "person."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_NON_RESPONSIVE_MODE",
+        type=values.CHOICE,
+        default="suggest",
+        choices=("suggest", "batch", "auto"),
+        category=CATEGORY_ADVISORY_AI,
+        label="Trust ladder: non-responsive",
+        consequence=(
+            "Suggest: a reviewer decides each record. Batch: a reviewer may "
+            "approve a cluster as non-responsive after a sampled check. Auto: "
+            "records the AI calls non-responsive at or above the confidence "
+            "below are staged as Ready to discard, and nothing is applied "
+            "until a reviewer finds no responsive record in a random elusion "
+            "sample of that pile and signs off."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_REDACTION_MODE",
+        type=values.CHOICE,
+        default="suggest",
+        choices=("suggest", "batch"),
+        category=CATEGORY_ADVISORY_AI,
+        label="Trust ladder: redaction proposals",
+        consequence=(
+            "Suggest: a reviewer accepts or rejects each proposed redaction. "
+            "Batch: a reviewer may accept every pending proposal with one "
+            "exemption and pattern on a case after accepting a random sample "
+            "of them; one rejection blocks the group. Each accepted proposal "
+            "is still its own redaction with its exemption citation, and "
+            "second review still applies where it is required. There is no "
+            "automatic mode."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_SCOPE_MODE",
+        type=values.CHOICE,
+        default="suggest",
+        choices=("suggest", "auto"),
+        category=CATEGORY_ADVISORY_AI,
+        label="Trust ladder: collect from the proposed scope",
+        consequence=(
+            "Suggest: a Records Officer approves the proposed scope and starts "
+            "the Vault collection with one click. Auto: when automatic "
+            "scoping finishes on a request with no Vault collection yet, the "
+            "export starts from its final count with no officer, recorded as "
+            "started automatically. Holds are unchanged: a targeted hold is "
+            "placed only for named district mailboxes."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_INTAKE_SPAM_MODE",
+        type=values.CHOICE,
+        default="suggest",
+        choices=("suggest", "auto"),
+        category=CATEGORY_ADVISORY_AI,
+        label="Trust ladder: spam",
+        consequence=(
+            "Suggest: a Records Officer confirms a spam label and closes the "
+            "case. Auto: when the automatic intake classification calls a new "
+            "email-created case spam at or above the confidence floor below, "
+            "the system closes it as not a records request with no officer. "
+            "Nothing is sent to the sender, Records Officers are emailed, and "
+            "one click on the case reopens it. Web-form cases are never closed "
+            "automatically."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_INTAKE_NON_REQUEST_MODE",
+        type=values.CHOICE,
+        default="suggest",
+        choices=("suggest", "auto"),
+        category=CATEGORY_ADVISORY_AI,
+        label="Trust ladder: not a records request",
+        consequence=(
+            "Suggest: a Records Officer confirms a not-a-request label and "
+            "closes the case. Auto: when the automatic intake classification "
+            "calls a new email-created case not a records request at or above "
+            "the confidence floor below, the system closes it with no officer. "
+            "Nothing is sent to the sender, Records Officers are emailed, and "
+            "one click on the case reopens it. A real request closed this way "
+            "has no response until someone reopens it."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_INTAKE_AUTO_MIN_CONFIDENCE",
+        type=values.INTEGER,
+        default=95,
+        minimum=50,
+        maximum=100,
+        unit="percent",
+        category=CATEGORY_ADVISORY_AI,
+        label="Automatic intake closure confidence floor",
+        consequence=(
+            "In auto mode, only spam or not-a-request labels with at least "
+            "this confidence close a case."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_NON_RESPONSIVE_AUTO_MIN_CONFIDENCE",
+        type=values.INTEGER,
+        default=95,
+        minimum=50,
+        maximum=100,
+        unit="percent",
+        category=CATEGORY_ADVISORY_AI,
+        label="Ready-to-discard confidence floor",
+        consequence=(
+            "In auto mode, only records the AI calls non-responsive with at "
+            "least this confidence are staged for discard."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_BATCH_SAMPLE_SIZE",
+        type=values.INTEGER,
+        default=10,
+        minimum=1,
+        maximum=200,
+        unit="records",
+        category=CATEGORY_ADVISORY_AI,
+        label="Cluster approval sample size",
+        consequence=(
+            "How many records, chosen at random, a reviewer judges before a "
+            "cluster can be approved. A smaller cluster is judged in full."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_TRUST_ELUSION_SAMPLE_SIZE",
+        type=values.INTEGER,
+        default=30,
+        minimum=1,
+        maximum=500,
+        unit="records",
+        category=CATEGORY_ADVISORY_AI,
+        label="Elusion sample size",
+        consequence=(
+            "How many records, chosen at random from the Ready to discard "
+            "pile, a reviewer checks for missed responsive records. Larger "
+            "samples catch rarer misses: with no finding in 30 records the "
+            "pile's miss rate is below about 10% at 95% confidence."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_INTENT_MAX_COUNT_ITERATIONS",
+        type=values.INTEGER,
+        default=4,
+        minimum=1,
+        maximum=10,
+        unit="counts",
+        category=CATEGORY_ADVISORY_AI,
+        label="Scoping counts per request",
+        consequence=(
+            "How many Google Vault counts iterative scoping may run for one "
+            "request: the intent proposal's count, then each tightened query "
+            "the agent proposes after reading the total and the custodian "
+            "breakdown. Counts only -- nothing is held or exported. 1 turns "
+            "refinement off and keeps the single proposal count."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_AUTOMATIC_ESTIMATE_LETTER_ENABLED",
+        type=values.BOOLEAN,
+        default=False,
+        category=CATEGORY_ADVISORY_AI,
+        label="Draft interpretation-and-estimate letters automatically",
+        consequence=(
+            "On, once a public records case has a completed intent proposal "
+            "and every unreviewed record has an AI suggestion, the system "
+            "computes an estimate and drafts the interpretation-and-estimate "
+            "letter for a Records Officer. The draft is never approved or "
+            "sent by the system; an officer approves and sends it. Off, no "
+            "letter is drafted automatically."
+        ),
+        requires=("PRR_AI_ADVISORY_ENABLED",),
+    ),
+    SettingSpec(
         key="PRR_AI_AUTOMATIC_CASE_TITLES_ENABLED",
         type=values.BOOLEAN,
         default=False,
@@ -288,6 +512,22 @@ SETTINGS: tuple[SettingSpec, ...] = (
             "reaches no requester, changes no status, runs no search, and "
             "never edits the request. Off, lists show the opening of the "
             "request wording instead."
+        ),
+        requires=("PRR_AI_ADVISORY_ENABLED",),
+    ),
+    SettingSpec(
+        key="PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED",
+        type=values.BOOLEAN,
+        default=False,
+        category=CATEGORY_ADVISORY_AI,
+        label="Classify new cases automatically",
+        consequence=(
+            "On, each new case gets a suggested label -- new request, "
+            "follow-up to or duplicate of an earlier case, related to one, "
+            "not a records request, or spam -- for a Records Officer to "
+            "confirm or dismiss. The label merges, closes, and sends nothing; "
+            "the officer applies it through the ordinary action. Off, new "
+            "cases are triaged by hand as before."
         ),
         requires=("PRR_AI_ADVISORY_ENABLED",),
     ),
@@ -346,6 +586,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
         type=values.TEXT,
         default="",
         allow_blank=True,
+        suggestions=BEDROCK_PROFILES,
         max_length=255,
         pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
         format_message="The advisory model must be a Bedrock model identifier.",
@@ -356,6 +597,93 @@ SETTINGS: tuple[SettingSpec, ...] = (
             "asked of, and the one recorded on each run. Changing it changes "
             "what future proposals come from; recorded runs keep the model "
             "they actually used."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MODEL_INTENT",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        suggestions=BEDROCK_PROFILES,
+        max_length=255,
+        pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
+        format_message="The advisory model must be a Bedrock model identifier.",
+        category=CATEGORY_ADVISORY_AI,
+        label="Request-intent model",
+        consequence=(
+            "The Bedrock model that reads a request and proposes its scope. Blank uses the advisory model above. Only models the "
+            "production Bedrock grant names can be called; any other "
+            "identifier makes these runs fail closed."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MODEL_CASE_TITLE",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        suggestions=BEDROCK_PROFILES,
+        max_length=255,
+        pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
+        format_message="The advisory model must be a Bedrock model identifier.",
+        category=CATEGORY_ADVISORY_AI,
+        label="Case-title model",
+        consequence=(
+            "The Bedrock model that proposes a case's one-line title. Blank uses the advisory model above. Only models the "
+            "production Bedrock grant names can be called; any other "
+            "identifier makes these runs fail closed."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MODEL_RESPONSIVENESS",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        suggestions=BEDROCK_PROFILES,
+        max_length=255,
+        pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
+        format_message="The advisory model must be a Bedrock model identifier.",
+        category=CATEGORY_ADVISORY_AI,
+        label="Record-responsiveness model",
+        consequence=(
+            "The Bedrock model that suggests whether a record is responsive. Blank uses the advisory model above. Only models the "
+            "production Bedrock grant names can be called; any other "
+            "identifier makes these runs fail closed."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MODEL_INTAKE",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        suggestions=BEDROCK_PROFILES,
+        max_length=255,
+        pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
+        format_message="The advisory model must be a Bedrock model identifier.",
+        category=CATEGORY_ADVISORY_AI,
+        label="Intake-classification model",
+        consequence=(
+            "The Bedrock model that suggests whether a new case is a new "
+            "request, a follow-up, a duplicate, related, a non-request, or "
+            "spam. Blank uses the advisory model above. Only models the "
+            "production Bedrock grant names can be called; any other "
+            "identifier makes these runs fail closed."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MODEL_REDACTION",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        suggestions=BEDROCK_PROFILES,
+        max_length=255,
+        pattern=r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
+        format_message="The advisory model must be a Bedrock model identifier.",
+        category=CATEGORY_ADVISORY_AI,
+        label="Redaction-candidate model",
+        consequence=(
+            "The Bedrock model that proposes redaction candidates. Blank uses the advisory model above. Only models the "
+            "production Bedrock grant names can be called; any other "
+            "identifier makes these runs fail closed."
         ),
     ),
     SettingSpec(
@@ -387,6 +715,66 @@ SETTINGS: tuple[SettingSpec, ...] = (
             "Longer material is truncated before it leaves, so raising this "
             "sends more district text to the model and lowering it sends "
             "less."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MAX_OUTPUT_TOKENS_INTAKE",
+        type=values.INTEGER,
+        default=1000,
+        minimum=256,
+        maximum=16000,
+        unit="tokens",
+        category=CATEGORY_ADVISORY_AI,
+        label="Intake classification output budget",
+        consequence=(
+            "The most output tokens the model may produce for an intake classification. "
+            "Too low cuts the answer off and the run fails closed; the reply "
+            "is still bounded by the response ceiling and its schema."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MAX_OUTPUT_TOKENS_INTENT",
+        type=values.INTEGER,
+        default=2000,
+        minimum=256,
+        maximum=16000,
+        unit="tokens",
+        category=CATEGORY_ADVISORY_AI,
+        label="Request-intent output budget",
+        consequence=(
+            "The most output tokens the model may produce for a request-intent analysis. "
+            "Too low cuts the answer off and the run fails closed; the reply "
+            "is still bounded by the response ceiling and its schema."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MAX_OUTPUT_TOKENS_RESPONSIVENESS",
+        type=values.INTEGER,
+        default=1000,
+        minimum=256,
+        maximum=16000,
+        unit="tokens",
+        category=CATEGORY_ADVISORY_AI,
+        label="Record-responsiveness output budget",
+        consequence=(
+            "The most output tokens the model may produce for a record-responsiveness suggestion. "
+            "Too low cuts the answer off and the run fails closed; the reply "
+            "is still bounded by the response ceiling and its schema."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_AI_MAX_OUTPUT_TOKENS_REDACTION",
+        type=values.INTEGER,
+        default=4000,
+        minimum=256,
+        maximum=16000,
+        unit="tokens",
+        category=CATEGORY_ADVISORY_AI,
+        label="Redaction-proposal output budget",
+        consequence=(
+            "The most output tokens the model may produce for a redaction-proposal run. "
+            "Too low cuts the answer off and the run fails closed; the reply "
+            "is still bounded by the response ceiling and its schema."
         ),
     ),
     SettingSpec(
@@ -1605,6 +1993,27 @@ SETTINGS: tuple[SettingSpec, ...] = (
             "The Workspace account the Vault identity acts as. It must be an "
             "account with Vault privileges; the wrong one makes every Vault "
             "call fail rather than silently return less."
+        ),
+    ),
+    SettingSpec(
+        key="PRR_VAULT_STAFF_ORG_UNIT_ID",
+        type=values.TEXT,
+        default="",
+        allow_blank=True,
+        max_length=100,
+        pattern=r"id:[A-Za-z0-9_-]{1,96}",
+        format_message=(
+            "An organizational unit ID from the Google Admin console, such as "
+            "id:03ph8a2z1enx4lx."
+        ),
+        category=CATEGORY_GOOGLE_IDENTITY,
+        label="Staff organizational unit for district-wide Drive and Chat",
+        consequence=(
+            "Google Vault searches Gmail across the whole district, but Drive "
+            "and Chat only by account or organizational unit. A district-wide "
+            "count or collection searches Drive and Chat for everyone in this "
+            "unit. Blank means a district-wide search covers Gmail only, and "
+            "Drive and Chat show as not available."
         ),
     ),
     SettingSpec(

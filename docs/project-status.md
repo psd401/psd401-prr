@@ -128,7 +128,7 @@ ledger. Like the rest of this file it is a point-in-time record.
 
 Since the original ledger, direct Google OIDC and group-mapped staff roles,
 token-authenticated staff/agent API access, OpenAPI docs, MCP transports, and
-the multi-user deploy stack have landed. Hosted `/mcp` exposes exactly three
+the multi-user deploy stack have landed. Hosted `/mcp` exposes exactly four
 attributed personal-token draft/proposal tools; standalone stdio and the shared
 nonstaff MCP identity remain read-only.
 

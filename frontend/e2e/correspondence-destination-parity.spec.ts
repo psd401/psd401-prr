@@ -48,7 +48,9 @@ test('correspondence-destination-parity', async ({ page }) => {
   await expect(page).toHaveURL(
     new RegExp(`/inbox\\?view=quarantined&inbound_receipt=${quarantinedReceiptId}$`),
   )
-  await expect(page.getByRole('button', { name: /Attachment held/ }))
+  // Held mail is not a bar chip; the "More views" trigger names and presses
+  // the selected queue when it lives in the menu.
+  await expect(page.getByRole('button', { name: 'More views: Held for review' }))
     .toHaveAttribute('aria-pressed', 'true')
   const quarantinedReview = page.getByRole('dialog', {
     name: 'Review inbound correspondence',

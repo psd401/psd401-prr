@@ -1,15 +1,15 @@
-// ABOUTME: Entry point — mounts the app with React Query and toasts; loads
-// ABOUTME: the self-hosted Source typography used throughout the workspace.
+// ABOUTME: Entry point — sets the Nexus theme, then mounts the app with React Query
+// ABOUTME: and toasts. Nexus fonts are self-hosted through index.css.
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import '@fontsource/source-sans-3/400.css'
-import '@fontsource/source-sans-3/600.css'
-import '@fontsource/source-sans-3/700.css'
-import '@fontsource/source-serif-4/400.css'
 import './index.css'
 import App from './App.tsx'
+import { startTheme } from './theme'
 import { ToastProvider } from './ui'
+
+// Before the first render, so no screen paints in the wrong theme.
+startTheme()
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -3,8 +3,8 @@
 Three stacks in account `338414773271`, `us-west-2`:
 
 - **`psd401-prr-prod`** hosts production at `https://prr.psd401.net`: a
-  dedicated t3a.large host, a subnet whose only route leaves through the
-  internet gateway, a records bucket, a write-only backups bucket, narrow SSM
+  dedicated t3a.large host in a subnet whose only route leaves through the
+  internet gateway (the subnet belongs to psd-aws-infra), a records bucket, a write-only backups bucket, narrow SSM
   managed-node permissions, fixed parameter-free email diagnostics and
   inbound-disabled-incident activation documents,
   an empty Google OIDC client-secret container, a daily EBS snapshot policy,
@@ -23,8 +23,28 @@ provisioned from the console or the CLI.
 The subnet is the point of the design. Every existing subnet in this VPC
 shares a route table that reaches on-prem over a VPN gateway and two VPC
 peerings. An internet-facing host holding FERPA-covered records must not have
-those paths, so the stack builds its own subnet with its own route table and
-never references the shared DMZ route table, NACL, or subnet.
+those paths, so the host sits in a subnet of its own with its own route table,
+and the stack never references the shared DMZ route table, NACL, or subnet.
+This stack built that subnet; psd-aws-infra now owns it, and the stack finds
+it the psd-dev-standards 08 way: the one subnet in the VPC tagged
+`psd:shared = network` and `Name = psd401-prr-<env>`
+([`lib/shared-subnet.ts`](lib/shared-subnet.ts)). Synth fails unless exactly
+one subnet carries both tags.
+
+**Moved to psd-aws-infra (2026-11-03).** psd-dev-standards 08 gives every
+subnet in a shared VPC to psd-aws-infra, so this stack handed over the
+subnet, its route table, the association and the default route
+(psd401/psd-aws-infra#42); psd-aws-infra imports them. The isolation above
+doesn't change: the subnet keeps its own route table with only the internet
+route. The four left this stack with Retain deployed first (#22).
+
+The instance's `SubnetId` couldn't change in place: CloudFormation replaces
+an instance for any `SubnetId` change, including a reference swapped for the
+same literal ID, and the root volume holds PostgreSQL. (Observed, not tested:
+unexecuted change sets against the live stack on 2026-11-02 reported
+`Replacement: True`, `SubnetId`, Always, Static.) So the instance and its
+Elastic IP association, both retained (#24), left the stack and came back by
+`cdk import` with the subnet as a literal ID (#25). Both keep Retain.
 
 Neither stack owns the VPC, the internet gateway, the Route 53 zone, any DNS
 record, the Elastic IP allocation, or the CDK bootstrap stack. Production
@@ -57,8 +77,9 @@ bunx cdk deploy psd401-prr-terraform-state
 ```
 
 `bun test` and `bunx cdk synth` need no AWS credentials: the Ubuntu 24.04 AMI
-lookup is cached in the committed `cdk.context.json`. Refresh it deliberately,
-not routinely, and only alongside a maintenance window:
+lookup and the subnet tag lookup are cached in the committed
+`cdk.context.json`. Refresh the AMI deliberately, not routinely, and only
+alongside a maintenance window:
 
 ```text
 bunx cdk context --reset "ssm:account=338414773271:parameterName=/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id:region=us-west-2"
@@ -68,6 +89,11 @@ bunx cdk synth
 A new AMI id replaces the instance. The root volume has
 `DeleteOnTermination: false`, so the old volume survives, but the host is
 rebuilt and its Docker state is gone.
+
+The cached subnet lookup is the same kind of value: a different subnet ID
+replaces the instance and its PostgreSQL root volume. Reset its
+`cc-api-provider:...:typeName=AWS::EC2::Subnet` key only after a tag change in
+psd-aws-infra, and read the `cdk diff` before deploying.
 
 Termination protection is on for both the stack and the instance. Removing a
 stack means clearing both first, and the buckets and secret are retained

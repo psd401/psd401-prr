@@ -13,7 +13,7 @@ test('officer-statutory-response-and-templates', async ({ page }) => {
   await login(page)
 
   // Workstream B: grouped chips and the statutory backlog with triage context.
-  await page.getByRole('link', { name: /Inbox/ }).click()
+  await page.goto('/inbox')
   await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
   // Decide-now queues are chips; the taxonomy that used to fill the page is
   // intact inside the menu.
@@ -67,9 +67,8 @@ test('officer-statutory-response-and-templates', async ({ page }) => {
 
   // Workstream A: the guided statutory send steps on the case that owes one.
   await page.goto(`/requests/${awaitingRequestNumber}/overview`)
-  await expect(
-    page.getByRole('heading', { name: awaitingRequestNumber }),
-  ).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Case summary' }))
+    .toContainText(awaitingRequestNumber)
   const steps = page.getByRole('list', { name: 'Statutory response steps' })
   await expect(steps).toBeVisible()
   await expect(steps.getByText('Prepare the acknowledgment draft')).toBeVisible()
@@ -119,7 +118,8 @@ test('officer-statutory-response-and-templates', async ({ page }) => {
   })
 
   // The courtesy receipt must not have satisfied the statutory response.
-  await page.getByRole('link', { name: 'Overview', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Case stages' })
+    .getByRole('link', { name: /^Intake:/ }).click()
   await expect(
     page.getByRole('list', { name: 'Statutory response steps' })
       .getByText('Prepare the acknowledgment draft'),

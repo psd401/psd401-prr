@@ -14,11 +14,11 @@ function SectionLinks({ items }: { items: NavItem[] }) {
         <li key={item.path}>
           <Link
             to={item.path}
-            className="block h-full rounded-xl border border-driftwood/60 bg-white p-5 shadow-sm transition hover:border-seaglass hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-whulge"
+            className="block h-full rounded-xl border border-line bg-surface-raised p-5 shadow-sm transition hover:border-flow hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
-            <span className="font-heading text-lg font-bold text-pacific">{item.label}</span>
+            <span className="font-heading text-lg font-bold text-ink">{item.label}</span>
             {item.description && (
-              <span className="mt-2 block text-sm leading-relaxed text-pacific/80">{item.description}</span>
+              <span className="mt-2 block text-sm leading-relaxed text-ink-muted">{item.description}</span>
             )}
           </Link>
         </li>
@@ -28,10 +28,17 @@ function SectionLinks({ items }: { items: NavItem[] }) {
 }
 
 export function ConfigurationIndex({ roles }: { roles: StaffRole[] }) {
+  const reports = visibleNav(OVERSIGHT_NAV, roles)
   return (
     <>
-      <PageHeader title="Configuration" subtitle="Personal access and role-scoped application settings." />
+      <PageHeader title="Settings" />
       <SectionLinks items={visibleNav(CONFIGURATION_NAV, roles)} />
+      {reports.length > 0 && (
+        <section aria-labelledby="settings-reports" className="mt-10">
+          <h2 id="settings-reports" className="mb-4 font-heading text-xl font-bold text-ink">Reports</h2>
+          <SectionLinks items={reports} />
+        </section>
+      )}
     </>
   )
 }

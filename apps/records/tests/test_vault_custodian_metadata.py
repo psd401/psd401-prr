@@ -463,6 +463,45 @@ class VaultIngestReadsExportMetadataTests(_MetadataExportFixture, TestCase):
         self.assertEqual(summary["delivered_to_missing"], 2)
         self.assertEqual(summary["csv_sets_attached"], 0)
 
+    def test_a_superseded_copy_does_not_stop_the_live_copy_taking_the_set(self):
+        # An earlier, over-broad collection brought in Alice's copy and was
+        # superseded. A narrower collection then reads Bob's copy of the same
+        # message. Only Bob's record is still in review, so it is the sole
+        # live record and takes the CSV set; while Alice's copy was still
+        # live, neither would have.
+        self._ingest(
+            self._task([], export_id="export-broad"),
+            mbox(build_message(message_id="<one@psd401.net>", body="Alice copy")),
+            export_id="export-broad",
+        )
+        broad_record = RecordItem.objects.get(request=self.prr)
+        RecordItem.objects.filter(pk=broad_record.pk).update(
+            review_state=RecordItem.ReviewState.SUPERSEDED,
+        )
+
+        run = self._ingest(
+            self._task([], export_id="export-narrow"),
+            mbox(build_message(message_id="<one@psd401.net>", body="Bob copy")),
+            csv_payload=metadata_csv([
+                ("<one@psd401.net>", "alice@psd401.net"),
+                ("<one@psd401.net>", "bob@psd401.net"),
+            ]),
+            export_id="export-narrow",
+        )
+
+        live = RecordItem.objects.exclude(pk=broad_record.pk).get(request=self.prr)
+        self.assertEqual(
+            sorted(
+                RecordItemCustodian.objects.filter(record_item=live)
+                .values_list("custodian", flat=True)
+            ),
+            ["alice@psd401.net", "bob@psd401.net"],
+        )
+        self.assertFalse(
+            RecordItemCustodian.objects.filter(record_item=broad_record).exists()
+        )
+        self.assertEqual(run.export_snapshot["custodian_metadata"]["csv_sets_attached"], 1)
+
     def test_a_delivered_to_the_csv_does_not_corroborate_is_treated_as_absent(self):
         # A sender can write a Delivered-To header. When the export's own
         # metadata names the mailboxes that held the message, a header naming

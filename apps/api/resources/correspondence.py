@@ -787,6 +787,12 @@ class EstimateRevisionEditSerializer(StructuredEditSerializer):
     reason = serializers.CharField()
 
 
+class InterpretationEstimateEditSerializer(StructuredEditSerializer):
+    # Only the interpretation is editable; the count, charge, and date are
+    # the stored estimate's.
+    interpretation = serializers.CharField()
+
+
 class InstallmentEditSerializer(StructuredEditSerializer):
     is_final = serializers.BooleanField()
 
@@ -813,6 +819,10 @@ STRUCTURED_EDIT_CONTRACTS = {
     Correspondence.Kind.ESTIMATE_REVISION: (
         EstimateRevisionEditSerializer,
         ("new_date", "reason"),
+    ),
+    Correspondence.Kind.INTERPRETATION_ESTIMATE: (
+        InterpretationEstimateEditSerializer,
+        ("interpretation",),
     ),
     Correspondence.Kind.INSTALLMENT_NOTICE: (
         InstallmentEditSerializer,
@@ -1162,6 +1172,7 @@ class CorrespondenceViewSet(
         "threads": CORRESPONDENCE_VIEW_ROLES,
         "thread_messages": CORRESPONDENCE_VIEW_ROLES,
         "partial_update": DRAFT_ROLES,
+        "delete_draft": DRAFT_ROLES,
         "preview": CORRESPONDENCE_VIEW_ROLES,
         "attempts": CORRESPONDENCE_VIEW_ROLES,
         "create_general_draft": DRAFT_ROLES,
@@ -2563,6 +2574,25 @@ class CorrespondenceViewSet(
         except ValidationError as exc:
             return _service_error(exc)
         return self._detail_response(correspondence)
+
+    @action(detail=True, methods=["post"], url_path="delete")
+    @extend_schema(
+        request=ExpectedVersionSerializer,
+        responses={204: None},
+    )
+    def delete_draft(self, request, pk=None):
+        correspondence = self.get_object()
+        serializer = ExpectedVersionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            services.delete_draft(
+                correspondence,
+                actor=request.user,
+                expected_version=serializer.validated_data["expected_version"],
+            )
+        except ValidationError as exc:
+            return _service_error(exc)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"])
     @extend_schema(

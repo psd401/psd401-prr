@@ -111,7 +111,7 @@ export function CaseNotesPanel({
           <Button type="submit" disabled={!trimmed || add.isPending}>
             Add note
           </Button>
-          <p className="text-xs text-pacific/80">
+          <p className="text-xs text-ink-muted">
             Staff only — never sent to the requester. Notes cannot be edited or
             deleted, and may themselves be disclosable public records.
           </p>
@@ -129,16 +129,16 @@ export function CaseNotesPanel({
             {rows.map((note) => (
               <li
                 key={note.id}
-                className="rounded-lg border border-driftwood/60 bg-white p-3"
+                className="rounded-lg border border-line bg-surface-raised p-3"
               >
-                <p className="font-heading text-xs font-semibold uppercase tracking-[0.06em] text-pacific/80">
+                <p className="font-heading text-xs font-semibold uppercase tracking-[0.06em] text-ink-muted">
                   {note.author_username ?? 'Staff'}
                   {' · '}
                   <time dateTime={note.created_at}>
                     {noteTimestamp(note.created_at)}
                   </time>
                 </p>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-pacific">
+                <p className="mt-1 whitespace-pre-wrap text-sm text-ink">
                   {note.body}
                 </p>
               </li>

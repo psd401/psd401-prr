@@ -7,10 +7,11 @@ timestamp: 2026-09-24T00:00:00Z
 openwiki:
   roles: [domain, workflow]
   change_kinds: [case-notes, record-upload, next-due, staff-intake, time-entries]
-  source_paths: [apps/records/response_due.py, apps/records/record_uploads.py, apps/records/scanned_records.py, apps/records/services.py, apps/records/models.py, apps/records/legacy_timeline.py, apps/api/resources/requests.py, apps/api/resources/records_misc.py, frontend/src/pages/TimeEntries.tsx]
-  symbols: [next_response_due, annotate_next_response_due, CaseNote, add_case_note, upload_records, create_scanned_record_item, StaffIntakeSubmission, RequestsViewSet, CaseActivitySerializer, compliance_flagged_note, TimeEntry, TimeEntryViewSet]
-  test_paths: [apps/records/tests/test_case_notes.py, apps/records/tests/test_next_response_due.py, apps/api/tests/test_case_notes_api.py, apps/api/tests/test_record_uploads.py, apps/api/tests/test_staff_intake.py, apps/api/tests/test_case_workspace.py, apps/api/tests/test_case_activity.py, apps/api/tests/test_records_misc.py]
+  source_paths: [apps/records/stages.py, apps/records/response_due.py, apps/records/record_uploads.py, apps/records/scanned_records.py, apps/records/services.py, apps/records/models.py, apps/records/legacy_timeline.py, apps/api/resources/requests.py, apps/api/resources/records_misc.py, frontend/src/case/CaseWorkspace.tsx, frontend/src/pages/TimeEntries.tsx]
+  symbols: [case_stages, STAGE_IDS, next_response_due, annotate_next_response_due, CaseNote, add_case_note, upload_records, create_scanned_record_item, StaffIntakeSubmission, RequestsViewSet, CaseActivitySerializer, compliance_flagged_note, TimeEntry, TimeEntryViewSet]
+  test_paths: [apps/records/tests/test_case_stages.py, apps/records/tests/test_case_notes.py, apps/records/tests/test_next_response_due.py, apps/api/tests/test_case_notes_api.py, apps/api/tests/test_record_uploads.py, apps/api/tests/test_staff_intake.py, apps/api/tests/test_case_workspace.py, apps/api/tests/test_case_activity.py, apps/api/tests/test_records_misc.py, frontend/src/case/CaseWorkspace.test.tsx]
   invariants:
+    - "The stage rail is a read model: the current stage is the earliest stage with open work, and a closed case reads done throughout. Status still changes only through services.transition()."
     - "Case notes are append-only and internal; no letter, production manifest, or export reads them."
     - "Record uploads are Records Officer only, open cases only, and every file is scanned before a RecordItem exists."
     - "Next due is never a statutory claim after a first response is delivered; district targets are labelled as targets."
@@ -29,6 +30,85 @@ case model and the same role scope as everything else, so each surface follows
 the rules in [Request lifecycle](requests.md) and [Matter kinds](matter-kinds.md).
 Staff-level how-to guidance lives in
 [`docs/casework-staff-guide.md`](../../docs/casework-staff-guide.md).
+
+## Case stage rail
+
+The case workspace is organized as a rail of seven stages: Intake, Scope, Collect,
+Review, Redact, Release, and Close. Each stage counts its own open work, and the
+staff screen shows which stage the case is in. The rail is a navigation read model.
+It is not a legal state. Status still changes only through `services.transition()`
+([requests](requests.md)), and closure readiness stays the authority on what blocks
+closing. The Redact stage's group decisions and per-record drawing are described in
+[record review](record-review-and-handling.md#the-redact-stage).
+
+`case_stages()` in [`apps/records/stages.py`](../../apps/records/stages.py) builds the
+rail. `RequestsViewSet.workspace_summary` in
+[`apps/api/resources/requests.py`](../../apps/api/resources/requests.py) returns it as
+the `stages` field of `GET /api/staff/requests/<number>/workspace-summary/`. Each entry
+has `id`, `label`, `state` (`done`, `current`, `blocked`, or `upcoming`), `open_count`,
+`summary`, and `reason`.
+
+```mermaid
+flowchart TD
+    A["Case with status"] --> T{"Terminal status?"}
+    T -->|yes| D["All seven stages done"]
+    T -->|no| W["_open_work: count open work per stage"]
+    W --> C["Current = earliest stage with open work, else Close"]
+    C --> S{"Stage index"}
+    S -->|before current| DN["done"]
+    S -->|after current| UP["upcoming, still reports its open work"]
+    S -->|current| B{"Blocked reason?"}
+    B -->|yes| BL["blocked, with reason"]
+    B -->|no| CU["current"]
+```
+
+Caption: the stage state is derived from open work counts in a fixed order. Only the
+current stage can be blocked.
+
+- **Current stage.** The earliest stage with open work. If none has open work, the case
+  is at Close. Later stages still report what is already waiting there, so a record that
+  arrives during collection shows as open review work while Collect stays current.
+- **Blocked.** The current stage reads blocked when it waits on the requester. Scope is
+  blocked while a clarification is open, and Release is blocked by an open fee deposit
+  gate ([fees and deposits](fees-and-deposits.md)). The reason is the case's own state.
+  It asserts no statute.
+- **Matter kinds.** The rail serves every matter kind, because collection, review,
+  redaction, production, and closure are shared. The only acknowledgment reading, that a
+  received case still owes its acknowledgment, is made for `public_records` alone. Other
+  kinds read "Received and not yet triaged" ([matter kinds](matter-kinds.md)).
+- **Tab names still in the payload.** `next_action.tab` and closure blockers still send
+  pre-rail tab names such as `overview`, `collection`, and `records`. The frontend maps
+  them to stage URLs with `caseTabPath()`. See
+  [staff frontend](../architecture/staff-frontend.md#case-stages-and-views).
+
+Invariants and where each is pinned in `apps/records/tests/test_case_stages.py`:
+
+- A received case is at Intake, and Scope and Close are upcoming
+  (`test_a_received_case_is_at_intake`).
+- An acknowledged case with no collection is at Scope (`test_an_acknowledged_case_with_no_collection_is_at_scope`).
+- An open clarification blocks Scope with a reason (`test_awaiting_clarification_blocks_scope_with_the_reason`).
+- An open collection makes Collect current; a completed one is done (`test_an_open_collection_makes_collect_current`).
+- Unreviewed records make Review current (`test_unreviewed_records_make_review_current`),
+  and superseded records are not review work (`test_superseded_records_are_not_review_work`).
+- Pending redaction proposals make Redact current, with the proposal count patched in
+  through `apps.records.stages.pending_proposal_count` (`test_pending_redaction_proposals_make_redact_current`).
+- Unreleased responsive records make Release current, and an open deposit blocks it
+  (`test_an_open_deposit_blocks_release`).
+- A closed case is done throughout (`test_a_closed_case_is_done_throughout`).
+- Stage order is fixed (`test_stages_run_in_order`). The API's stage list is pinned in
+  `apps/api/tests/test_case_workspace.py` ("The stage rail (#45) is server-derived").
+
+Extension seam. Adding or reordering a stage changes `STAGES` and `STAGE_IDS` in
+`stages.py`, the `_open_work` table, `STAGE_ROLES` in `frontend/src/nav.ts`, the
+`STAGE_DECISIONS` and `TabContent` branches in `frontend/src/case/CaseWorkspace.tsx`, and
+the agent capability `ui_routes` in `apps/api/capabilities.py`. Then run
+`test_case_ui_routes_name_a_stage_of_the_rail` in `apps/api/tests/test_agent_capabilities.py`,
+which fails if a capability names a stage the frontend does not authorize. The
+staff-frontend contract is in [staff frontend](../architecture/staff-frontend.md#case-stages-and-views).
+
+Focused validation:
+`PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_case_stages apps.api.tests.test_case_workspace --settings=config.test_settings`.
+Frontend: `cd frontend && bun run test -- src/case/CaseWorkspace.test.tsx`.
 
 ## Next due
 
@@ -124,8 +204,8 @@ only then the row. No row can point at bytes that were not scanned.
 `RequestsViewSet` in [`apps/api/resources/requests.py`](../../apps/api/resources/requests.py).
 It returns one newest-first timeline, serialized by `CaseActivitySerializer`
 (fields `id`, `type`, `occurred_at`, `label`, `actor_username`, `detail`,
-`work_item_id`, `delivery_status`, `flagged`). The staff workspace Overview shows a
-slice of this feed and the Activity tab shows all of it. This is the case history
+`work_item_id`, `delivery_status`, `flagged`). The Intake stage shows a bounded slice of
+this feed as its "Running log", and the Activity view shows all of it. This is the case history
 the UI renders, so a wrong label or an invented actor is wrong everywhere.
 
 ```mermaid
@@ -186,7 +266,7 @@ mounted at `/api/staff/time-entries/`, which filters by `?request=<number>`.
 - **Ownership.** The `staff` field is set from the session in `perform_create`, never
   from the request body.
 
-The case Overview tab mounts the time-entries panel
+The Intake stage (the case overview) mounts the time-entries panel
 (`frontend/src/pages/TimeEntries.tsx`, rendered from `TabContent` in
 `frontend/src/case/CaseWorkspace.tsx`). It passes the case number, so the list uses
 the same request scope as the API filter. The panel's list and mutations invalidate the

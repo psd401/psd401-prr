@@ -52,6 +52,20 @@ from .vault_metadata import (
 )
 
 _METADATA_SUFFIXES = {".csv", ".xml", ".json", ".txt"}
+
+_COMPLETION_LABELS = {
+    CollectionTask.Kind.VAULT_MAIL: "Vault collection",
+    CollectionTask.Kind.VAULT_DRIVE: "Vault Drive collection",
+    CollectionTask.Kind.VAULT_CHAT: "Vault Chat collection",
+}
+
+#: What each Vault collection kind writes to ``RecordItem.source_system``, so
+#: every record says which Google Workspace source it came from.
+SOURCE_SYSTEMS = {
+    CollectionTask.Kind.VAULT_MAIL: "google_vault_gmail",
+    CollectionTask.Kind.VAULT_DRIVE: "google_vault_drive",
+    CollectionTask.Kind.VAULT_CHAT: "google_vault_chat",
+}
 _HTML_TAG = re.compile(r"<[^>]+>")
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
@@ -353,19 +367,13 @@ def _safe_archive_member(info):
         )
 
 
-def _iter_export_messages(source, object_name):
-    suffix = PurePosixPath(object_name).suffix.lower()
-    if suffix == ".mbox":
-        yield from _mailbox_messages(source)
-        return
-    if suffix in _METADATA_SUFFIXES:
-        return
-    if suffix != ".zip":
-        raise VaultIngestPermanentError(
-            "export_format_unsupported",
-            "The completed Vault mail export is not MBOX or ZIP.",
-        )
+def _archive_members(source, *, wanted):
+    """Yield ``(info, spooled bytes)`` for each wanted member of a ZIP export.
 
+    The member count and expanded-byte limits bound the decompression of a
+    potentially hostile archive; every member is checked for an unsafe path
+    before anything is read.
+    """
     source.seek(0)
     try:
         archive = zipfile.ZipFile(source)
@@ -396,14 +404,14 @@ def _iter_export_messages(source, object_name):
                     "archive_too_large",
                     "The Vault export archive expands beyond its limit.",
                 )
-            if info.is_dir() or PurePosixPath(info.filename).suffix.lower() != ".mbox":
+            if info.is_dir() or not wanted(info):
                 continue
             with (
                 archive.open(info) as member,
                 tempfile.SpooledTemporaryFile(
                     max_size=memory_limit,
                     mode="w+b",
-                ) as mbox_source,
+                ) as spool,
             ):
                 copied = 0
                 while chunk := member.read(READ_CHUNK_SIZE):
@@ -413,9 +421,52 @@ def _iter_export_messages(source, object_name):
                             "archive_too_large",
                             "A Vault export archive member exceeded its limit.",
                         )
-                    mbox_source.write(chunk)
-                mbox_source.seek(0)
-                yield from _mailbox_messages(mbox_source)
+                    spool.write(chunk)
+                spool.seek(0)
+                yield info, spool
+
+
+def _iter_export_messages(source, object_name):
+    suffix = PurePosixPath(object_name).suffix.lower()
+    if suffix == ".mbox":
+        yield from _mailbox_messages(source)
+        return
+    if suffix in _METADATA_SUFFIXES:
+        return
+    if suffix != ".zip":
+        raise VaultIngestPermanentError(
+            "export_format_unsupported",
+            "The completed Vault mail export is not MBOX or ZIP.",
+        )
+    for _info, mbox_source in _archive_members(
+        source,
+        wanted=lambda info: PurePosixPath(info.filename).suffix.lower() == ".mbox",
+    ):
+        yield from _mailbox_messages(mbox_source)
+
+
+#: Export objects Vault writes beside a Drive export's ZIP archives: metadata,
+#: custodian and error listings, and the MD5 checksum file.
+_DRIVE_SIDE_FILE_SUFFIXES = _METADATA_SUFFIXES | {".md5"}
+
+
+def _iter_drive_files(source, object_name):
+    """Yield ``(filename, spooled bytes)`` for each file in a Drive export.
+
+    Vault exports Drive as ZIP archives of native files (Docs as DOCX, Sheets
+    as XLSX, Slides as PPTX, Drawings as PDF) next to metadata objects. Every
+    regular member of an archive is a file from Drive, whatever its suffix.
+    """
+    suffix = PurePosixPath(object_name).suffix.lower()
+    if suffix in _DRIVE_SIDE_FILE_SUFFIXES:
+        return
+    if suffix != ".zip":
+        raise VaultIngestPermanentError(
+            "export_format_unsupported",
+            "The completed Vault Drive export is not ZIP.",
+        )
+    for info, spool in _archive_members(source, wanted=lambda info: True):
+        yield PurePosixPath(info.filename).name, spool
 
 
 def _message_text(raw_message: bytes) -> tuple[str, str]:
@@ -541,6 +592,24 @@ def _scan_vault_message(
         expected_size=expected_size,
         expected_sha256=expected_sha256,
         max_bytes=runtime.get("PRR_VAULT_MESSAGE_MAX_BYTES"),
+        _client=client,
+    )
+
+
+def _scan_vault_file(
+    storage_key,
+    *,
+    expected_size,
+    expected_sha256,
+    client,
+):
+    """Scan one Drive file, bounded by the Drive file limit, not the
+    (smaller) message limit."""
+    return secure_files.scan_object_for_malware(
+        storage_key,
+        expected_size=expected_size,
+        expected_sha256=expected_sha256,
+        max_bytes=_drive_file_limit(),
         _client=client,
     )
 
@@ -715,6 +784,15 @@ def attach_custodians(item, task, extra_custodians=()):
         item.save(update_fields=["custodian"])
 
 
+#: Records that do not count as a live copy of a message for custodian
+#: attachment: a duplicate defers to its survivor, and a superseded record left
+#: review with its collection.
+_NOT_LIVE_COPY_STATES = (
+    RecordItem.ReviewState.DUPLICATE,
+    RecordItem.ReviewState.SUPERSEDED,
+)
+
+
 def attach_csv_sets_to_sole_records(run, task, csv_metadata):
     """Give the CSV's Message-ID set to each record this run touched that is,
     now that every message of the export has been read, the sole live record
@@ -750,7 +828,7 @@ def attach_csv_sets_to_sole_records(run, task, csv_metadata):
         )
         records = list(
             RecordItem.objects.filter(pk__in=record_ids)
-            .exclude(review_state=RecordItem.ReviewState.DUPLICATE)
+            .exclude(review_state__in=_NOT_LIVE_COPY_STATES)
             .exclude(email_message_id="")
             .order_by("created_at", "pk")
         )
@@ -761,7 +839,7 @@ def attach_csv_sets_to_sole_records(run, task, csv_metadata):
                     record.email_message_id for record in records
                 },
             )
-            .exclude(review_state=RecordItem.ReviewState.DUPLICATE)
+            .exclude(review_state__in=_NOT_LIVE_COPY_STATES)
             .values_list("email_message_id", flat=True)
         )
         for record in records:
@@ -802,7 +880,18 @@ def _message_duplicate(request_id, metadata):
     )
 
 
-def _mark_duplicate(artifact, duplicate):
+def _mark_duplicate(artifact, duplicate, task=None):
+    # A message an earlier, superseded collection brought in was taken out of
+    # review. When a collection (``task``) finds it again on its own terms, it
+    # goes back to a reviewer instead of folding into a record no one will
+    # open. Callers outside ingest re-point evidence only and pass no task.
+    if (
+        task is not None
+        and duplicate.review_state == RecordItem.ReviewState.SUPERSEDED
+    ):
+        from .collection_supersession import restore_superseded_record
+
+        restore_superseded_record(duplicate, task=task)
     artifact.outcome = VaultMessageArtifact.Outcome.DUPLICATE
     artifact.duplicate_of = duplicate
     artifact.record_item = None
@@ -901,7 +990,7 @@ def _process_message(
     )
     if raw_duplicate:
         attach(raw_duplicate.record_item)
-        _mark_duplicate(artifact, raw_duplicate.record_item)
+        _mark_duplicate(artifact, raw_duplicate.record_item, task=task)
         return not delivered_to
 
     # Message-ID plus the body digest catches what a byte hash cannot: the
@@ -933,7 +1022,7 @@ def _process_message(
     existing = _message_duplicate(task.request_id, metadata)
     if existing is not None:
         attach(existing)
-        _mark_duplicate(artifact, existing)
+        _mark_duplicate(artifact, existing, task=task)
         return not delivered_to
 
     try:
@@ -966,7 +1055,7 @@ def _process_message(
         artifact.rendered_sha256 = rendered_sha256
         artifact.save(update_fields=["rendered_sha256"])
         attach(converted_duplicate)
-        _mark_duplicate(artifact, converted_duplicate)
+        _mark_duplicate(artifact, converted_duplicate, task=task)
         return not delivered_to
 
     storage_key = generated_record_storage_key(
@@ -993,7 +1082,7 @@ def _process_message(
             item = RecordItem.objects.create(
                 request_id=task.request_id,
                 collection_task=task,
-                source_system="google_vault_gmail",
+                source_system=SOURCE_SYSTEMS[task.kind],
                 # Left empty on purpose: attach_custodians repairs it from
                 # the union of the task's custodians and the CSV's accounts,
                 # so the primary field and the custodian rows are decided in
@@ -1049,9 +1138,187 @@ def _process_message(
         artifact.rendered_sha256 = rendered_sha256
         artifact.save(update_fields=["rendered_sha256"])
         attach(winner)
-        _mark_duplicate(artifact, winner)
+        _mark_duplicate(artifact, winner, task=task)
         return not delivered_to
     return not delivered_to
+
+
+def _drive_file_limit() -> int:
+    """The largest single Drive file retained, in bytes."""
+    return runtime.get("PRR_VAULT_EXPORT_MAX_BYTES")
+
+
+def _fail_artifact(artifact, *, code, detail):
+    artifact.outcome = VaultMessageArtifact.Outcome.FAILED
+    artifact.last_error_code = code
+    artifact.last_error_detail = detail
+    artifact.save(update_fields=["outcome", "last_error_code", "last_error_detail"])
+
+
+def _process_drive_file(
+    source_object,
+    ordinal,
+    filename,
+    spool,
+    task,
+    *,
+    client,
+    scan,
+    cleanup_quarantine,
+):
+    """Ingest one Drive file as a candidate record, keeping the original.
+
+    The order is the one every untrusted file takes: quarantine, a ClamAV
+    verdict on the exact bytes, deletion of the quarantine copy, then an
+    immutable ``records/`` object, and only then the ``RecordItem``. The
+    review path (preview, convert, media, opaque) is decided by
+    ``handling.py`` from the file's name, and a rendition is queued for a
+    format that needs one. A file that is infected or too large is recorded
+    as failed on its artifact and the rest of the export proceeds.
+    """
+    from .scanned_records import guess_record_content_type, queue_record_derivative
+
+    artifact, _ = VaultMessageArtifact.objects.get_or_create(
+        export_object=source_object,
+        ordinal=ordinal,
+    )
+    if artifact.outcome in {
+        VaultMessageArtifact.Outcome.CREATED,
+        VaultMessageArtifact.Outcome.DUPLICATE,
+    }:
+        return
+    size, sha256 = _digest_file(spool)
+    if artifact.raw_sha256 and artifact.raw_sha256 != sha256:
+        raise VaultIngestPermanentError(
+            "message_identity_changed",
+            "A retained Vault file changed at an existing ordinal.",
+        )
+    limit = _drive_file_limit()
+    if size > limit:
+        _fail_artifact(
+            artifact,
+            code="file_too_large",
+            detail="A Drive file exceeded the configured byte limit; collect it by hand.",
+        )
+        audit(
+            "vault.file_too_large",
+            target=task.request.number,
+            collection_task_id=task.pk,
+            message_artifact_id=artifact.pk,
+            size=size,
+        )
+        return
+    display_name = _CONTROL.sub(" ", filename).strip()[:500] or "Drive file"
+    duplicate = (
+        RecordItem.objects.filter(request_id=task.request_id, sha256=sha256)
+        .order_by("created_at", "pk")
+        .first()
+    )
+    if duplicate is not None:
+        attach_custodians(duplicate, task)
+        artifact.rendered_sha256 = sha256
+        artifact.save(update_fields=["rendered_sha256"])
+        _mark_duplicate(artifact, duplicate, task=task)
+        return
+
+    quarantine_key = (
+        f"quarantine/vault-messages/{uuid.UUID(str(task.request_id))}/"
+        f"{int(task.pk)}/{int(artifact.pk)}.bin"
+    )
+    secure_files.store_quarantined_object(
+        quarantine_key,
+        spool,
+        content_length=size,
+        sha256=sha256,
+        _client=client,
+    )
+    try:
+        clean, _detail = scan(
+            quarantine_key,
+            expected_size=size,
+            expected_sha256=sha256,
+            client=client,
+        )
+    except secure_files.AttachmentScanUnavailable as exc:
+        cleanup_quarantine(quarantine_key, client=client)
+        detail = "ClamAV could not classify the Drive file."
+        _fail_artifact(artifact, code="file_malware_scan_unavailable", detail=detail)
+        raise VaultIngestError("file_malware_scan_unavailable", detail) from exc
+    cleanup_quarantine(quarantine_key, client=client)
+    if not clean:
+        _fail_artifact(
+            artifact,
+            code="file_malware_detected",
+            detail="A Drive file failed malware scanning and was not retained.",
+        )
+        audit(
+            "vault.file_malware_detected",
+            target=task.request.number,
+            collection_task_id=task.pk,
+            message_artifact_id=artifact.pk,
+        )
+        return
+
+    content_type = guess_record_content_type(display_name)
+    storage_key = generated_record_storage_key(
+        task.request_id,
+        original_filename=display_name,
+    )
+    spool.seek(0)
+    store_immutable_object(
+        storage_key,
+        spool,
+        content_length=size,
+        sha256=sha256,
+        content_type=content_type,
+        _client=client,
+    )
+    with transaction.atomic():
+        item = RecordItem.objects.create(
+            request_id=task.request_id,
+            collection_task=task,
+            source_system=SOURCE_SYSTEMS[task.kind],
+            custodian="",
+            original_filename=display_name,
+            storage_key=storage_key,
+            sha256=sha256,
+            content_length=size,
+            content_type=content_type[:255],
+        )
+        attach_custodians(item, task)
+        from apps.work_queue.integration import schedule_source_work_item_reconciliation
+
+        schedule_source_work_item_reconciliation("records", item.pk)
+        artifact.raw_storage_key = storage_key
+        artifact.raw_sha256 = sha256
+        artifact.raw_size = size
+        artifact.rendered_sha256 = sha256
+        artifact.outcome = VaultMessageArtifact.Outcome.CREATED
+        artifact.record_item = item
+        artifact.duplicate_of = None
+        artifact.completed_at = timezone.now()
+        artifact.last_error_code = ""
+        artifact.last_error_detail = ""
+        artifact.save(update_fields=[
+            "raw_storage_key",
+            "raw_sha256",
+            "raw_size",
+            "rendered_sha256",
+            "outcome",
+            "record_item",
+            "duplicate_of",
+            "completed_at",
+            "last_error_code",
+            "last_error_detail",
+        ])
+        transaction.on_commit(lambda: queue_record_derivative(item))
+        from .advisory_ai import defer_automatic_record_advisory
+        from .models import AdvisoryRun
+
+        defer_automatic_record_advisory(
+            item.pk,
+            kind=AdvisoryRun.Kind.RECORD_RESPONSIVENESS,
+        )
 
 
 def _refresh_counts(run):
@@ -1150,7 +1417,9 @@ def _mark_complete(run_id, lease_token):
     StatusEvent.objects.create(
         request=task.request,
         note=(
-            f"Vault collection completed: {run.messages_seen} message(s) "
+            f"{_COMPLETION_LABELS.get(task.kind, 'Vault collection')} completed: "
+            f"{run.messages_seen} "
+            f"{'file(s)' if task.kind == CollectionTask.Kind.VAULT_DRIVE else 'message(s)'} "
             f"processed, {run.items_created} review item(s) created, and "
             f"{run.duplicates_skipped} duplicate(s) retained as evidence."
         ),
@@ -1366,11 +1635,12 @@ def ingest_completed_export(
     task = CollectionTask.objects.select_related("request").get(
         pk=collection_task_id,
     )
-    if task.kind != CollectionTask.Kind.VAULT_MAIL:
+    if task.kind not in SOURCE_SYSTEMS:
         raise VaultIngestPermanentError(
             "collection_kind_unsupported",
-            "This ingest pipeline currently requires a Vault mail task.",
+            "This ingest pipeline requires a Vault Gmail, Drive, or Chat task.",
         )
+    drive = task.kind == CollectionTask.Kind.VAULT_DRIVE
     if export is None:
         from apps.integrations.vault import client as vault
 
@@ -1400,19 +1670,28 @@ def ingest_completed_export(
             )
         download = _default_download if _download is None else _download
         convert = convert_message_to_searchable_pdf if _convert is None else _convert
-        scan = _scan_vault_message if _scan is None else _scan
+        if _scan is not None:
+            scan = _scan
+        else:
+            scan = _scan_vault_file if drive else _scan_vault_message
         cleanup_quarantine = (
             _cleanup_vault_message_quarantine
             if _cleanup_quarantine is None
             else _cleanup_quarantine
         )
-        csv_metadata = _load_custodian_metadata(
-            run,
-            task,
-            files,
-            download=download,
-            client=_client,
-        )
+        if drive:
+            # Drive metadata is XML about files, not the per-message Gmail
+            # CSV; custodians come from the task's own accounts.
+            _record_custodian_metadata(run, {"status": "not_applicable", "objects": 0})
+            csv_metadata = None
+        else:
+            csv_metadata = _load_custodian_metadata(
+                run,
+                task,
+                files,
+                download=download,
+                client=_client,
+            )
         delivered_to_missing = 0
         for descriptor in files:
             _heartbeat(run, lease_token)
@@ -1427,8 +1706,26 @@ def ingest_completed_export(
                     client=_client,
                 )
                 try:
+                    if drive:
+                        for ordinal, (filename, spool) in enumerate(
+                            _iter_drive_files(retained, source_object.object_name),
+                            start=1,
+                        ):
+                            _process_drive_file(
+                                source_object,
+                                ordinal,
+                                filename,
+                                spool,
+                                task,
+                                client=_client,
+                                scan=scan,
+                                cleanup_quarantine=cleanup_quarantine,
+                            )
+                            _heartbeat(run, lease_token)
                     for ordinal, raw_message in enumerate(
-                        _iter_export_messages(
+                        ()
+                        if drive
+                        else _iter_export_messages(
                             retained,
                             source_object.object_name,
                         ),

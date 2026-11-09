@@ -29,7 +29,7 @@ from django.db.models import (
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast, Coalesce, Lower, NullIf
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema, extend_schema_field
+from drf_spectacular.utils import extend_schema, extend_schema_field, inline_serializer
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -43,7 +43,9 @@ from apps.api.identity import (
     has_staff_role,
     staff_roles,
 )
+from apps.api.pagination import CaseListPagination
 from apps.api.resources.collection_tasks import CollectionTaskSerializer
+from apps.api.resources.records_misc import InstallmentSerializer
 from apps.api.resources.work_items import (
     INBOX_MESSAGE_WORK_KINDS,
     NEXT_ACTION_LABELS,
@@ -58,6 +60,7 @@ from apps.api.vault_counts import (
     VaultCountRequestSerializer,
     VaultCountRunSerializer,
 )
+from apps.audit.models import audit
 from apps.configuration import runtime
 from apps.correspondence.models import (
     Correspondence,
@@ -66,7 +69,12 @@ from apps.correspondence.models import (
     InboundCorrespondenceReceipt,
 )
 from apps.records import services
-from apps.records.advisory_ai import request_request_intent_advisory
+from apps.records.advisory_ai import (
+    INTAKE_LABELS,
+    first_pass_progress,
+    request_intake_classification,
+    request_request_intent_advisory,
+)
 from apps.records.attachments import (
     AttachmentValidationError,
     attachment_digest_descriptors,
@@ -80,6 +88,7 @@ from apps.records.legacy_timeline import (
 )
 from apps.records.models import (
     CASE_NOTE_MAX_LENGTH,
+    AdvisoryFeedback,
     AdvisoryRun,
     CaseNote,
     Channel,
@@ -91,10 +100,12 @@ from apps.records.models import (
     InitialResponseAttestation,
     Installment,
     IntakeAttachment,
+    IntakeAutoApplication,
     JlarcRequestMetrics,
     MatterKind,
     PublicRecordsRequest,
     RecordItem,
+    RecordsEstimate,
     Requester,
     RequestStatus,
     StaffIntakeSubmission,
@@ -115,6 +126,7 @@ from apps.records.response_due import (
     annotate_next_response_due,
     next_response_due,
 )
+from apps.records.stages import STAGE_IDS, case_stages, current_stages
 from apps.records.upload_handlers import (
     IntakeAttachmentLimitUploadHandler,
     RecordUploadLimitUploadHandler,
@@ -208,6 +220,35 @@ def description_snippet(description: str | None) -> str:
     return collapsed[:DESCRIPTION_SNIPPET_LENGTH].rstrip() + "…"
 
 
+#: Long enough for two lines at the top of a case page.
+CASE_SUMMARY_LENGTH = 280
+
+
+def description_preview(description: str | None) -> str:
+    """The opening of a request, collapsed to about two lines.
+
+    Like ``description_snippet``, a reading of the legal record that never
+    writes it (rule 9).
+    """
+    collapsed = " ".join((description or "").split())
+    if len(collapsed) <= CASE_SUMMARY_LENGTH:
+        return collapsed
+    return collapsed[:CASE_SUMMARY_LENGTH].rstrip() + "…"
+
+
+def latest_intent_summary(prr) -> str:
+    """The summary from the case's newest completed request-intent run, or
+    "". Advisory text a person has not adopted; callers gate it to Records
+    Officers, the same boundary as the advisory title."""
+    run = AdvisoryRun.objects.filter(
+        request=prr,
+        kind=AdvisoryRun.Kind.REQUEST_INTENT,
+        state=AdvisoryRun.State.COMPLETE,
+    ).order_by("-created_at", "-pk").first()
+    summary = (run.proposal or {}).get("summary") if run else None
+    return summary.strip() if isinstance(summary, str) else ""
+
+
 def advisory_short_title(obj) -> str:
     """The annotated advisory short title, or "" when there is none.
 
@@ -247,6 +288,55 @@ class CaseNoteCreateSerializer(serializers.Serializer):
 CASE_NOTE_SNIPPET_LENGTH = 160
 
 
+def _unanswered_intake_labels(cases) -> dict:
+    """Each case's latest completed intake label nobody has answered (#33).
+
+    One query for the page: the newest completed intake run per case, kept
+    only when no officer feedback exists for it. A case whose latest run is
+    still pending or failed shows nothing.
+    """
+    latest = {}
+    runs = (
+        AdvisoryRun.objects.filter(
+            request__in=[case.pk for case in cases],
+            kind=AdvisoryRun.Kind.INTAKE_CLASSIFICATION,
+            record_item__isnull=True,
+        )
+        .annotate(
+            _answered=Exists(
+                AdvisoryFeedback.objects.filter(advisory_run=OuterRef("pk"))
+            )
+        )
+        .order_by("request_id", "-created_at")
+        .values("request_id", "state", "proposal", "_answered")
+    )
+    for run in runs:
+        latest.setdefault(run["request_id"], run)
+    suggestions = {}
+    for request_id, run in latest.items():
+        proposal = run["proposal"] or {}
+        if (
+            run["state"] == AdvisoryRun.State.COMPLETE
+            and not run["_answered"]
+            and proposal.get("label")
+        ):
+            suggestions[request_id] = {
+                "label": proposal.get("label"),
+                "target_case_number": proposal.get("target_case_number"),
+                "confidence": proposal.get("confidence"),
+            }
+    return suggestions
+
+
+class CaseStageSerializer(serializers.Serializer):
+    id = serializers.ChoiceField(choices=list(STAGE_IDS))
+    label = serializers.CharField()  # pyright: ignore[reportAssignmentType]
+    state = serializers.ChoiceField(choices=["done", "current", "blocked", "upcoming"])
+    open_count = serializers.IntegerField(min_value=0)
+    summary = serializers.CharField(allow_blank=True)
+    reason = serializers.CharField(allow_blank=True)
+
+
 class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
     requester_email = serializers.EmailField(source="requester.email", read_only=True)
     requester_name = serializers.CharField(source="requester.name", read_only=True)
@@ -263,6 +353,8 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
     next_due = serializers.SerializerMethodField()
     next_due_basis = serializers.SerializerMethodField()
     latest_note = serializers.SerializerMethodField()
+    intake_suggestion = serializers.SerializerMethodField()
+    stage = serializers.SerializerMethodField()
 
     class Meta:
         model = PublicRecordsRequest
@@ -277,7 +369,7 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
                   "next_due", "next_due_basis",
                   "latest_note",
                   "inbox_needs_attention", "latest_inbound_at",
-                  "subject", "subject_source"]
+                  "subject", "subject_source", "intake_suggestion", "stage"]
         read_only_fields = ["id", "number", "status", "matter_kind",
                             "received_at",
                             "statutory_response_due", "ferpa_access_due",
@@ -285,6 +377,21 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
                             "closed_at", "tolled_business_days",
                             "acknowledgment_sent_at",
                             "initial_response_delivered"]
+
+    @extend_schema_field(serializers.JSONField(allow_null=True))
+    def get_intake_suggestion(self, obj):
+        """The case's unanswered intake label, on a Records Officer's Inbox
+        rows only (#33); null everywhere else. Precomputed for the page."""
+        return (self.context.get("intake_suggestions") or {}).get(obj.pk)
+
+    @extend_schema_field(CaseStageSerializer(allow_null=True))
+    def get_stage(self, obj):
+        """The stage the case is in now, as its rail reads it (#45).
+
+        Precomputed for the whole page by ``stages.current_stages``; null on
+        any response that did not compute it, such as a single case.
+        """
+        return (self.context.get("stages") or {}).get(obj.pk)
 
     @extend_schema_field(serializers.IntegerField())
     def get_inbox_needs_attention(self, obj):
@@ -369,8 +476,14 @@ class PublicRecordsRequestListSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        user = self.context["request"].user
-        if not has_staff_role(user, StaffRole.RECORDS_OFFICER):
+        # A page reads the caller's role once (``list`` sets it), not once
+        # per row: each check is a group query.
+        is_officer = self.context.get("is_records_officer")
+        if is_officer is None:
+            is_officer = has_staff_role(
+                self.context["request"].user, StaffRole.RECORDS_OFFICER,
+            )
+        if not is_officer:
             data["requester_email"] = None
             data["requester_name"] = None
         return data
@@ -991,6 +1104,12 @@ class CaseClosureSerializer(serializers.Serializer):
     )
 
 
+class IntakeFeedbackSerializer(serializers.Serializer):
+    outcome = serializers.ChoiceField(choices=AdvisoryFeedback.Outcome.choices)
+    final_label = serializers.ChoiceField(choices=sorted(INTAKE_LABELS))
+    reason = serializers.CharField(max_length=2000, required=False, allow_blank=True)
+
+
 class MergeRequestSerializer(serializers.Serializer):
     """A merge names the case of record and says why, in writing."""
 
@@ -1142,6 +1261,12 @@ class CaseWorkspaceNextActionSerializer(serializers.Serializer):
     work_item_id = serializers.UUIDField()
 
 
+class CaseWorkspaceFirstPassSerializer(serializers.Serializer):
+    enabled = serializers.BooleanField()
+    read = serializers.IntegerField()
+    total = serializers.IntegerField()
+
+
 class CaseWorkspaceSummarySerializer(serializers.Serializer):
     number = serializers.CharField()
     legal_status = serializers.CharField()
@@ -1151,6 +1276,15 @@ class CaseWorkspaceSummarySerializer(serializers.Serializer):
     estimated_completion = serializers.DateField(allow_null=True)
     counts = CaseWorkspaceCountsSerializer()
     next_action = CaseWorkspaceNextActionSerializer(allow_null=True)
+    stages = CaseStageSerializer(many=True)
+    title = serializers.CharField()
+    summary = serializers.CharField(allow_blank=True)
+    matter_kind = serializers.CharField()
+    next_due = serializers.DateField(allow_null=True)
+    next_due_basis = serializers.ChoiceField(
+        choices=list(DueBasis.CHOICES), allow_null=True,
+    )
+    ai_first_pass = CaseWorkspaceFirstPassSerializer()
 
 
 class CaseActivityEntrySerializer(serializers.Serializer):
@@ -1352,6 +1486,50 @@ class RecordUploadResponseSerializer(serializers.Serializer):
     results = RecordUploadResultSerializer(many=True)
 
 
+def _scoping_data(session) -> dict:
+    from apps.records.models import ScopeIteration
+    from apps.records.vault_counts import source_count_summary
+
+    iterations = list(
+        ScopeIteration.objects.filter(session=session).select_related("count_run").order_by("number")
+    )
+    final = next(
+        (i for i in reversed(iterations) if i.count_run.state == "complete"), None,
+    )
+
+    def row(iteration):
+        run = iteration.count_run
+        return {
+            "number": iteration.number,
+            "count_run_id": str(run.pk),
+            "input_sha256": run.input_sha256,
+            "reason": iteration.reason,
+            "query": run.terms,
+            "search_scope": run.search_scope,
+            "custodians": iteration.custodians,
+            "state": run.state,
+            "total": run.total_count,
+            # Per source: Gmail, Drive, Chat (counting, counted, unavailable).
+            "source_counts": source_count_summary(run),
+            "top_accounts": run.account_counts[:5],
+            "date_range_start": run.date_range_start,
+            "date_range_end": run.date_range_end,
+        }
+
+    return {
+        "id": session.pk,
+        "trigger": session.trigger,
+        "actor": getattr(session.actor, "email", None),
+        "reason": session.reason,
+        "state": session.state,
+        "stop_reason": session.stop_reason,
+        "max_iterations": session.max_iterations,
+        "created_at": session.created_at,
+        "iterations": [row(i) for i in iterations],
+        "final": row(final) if final else None,
+    }
+
+
 class RequestsViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
@@ -1363,6 +1541,8 @@ class RequestsViewSet(
     drive status changes through the service layer, never the model directly.
     Estimate revisions use the durable correspondence resource.
     """
+
+    pagination_class = CaseListPagination
     lookup_field = "number"
     http_method_names = ["get", "patch", "post", "head", "options"]
     role_permissions = {
@@ -1395,7 +1575,14 @@ class RequestsViewSet(
         "ferpa_identity_verification": {StaffRole.RECORDS_OFFICER},
         "jlarc_classification": {StaffRole.RECORDS_OFFICER},
         "advisory_intent": {StaffRole.RECORDS_OFFICER},
+        "advisory_intake": {StaffRole.RECORDS_OFFICER},
+        "advisory_intake_feedback": {StaffRole.RECORDS_OFFICER},
+        # Sending it is approve_and_send, which is the officer's too.
+        "estimate_letter": {StaffRole.RECORDS_OFFICER},
         "vault_counts": {StaffRole.RECORDS_OFFICER},
+        "scoping": {StaffRole.RECORDS_OFFICER},
+        "rescope": {StaffRole.RECORDS_OFFICER},
+        "release_package": {StaffRole.RECORDS_OFFICER},
         "vault_collection": {StaffRole.RECORDS_OFFICER},
         # Adding candidate records to a case is collection, which is the
         # officer's: liaisons hand theirs over through a collection task.
@@ -1650,6 +1837,24 @@ class RequestsViewSet(
             return qs.order_by(*ordering)
         return qs.order_by(CASE_DUE_DATE.asc(nulls_last=True), "pk")
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        rows = page if page is not None else list(queryset)
+        context = dict(self.get_serializer_context())
+        context["stages"] = current_stages(rows)
+        context["is_records_officer"] = has_staff_role(
+            request.user, StaffRole.RECORDS_OFFICER,
+        )
+        if request.query_params.get("queue") == "inbox" and has_staff_role(
+            request.user, StaffRole.RECORDS_OFFICER,
+        ):
+            context["intake_suggestions"] = _unanswered_intake_labels(rows)
+        data = self.get_serializer_class()(rows, many=True, context=context).data
+        if page is not None:
+            return self.get_paginated_response(data)
+        return Response(data)
+
     def get_serializer_class(self):
         if self.action == "intake":
             return StaffIntakeSerializer
@@ -1757,7 +1962,20 @@ class RequestsViewSet(
                 ),
             }
         response_plan = initial_response_plan(prr)
+        is_officer = has_staff_role(request.user, StaffRole.RECORDS_OFFICER)
+        # What the case is about, at the top of its page: the advisory title
+        # and summary for a Records Officer (``advisory_short_title`` is
+        # already officer-only), the opening of the request for everyone.
+        due = next_response_due(prr)
         payload = {
+            "title": advisory_short_title(prr) or description_snippet(prr.description),
+            "summary": (
+                (latest_intent_summary(prr) if is_officer else "")
+                or description_preview(prr.description)
+            ),
+            "matter_kind": prr.matter_kind,
+            "next_due": due.date.isoformat() if due.date else None,
+            "next_due_basis": due.basis,
             "number": prr.number,
             "legal_status": prr.status,
             "requester": requester,
@@ -1814,6 +2032,8 @@ class RequestsViewSet(
                 if next_work is not None
                 else None
             ),
+            "stages": case_stages(prr),
+            "ai_first_pass": first_pass_progress(prr),
         }
         return Response(CaseWorkspaceSummarySerializer(payload).data)
 
@@ -2409,6 +2629,16 @@ class RequestsViewSet(
         url_path="close-non-request",
     )
     def close_non_request(self, request, number=None):
+        # A decision batch replaces this for token callers (#43): an agent
+        # proposes, the accountable person approves in the staff application.
+        handoff = human_only_handoff(
+            request,
+            capability_id="requests.close_non_request",
+            action="Propose an intake-label decision batch, or close in the staff application.",
+            required_role="records_officer",
+        )
+        if handoff is not None:
+            return handoff
         prr = self.get_object()
         serializer = NonRequestClosureSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -2630,6 +2860,16 @@ class RequestsViewSet(
     @action(detail=True, methods=["post"], url_path="merge")
     def merge(self, request, number=None):
         """Merge this duplicate case into the case of record; returns the target."""
+        # A decision batch replaces this for token callers (#43): an agent
+        # proposes, the accountable person approves in the staff application.
+        handoff = human_only_handoff(
+            request,
+            capability_id="requests.merge",
+            action="Propose an intake-label decision batch, or merge in the staff application.",
+            required_role="records_officer",
+        )
+        if handoff is not None:
+            return handoff
         source = self.get_object()
         serializer = MergeRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -2755,6 +2995,304 @@ class RequestsViewSet(
             status=status.HTTP_202_ACCEPTED,
         )
 
+    def _latest_intake_classification(self, prr):
+        return (
+            AdvisoryRun.objects.filter(
+                request=prr,
+                kind=AdvisoryRun.Kind.INTAKE_CLASSIFICATION,
+                record_item__isnull=True,
+            )
+            .select_related("requested_by")
+            .first()
+        )
+
+    @staticmethod
+    def _auto_applied(prr):
+        """The system's own closure of this case, if any (#34), and whether it
+        still stands: undoing it is an ordinary reopen, a later event."""
+        applied = (
+            IntakeAutoApplication.objects.filter(request=prr)
+            .select_related("status_event")
+            .first()
+        )
+        if applied is None:
+            return None
+        event = applied.status_event
+        return {
+            "label": applied.label,
+            "confidence": applied.confidence,
+            "applied_at": event.occurred_at,
+            "in_effect": (
+                prr.status == RequestStatus.CLOSED_NON_REQUEST
+                and not prr.events.filter(occurred_at__gt=event.occurred_at).exists()
+            ),
+        }
+
+    @extend_schema(
+        request=None,
+        responses={200: AdvisoryLatestSerializer, 202: AdvisoryRunSerializer},
+    )
+    @action(
+        detail=True,
+        methods=["get", "post"],
+        url_path="advisory-intake",
+    )
+    def advisory_intake(self, request, number=None):
+        """The suggested intake label for this case, for a person to confirm.
+
+        Advisory only: nothing here merges, closes, or sends. The officer
+        applies a label through the ordinary merge, close, or add-to-case
+        action and then records what they decided (``feedback``).
+        """
+        prr = self.get_object()
+        if request.method == "GET":
+            latest = self._latest_intake_classification(prr)
+            feedback = (
+                AdvisoryFeedback.objects.filter(advisory_run=latest).first()
+                if latest is not None
+                else None
+            )
+            return Response({
+                "enabled": runtime.get("PRR_AI_ADVISORY_ENABLED"),
+                "latest": (
+                    AdvisoryRunSerializer(latest).data if latest is not None else None
+                ),
+                "feedback": (
+                    {
+                        "outcome": feedback.outcome,
+                        "final_label": feedback.final_label,
+                        "created_at": feedback.created_at,
+                    }
+                    if feedback is not None
+                    else None
+                ),
+                "auto_applied": self._auto_applied(prr),
+            })
+        try:
+            run = request_intake_classification(prr.pk, actor=request.user)
+        except DjangoValidationError as exc:
+            detail = getattr(exc, "message_dict", None) or exc.messages
+            raise serializers.ValidationError(detail) from exc
+        return Response(
+            AdvisoryRunSerializer(run).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @extend_schema(
+        responses={
+            200: inline_serializer(
+                "EstimateLetter",
+                fields={
+                    "correspondence": inline_serializer(
+                        "EstimateLetterDraft",
+                        allow_null=True,
+                        fields={
+                            "id": serializers.UUIDField(),
+                            "version": serializers.IntegerField(),
+                            "status": serializers.CharField(),
+                            "system_prepared": serializers.BooleanField(),
+                            "subject": serializers.CharField(),
+                            "body": serializers.CharField(),
+                        },
+                    ),
+                    "estimate": serializers.JSONField(allow_null=True),
+                },
+            )
+        }
+    )
+    @action(detail=True, methods=["get"], url_path="estimate-letter")
+    def estimate_letter(self, request, number=None):
+        """The interpretation-and-estimate letter awaiting approval (#42).
+
+        Read only. The case header shows it with an Approve and send button,
+        which calls the ordinary correspondence approve-and-send primitive.
+        """
+        prr = self.get_object()
+        draft = (
+            Correspondence.objects.filter(
+                request=prr,
+                kind=Correspondence.Kind.INTERPRETATION_ESTIMATE,
+                status=Correspondence.Status.DRAFT,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        estimate = None
+        if draft is not None:
+            row = RecordsEstimate.objects.filter(
+                pk=draft.draft_metadata.get("estimate_id"), request=prr,
+            ).first()
+            if row is not None:
+                estimate = {"id": str(row.pk), "as_of": row.as_of, **row.result}
+        return Response({
+            "correspondence": None if draft is None else {
+                "id": draft.pk,
+                "version": draft.version,
+                "status": draft.status,
+                "system_prepared": draft.system_prepared,
+                "subject": draft.draft_subject,
+                "body": draft.draft_body,
+            },
+            "estimate": estimate,
+        })
+
+    @extend_schema(request=IntakeFeedbackSerializer, responses={201: None})
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="advisory-intake/feedback",
+    )
+    def advisory_intake_feedback(self, request, number=None):
+        """Record whether the officer agreed with the latest classification."""
+        prr = self.get_object()
+        payload = IntakeFeedbackSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        latest = self._latest_intake_classification(prr)
+        if latest is None or latest.state != AdvisoryRun.State.COMPLETE:
+            raise serializers.ValidationError(
+                {"detail": ["There is no completed classification to answer."]}
+            )
+        with transaction.atomic():
+            if AdvisoryFeedback.objects.filter(advisory_run=latest).exists():
+                return Response(
+                    {"code": "feedback_recorded",
+                     "detail": "This classification already has an answer."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            feedback = AdvisoryFeedback.objects.create(
+                advisory_run=latest,
+                actor=request.user,
+                **payload.validated_data,
+            )
+            audit(
+                "advisory.feedback_recorded",
+                target=str(latest.pk),
+                actor=request.user,
+                request_number=prr.number,
+                kind=latest.kind,
+                outcome=feedback.outcome,
+                final_label=feedback.final_label,
+                proposed_label=(latest.proposal or {}).get("label", ""),
+            )
+        return Response({"outcome": feedback.outcome}, status=status.HTTP_201_CREATED)
+
+    @extend_schema(
+        request=inline_serializer("ScopingRerun", fields={"reason": serializers.CharField()}),
+        responses={
+            200: inline_serializer(
+                "ScopingLatest",
+                fields={"session": serializers.JSONField(allow_null=True)},
+            ),
+            202: inline_serializer(
+                "ScopingStarted",
+                fields={"session": serializers.JSONField()},
+            ),
+        },
+    )
+    @action(detail=True, methods=["get", "post"], url_path="scoping")
+    def scoping(self, request, number=None):
+        """Iterative scoping (#36): the latest session's count trail, or an
+        officer's re-run with a reason. Counts only."""
+        from apps.records.models import ScopingSession
+        from apps.records.scoping import rerun_scoping
+
+        prr = self.get_object()
+        if request.method == "POST":
+            try:
+                session = rerun_scoping(
+                    prr, actor=request.user, reason=request.data.get("reason", ""),
+                )
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError(exc.messages) from exc
+            except VaultCountAlreadyRunning as exc:
+                raise serializers.ValidationError([str(exc)]) from exc
+            return Response({"session": _scoping_data(session)}, status=status.HTTP_202_ACCEPTED)
+        from apps.records.scoping import current_collection
+
+        session = ScopingSession.objects.filter(request=prr).order_by("-created_at").first()
+        return Response({
+            "session": _scoping_data(session) if session else None,
+            "current_collection": current_collection(prr),
+        })
+
+    @extend_schema(
+        request=inline_serializer(
+            "Rescope",
+            fields={
+                "count_run_id": serializers.UUIDField(),
+                "expected_input_sha256": serializers.CharField(),
+                "reason": serializers.CharField(),
+            },
+        ),
+        responses={202: CollectionTaskSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="rescope")
+    def rescope(self, request, number=None):
+        """Collect a new scope and supersede the previous collection (#37)."""
+        # A decision batch replaces this for token callers (#43): an agent
+        # proposes, the accountable person approves in the staff application.
+        handoff = human_only_handoff(
+            request,
+            capability_id="requests.rescope",
+            action="Propose a scope-and-collect decision batch, or re-scope in the staff application.",
+            required_role="records_officer",
+        )
+        if handoff is not None:
+            return handoff
+        from apps.records.scoping import rescope as rescope_request
+
+        prr = self.get_object()
+        try:
+            task = rescope_request(
+                prr,
+                count_run_id=request.data.get("count_run_id"),
+                expected_input_sha256=request.data.get("expected_input_sha256", ""),
+                actor=request.user,
+                reason=request.data.get("reason", ""),
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
+        return Response(
+            CollectionTaskSerializer(task, context={"request": request}).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @extend_schema(
+        request=None,
+        responses={
+            200: InstallmentSerializer,
+            400: inline_serializer(
+                "ReleasePackageBlocked",
+                fields={
+                    "detail": serializers.CharField(),
+                    "blocker": inline_serializer(
+                        "ReleasePackageBlocker",
+                        fields={"code": serializers.CharField(), "tab": serializers.CharField()},
+                    ),
+                },
+            ),
+        },
+    )
+    @action(detail=True, methods=["post"], url_path="release-package")
+    def release_package(self, request, number=None):
+        """Build the next release package in one action (#47); never releases it."""
+        from apps.records.release_package import (
+            ReleasePackageBlocked,
+            build_release_package,
+        )
+
+        prr = self.get_object()
+        try:
+            installment = build_release_package(prr.number, actor=request.user)
+        except ReleasePackageBlocked as exc:
+            return Response(
+                {"detail": exc.messages[0], "blocker": {"code": exc.code, "tab": exc.tab}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
+        return Response(InstallmentSerializer(installment, context={"request": request}).data)
+
     @extend_schema(
         request=VaultCountRequestSerializer,
         responses={200: VaultCountLatestSerializer, 202: VaultCountRunSerializer},
@@ -2769,13 +3307,16 @@ class RequestsViewSet(
         if request.method == "GET":
             latest = (
                 VaultCountRun.objects.filter(request=prr)
-                .select_related("requested_by", "collection_task")
+                .select_related("requested_by")
+                .prefetch_related("collection_tasks")
                 .first()
             )
             return Response(
                 {
                     "enabled": vault_count_enabled(),
                     "corpus": "MAIL",
+                    # Every count searches these Google Workspace sources.
+                    "sources": ["mail", "drive", "chat"],
                     "latest": (
                         VaultCountRunSerializer(latest).data
                         if latest is not None
@@ -2819,6 +3360,16 @@ class RequestsViewSet(
         url_path="vault-collection",
     )
     def vault_collection(self, request, number=None):
+        # A decision batch replaces this for token callers (#43): an agent
+        # proposes, the accountable person approves in the staff application.
+        handoff = human_only_handoff(
+            request,
+            capability_id="requests.vault_collection.start",
+            action="Propose a scope-and-collect decision batch, or collect in the staff application.",
+            required_role="records_officer",
+        )
+        if handoff is not None:
+            return handoff
         prr = self.get_object()
         serializer = VaultCollectionRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

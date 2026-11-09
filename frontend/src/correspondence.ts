@@ -13,6 +13,7 @@ export type CorrespondenceKind =
   | 'clarification_response'
   | 'delivery_status_notification'
   | 'estimate_revision'
+  | 'interpretation_estimate'
   | 'fee_estimate'
   | 'installment_notice'
   | 'submission_receipt'
@@ -345,6 +346,7 @@ export const CORRESPONDENCE_KIND_LABELS: Record<CorrespondenceKind, string> = {
   clarification_response: 'Clarification response',
   delivery_status_notification: 'Delivery status report',
   estimate_revision: 'Estimate revision',
+  interpretation_estimate: 'Interpretation and estimate',
   fee_estimate: 'Fee estimate',
   installment_notice: 'Installment notice',
   submission_receipt: 'Submission receipt',

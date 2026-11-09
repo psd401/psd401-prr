@@ -1,7 +1,7 @@
 ---
 type: Integration
 title: MCP Server
-description: MCP access to the PSD401 PRR staff API for LLM clients. Standalone stdio server exposes eight read-only tools; the hosted /mcp endpoint adds three attributed draft and proposal tools that never approve, send, or change legal state.
+description: MCP access to the PSD401 PRR staff API for LLM clients. Standalone stdio server exposes eight read-only tools; the hosted /mcp endpoint adds attributed reads of one request's records, clusters, AI advisories, and decision batches, plus five personal-token draft and proposal tools that never approve, send, decide, or change legal state.
 tags: [integration, mcp, agent, llm, read-only]
 timestamp: 2026-10-07T22:37:58-07:00
 ---
@@ -14,8 +14,10 @@ Claude Desktop. There are two transports, and they differ in what they can do:
 - **Standalone stdio** (`integrations/mcp/server.py`): read-only, for local and
   server-side automation under a nonstaff identity.
 - **Hosted streamable HTTP** at `/mcp` (`integrations/mcp/hosted.py`, mounted in
-  `config/asgi.py`): the same reads, plus three personal-token tools that create
-  drafts or return proposals. It rejects the shared read-only identity.
+  `config/asgi.py`): the same reads, plus attributed reads of records, clusters,
+  advisories, and decision batches, and five personal-token tools that create drafts,
+  return proposals, or propose a [decision batch](../domain/decision-batches.md) for a
+  person to approve. It rejects the shared read-only identity.
 
 Both transports are facades over the staff REST API. No MCP tool holds a rule
 of its own. The capability contract that maps these tools to REST primitives is
@@ -41,7 +43,7 @@ in [agent-parity.md](../architecture/agent-parity.md).
 
 - **`client.py`** — Pure HTTP client, no MCP dependency, loads in Django venv
 - **`tools.py`** — FastMCP tool registry shared by both transports; `create_mcp_server()`
-  registers the write tools only when `include_write_tools=True` (hosted)
+  registers the hosted reads and write tools only when `include_write_tools=True` (hosted)
 - **`server.py`** — standalone stdio entrypoint, runs via `uv run` standalone
 - **`hosted.py`** — `DjangoPRRClient` and `create_hosted_mcp()`, with the
   `StaffTokenAuthenticationMiddleware` that authenticates the `/mcp` route
@@ -79,9 +81,11 @@ The **shared read tools** are registered on both transports. The standalone
 stdio server registers no other tools. Wire names are namespaced: every tool name
 starts with `TOOL_NAMESPACE` (`psd_prr_`) and is defined once as a constant in
 `integrations/mcp/tools.py`. The `PRRClient` method behind each name is a separate
-vocabulary, mapped in `TOOL_CLIENT_METHODS`. The server is capped at `MAX_TOOLS` (15) in
-`tools.py`. The contract gate pins one SHA-256 digest over all eleven tool definitions, so a
-change to a name, title, description, or annotation fails until the pin is regenerated on purpose.
+vocabulary, mapped in `TOOL_CLIENT_METHODS`. Build guidance asks for about fifteen tools per
+server, but `tools.py` states that this is reviewed per change, not enforced by a count gate. The
+contract gate in `apps/api/tests/test_mcp_tool_contract.py` pins one SHA-256 digest over the tool
+definitions (`test_tool_definitions_match_the_pinned_digest`), so a change to a name, title,
+description, or annotation fails until the pin is regenerated on purpose.
 
 | Wire tool name | Client method | Endpoint | Purpose |
 |------|------|----------|---------|
@@ -100,9 +104,15 @@ returns something for a human to act on, and none executes a legal action.
 
 | Wire tool name | Client method | Behavior | Human handoff |
 |------|------|----------|---------------|
+| `psd_prr_acknowledgment_draft` | `draft_acknowledgment` | Creates one RCW 42.56.520 acknowledgment draft from the district's versioned statutory template; takes an optional ISO `estimated_completion` and rejects a date that disagrees with a published estimate. There is no batch form. The response confirms the draft but omits the letter text, because the letter quotes the full request description, which can name a student | A human reads and approves the letter in the case Messages tab. Drafting does not satisfy or defer the five-business-day response |
 | `psd_prr_clarification_letter_draft` | `draft_clarification_letter` | Calls the staff clarification draft primitive; creates an editable draft | A Records Officer approves, queues, and sends it in the staff UI |
 | `psd_prr_collection_task_notes_propose` | `update_collection_task_notes` | Reads the task and returns current and proposed instructions | The normal PATCH is performed by a human |
 | `psd_prr_exemption_citations_suggest` | `suggest_exemption_citations` | Validates active candidate citations for one record item and returns a proposal | A reviewer confirms; nothing is attached or withheld |
+| `psd_prr_decision_batch_propose` | `propose_decision_batch` | Stores a proposed batch of one of five kinds (review, supersede, scope and collect, redaction group, intake label) with its evidence and changes nothing else | A person with the kind's role approves or rejects it in the Decisions queue; see [decision batches](../domain/decision-batches.md) |
+| `psd_prr_decision_batch_get` | `get_decision_batch` | Reads one decision batch by id, or lists batches filtered by request number and state, with the proposer, records by id, and any decision | A read only |
+| `psd_prr_record_items_list` | `list_record_items` | Lists one request's records, 50 per page, with id, custodian, sender domain, review state, redaction count, tags, and the standing AI suggestion. Rows omit record text, filenames, addresses, and model rationale | A read only, for choosing records to propose; requires a reviewer or Records Officer token |
+| `psd_prr_record_clusters_list` | `list_record_clusters` | Groups one request's records by thread, sender, or tag, giving each cluster's size, majority AI suggestion, and record ids | A read only; requires a reviewer or Records Officer token |
+| `psd_prr_advisories_get` | `get_advisories` | Returns the latest responsiveness suggestion and redaction candidates for one record, without the model rationale or record text | A suggestion for a person; requires a reviewer or Records Officer token |
 
 ### Tool Parameters
 
@@ -120,11 +130,14 @@ psd_prr_clarification_letter_draft(request_number="PRR-2026-0012", clarification
 
 The standalone stdio server is **read-only by construction**. It registers only
 the eight shared read tools, and its dedicated nonstaff credential carries only
-`records.read_staff_api`. Hosted `/mcp` adds the three gated tools above. Those
-tools use `_post` only for the draft and proposal calls described in the tool
-table, and the attributed personal token is required for them. No hosted tool
+`records.read_staff_api`. Hosted `/mcp` adds the gated tools above. The
+draft tools POST to the staff draft endpoints. The proposal tools only read and return a
+proposal, except `psd_prr_decision_batch_propose`, which stores a proposal row for a person
+to decide. The five write and proposal tools require an attributed personal token, and the
+hosted reads of records, clusters, advisories, and decision batches are limited to reviewer
+and Records Officer roles. No hosted tool
 approves, queues, sends, applies an estimate, attaches a citation, resolves a
-clarification, denies a request, or excludes a camera.
+clarification, denies a request, excludes a camera, or approves or rejects a decision batch.
 
 ### Transport Security
 
@@ -165,13 +178,13 @@ Client and tool tests run against a Django test server:
 
 - [`apps/api/tests/test_mcp_client.py`](../../apps/api/tests/test_mcp_client.py): shared read tools and transport validation
 - [`apps/api/tests/test_hosted_mcp.py`](../../apps/api/tests/test_hosted_mcp.py): hosted `/mcp` route, token authentication, and the gated tools
-- [`apps/api/tests/test_mcp_write_tools.py`](../../apps/api/tests/test_mcp_write_tools.py): the three hosted draft and proposal tools, the shared read-only identity rejection, and the absence of approval or legal-effect tools
+- [`apps/api/tests/test_mcp_write_tools.py`](../../apps/api/tests/test_mcp_write_tools.py): the five hosted draft and proposal tools, the shared read-only identity rejection, and the absence of approval or legal-effect tools; [`apps/api/tests/test_mcp_decision_batch_tools.py`](../../apps/api/tests/test_mcp_decision_batch_tools.py): the decision-batch read and proposal tools and their filename redaction
 - [`apps/api/tests/test_mcp_client_security.py`](../../apps/api/tests/test_mcp_client_security.py): plaintext-URL refusal before a session is created, loopback-only HTTP, and no redirect following
-- [`apps/api/tests/test_mcp_tool_contract.py`](../../apps/api/tests/test_mcp_tool_contract.py): a static gate on the tool list itself. It checks the tool-name namespace, the tool ceiling, that read and write registries do not overlap, that every tool maps to a real `PRRClient` method, the read-only and destructive hints, and the pinned tool-definition digest and `server.json` inventory (`server.json` at the repository root). A change to a tool name, annotation, or description fails here until the manifest and pin are updated.
+- [`apps/api/tests/test_mcp_tool_contract.py`](../../apps/api/tests/test_mcp_tool_contract.py): a static gate on the tool list itself. It checks the tool-name namespace, the tool ceiling, that read and write registries do not overlap, that every tool maps to a real `PRRClient` method, the read-only and destructive hints, and the pinned tool-definition digest and `server.json` inventory (`server.json` at the repository root). A change to a tool name, annotation, or description fails here until the manifest and pin are updated. Tool descriptions are prompts that connected agents follow, so a wording change alters agent behavior even when no code changes. When wording changes on purpose, the failure message prints the new digest, and the `TOOL_DEFINITION_DIGEST` constant in `apps/api/tests/test_mcp_tool_contract.py` is updated in the same commit so review sees the wording diff beside it ([package README](../../integrations/mcp/README.md#tool-contract-and-the-definition-pin)).
 - [`apps/api/tests/test_mcp_evals.py`](../../apps/api/tests/test_mcp_evals.py): runs every case in `integrations/mcp/evals.py` over a real hosted MCP session with an attributed personal token, rather than calling `PRRClient` directly. A case fails when the wire contract breaks, for example a renamed tool, a dropped annotation, a changed argument name, or a serializer that stops returning a field an agent is told to read. The suite also requires that every read tool has an eval case.
 
 Focused command:
-`PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_mcp_client apps.api.tests.test_hosted_mcp apps.api.tests.test_mcp_tool_contract --settings=config.test_settings`
+`PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_mcp_client apps.api.tests.test_hosted_mcp apps.api.tests.test_mcp_write_tools apps.api.tests.test_mcp_tool_contract --settings=config.test_settings`
 
 The eval suite exercises the mounted transport, so run `apps.api.tests.test_mcp_evals`
 when a change touches `integrations/mcp/evals.py`, a serializer behind a read tool,
@@ -202,3 +215,4 @@ Tests verify:
 - [../domain/correspondence.md](../domain/correspondence.md) — Correspondence domain, which hosts the draft tools' outputs
 - [cli.md](cli.md) — Terminal client that exposes the same staff capabilities with the same human handoffs
 - [../architecture/overview.md](../architecture/overview.md) — API architecture
+- [../architecture/agent-parity.md](../architecture/agent-parity.md) — Capability catalog that maps each MCP tool to its REST primitive

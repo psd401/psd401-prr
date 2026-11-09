@@ -50,6 +50,36 @@ def execute_advisory_analysis(run_id: str):
 
 
 @shared_task
+def continue_scoping(session_id: int) -> None:
+    """Take the next scoping step after a count finishes (#36). Counts only."""
+    from .scoping import continue_scoping as continue_session
+
+    continue_session(session_id)
+
+
+@shared_task
+def prepare_estimate_letters(*, limit: int = 10) -> int:
+    """Draft interpretation-and-estimate letters for ready cases (#42).
+
+    Drafts only: a Records Officer approves and sends each letter.
+    """
+    from .estimate_letters import prepare_estimate_letters as prepare
+
+    return prepare(limit=limit)
+
+
+@shared_task
+def prepare_scope_letters(*, limit: int = 10) -> int:
+    """Draft the informational scope letter for cases with a finished count.
+
+    Drafts only: a person approves and sends each letter.
+    """
+    from .scope_letters import prepare_scope_letters as prepare
+
+    return prepare(limit=limit)
+
+
+@shared_task
 def prepare_record_review_advisories(*, limit: int = 25) -> int:
     """Recover missed automatic record analysis in small bounded batches."""
     if not (
@@ -192,15 +222,33 @@ class _VaultCollectionRetry(RuntimeError):
     """Content-free retry marker; provider errors never enter task evidence."""
 
 
-@shared_task(bind=True, max_retries=4)
-def execute_vault_collection(self, collection_task_id: int):
+#: Vault's export-creation quota (HTTP 429) refuses the third or fourth export
+#: created within a minute (production, 2026-11-08). A refused pull waits two
+#: minutes per try, about an hour in all, instead of the short fault budget.
+VAULT_RATE_LIMIT_RETRIES = 30
+#: Any other provider fault: the original short budget, counted on its own so
+#: earlier rate-limit waits never use it up.
+VAULT_FAULT_RETRIES = 4
+
+
+@shared_task(bind=True, max_retries=VAULT_RATE_LIMIT_RETRIES + VAULT_FAULT_RETRIES)
+def execute_vault_collection(
+    self, collection_task_id: int, rate_limit_retries: int = 0, fault_retries: int = 0,
+):
     """Start one confirmed Vault hold/export with bounded safe retries."""
+    from apps.integrations.vault.client import is_rate_limited
+
     from .vault_collections import fail_vault_collection, start_vault_collection
 
     try:
         start_vault_collection(collection_task_id)
-    except Exception:  # noqa: BLE001 - a provider fault retries, then fails the collection
-        if self.request.retries >= self.max_retries:
+    except Exception as exc:  # noqa: BLE001 - a provider fault retries, then fails the collection
+        limited = is_rate_limited(exc)
+        if limited:
+            spent, budget = rate_limit_retries, VAULT_RATE_LIMIT_RETRIES
+        else:
+            spent, budget = fault_retries, VAULT_FAULT_RETRIES
+        if spent >= budget:
             fail_vault_collection(
                 collection_task_id,
                 code="provider_unavailable",
@@ -214,12 +262,16 @@ def execute_vault_collection(self, collection_task_id: int):
                 extra={"collection_task": collection_task_id},
             )
             return
-        countdown = min(30 * (2 ** self.request.retries), 300)
+        countdown = 120 if limited else min(30 * (2 ** fault_retries), 300)
         raise self.retry(
             exc=_VaultCollectionRetry(
                 "Vault collection provider is temporarily unavailable."
             ),
             countdown=countdown,
+            kwargs={
+                "rate_limit_retries": rate_limit_retries + int(limited),
+                "fault_retries": fault_retries + int(not limited),
+            },
         ) from None
 
 
@@ -241,6 +293,14 @@ def poll_vault_count(self, run_id: str):
         raise
     if not complete:
         if self.request.retries >= self.max_retries:
+            from .models import VaultCountRun
+
+            run = VaultCountRun.objects.only("source_counts").get(pk=run_id)
+            if "mail" in (run.source_counts or {}):
+                # Gmail is counted; a Drive or Chat count-only export can
+                # take longer than this fast poll. The export poller in
+                # poll_vault_exports finishes it, bounded by its own timeout.
+                return
             fail_vault_count(
                 run_id,
                 code="provider_timeout",
@@ -528,6 +588,22 @@ def poll_vault_exports():
             )
 
     _reconcile_stale_vault_ingest_claims()
+    _advance_vault_counts()
+
+
+def _advance_vault_counts():
+    """Finish Drive and Chat counts, and delete count-only exports."""
+    from .vault_counts import advance_vault_count, runs_waiting_on_sources
+
+    for run_id in list(runs_waiting_on_sources()):
+        try:
+            advance_vault_count(run_id)
+        except Exception:  # noqa: BLE001 - one run's provider fault must not stop the others
+            # Provider text can echo the query; keep the log to the run id.
+            logger.error(
+                "Vault count could not be advanced; provider detail suppressed",
+                extra={"vault_count_run": str(run_id)},
+            )
 
 
 @shared_task(bind=True, max_retries=5)

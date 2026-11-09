@@ -1,13 +1,13 @@
 # ABOUTME: Staff resources for requesters, record items, installments, and
 # ABOUTME: PRA time entries — four small verticals grouped in one module.
+import hashlib
 from decimal import Decimal
+from typing import NoReturn
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
-from django.db.models.fields.json import KeyTextTransform
-from django.db.models.functions import Cast
-from django.http import HttpResponse
-from drf_spectacular.utils import extend_schema, extend_schema_field
+from django.http import HttpResponse, QueryDict
+from drf_spectacular.utils import extend_schema, extend_schema_field, inline_serializer
 from rest_framework import filters, mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -21,6 +21,8 @@ from apps.records.advisory_ai import (
     request_record_redaction_advisory,
     request_record_responsiveness_advisory,
 )
+from apps.records.agreement import annotate_latest_suggestion
+from apps.records.clusters import cluster_records
 from apps.records.exemption_logs import generate_exemption_log
 from apps.records.fees import (
     activate_fee_schedule,
@@ -78,6 +80,7 @@ from apps.records.production import (
     prepare_installment,
     release_installment_with_notice,
 )
+from apps.records.readable import record_reading_text
 from apps.records.record_tags import (
     PRIVILEGE_TAGS,
     TAG_LABELS,
@@ -93,18 +96,23 @@ from apps.records.redaction_ai import (
     reject_redaction_proposal,
 )
 from apps.records.review import (
+    BULK_REVIEW_FILTER_MAX_ITEMS,
     BULK_REVIEW_MAX_ITEMS,
     BULK_REVIEW_STATES,
+    BulkSelectionChanged,
     approve_second_review,
+    bulk_review_confirmed_selection,
     bulk_review_records,
+    bulk_review_selection,
     create_redaction,
     render_redacted_record,
     review_record,
+    undo_review,
     void_redaction,
 )
 
 
-def _raise_api_validation(exc):
+def _raise_api_validation(exc) -> NoReturn:
     detail = getattr(exc, "message_dict", None) or exc.messages
     raise serializers.ValidationError(detail) from exc
 
@@ -127,6 +135,11 @@ class RequesterViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
     search_fields = ["name", "email"]
     allowed_roles = {StaffRole.RECORDS_OFFICER}
     allow_readonly_agent = False
+
+
+class RecordReadingTextSerializer(serializers.Serializer):
+    text = serializers.CharField(allow_blank=True)
+    truncated = serializers.BooleanField()
 
 
 class RecordItemSerializer(serializers.ModelSerializer):
@@ -167,7 +180,7 @@ class RecordItemSerializer(serializers.ModelSerializer):
             "email_from", "email_to", "email_cc", "email_sent_at",
             "email_message_id", "email_in_reply_to", "email_sender_domain",
             "email_auto_submitted", "email_list_id", "email_precedence",
-            "email_has_calendar_part",
+            "email_has_calendar_part", "email_body_sha256",
             "tags", "advisory_suggested_state", "advisory_confidence",
         ]
 
@@ -271,18 +284,78 @@ class RecordReviewInputSerializer(serializers.Serializer):
     )
 
 
+#: The list filters a filter-mode bulk decision may carry. Ordering and paging
+#: are left out: they change what is shown, never what matches.
+BULK_FILTER_KEYS = (
+    "request", "review_state", "source_system", "tag", "sender_domain",
+    "custodian", "advisory_state", "confidence_min", "search", "handling",
+    "collection_task",
+)
+
+
 class BulkRecordReviewInputSerializer(serializers.Serializer):
-    """One human responsiveness decision over an explicitly selected set."""
+    """One human responsiveness decision over an explicit set, or over every
+    record a filter matches after the reviewer has seen the exact count."""
 
     record_item_ids = serializers.ListField(
         child=serializers.UUIDField(),
         allow_empty=False,
         max_length=BULK_REVIEW_MAX_ITEMS,
+        required=False,
     )
+    filter = serializers.DictField(
+        child=serializers.CharField(allow_blank=True),
+        required=False,
+    )
+    expected_count = serializers.IntegerField(min_value=1, required=False)
+    selection_sha256 = serializers.RegexField(r"^[0-9a-f]{64}$", required=False)
     state = serializers.ChoiceField(choices=[
         (value, RecordItem.ReviewState(value).label)
         for value in BULK_REVIEW_STATES
     ])
+
+    def validate(self, attrs):
+        has_ids = "record_item_ids" in attrs
+        has_filter = "filter" in attrs
+        if has_ids == has_filter:
+            raise serializers.ValidationError(
+                "Send either record_item_ids or a filter, not both."
+            )
+        if has_filter:
+            if "expected_count" not in attrs or "selection_sha256" not in attrs:
+                raise serializers.ValidationError(
+                    "A filter decision needs the expected_count and "
+                    "selection_sha256 from bulk-selection."
+                )
+            attrs["filter"] = _bulk_filter(attrs["filter"])
+        return attrs
+
+
+def _auditable_filter(filters):
+    """The filter as the append-only audit log may keep it.
+
+    Free text a reviewer typed can name a student; the log keeps its digest,
+    which still proves which search was decided, never the words.
+    """
+    detail = dict(filters)
+    search = detail.pop("search", "")
+    if search:
+        detail["search_sha256"] = hashlib.sha256(search.encode()).hexdigest()
+    return detail
+
+
+def _bulk_filter(values):
+    """Keep only list filters, and require exactly one request."""
+    cleaned = {
+        key: str(values[key]).strip()
+        for key in BULK_FILTER_KEYS
+        if str(values.get(key) or "").strip()
+    }
+    if not cleaned.get("request"):
+        raise serializers.ValidationError(
+            {"request": ["Bulk review by filter applies to one request at a time."]}
+        )
+    return cleaned
 
 
 #: How many distinct values one open-ended facet returns. A reviewer chooses
@@ -346,6 +419,50 @@ def _truthy_flag(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+#: Clusters returned at once; the rest are counted in ``cluster_count``.
+CLUSTER_LIMIT = 200
+
+
+# Declared through inline_serializer: a serializer *class* attribute named
+# ``label`` collides with Field.label in the type stubs.
+RECORD_CLUSTERS_SCHEMA = inline_serializer(
+    "RecordClusters",
+    fields={
+        "group_by": serializers.CharField(),
+        "cluster_count": serializers.IntegerField(),
+        "clusters": inline_serializer(
+            "RecordCluster",
+            many=True,
+            fields={
+                "key": serializers.CharField(allow_blank=True),
+                "label": serializers.CharField(),
+                "size": serializers.IntegerField(),
+                "ai_majority": inline_serializer(
+                    "RecordClusterMajority",
+                    allow_null=True,
+                    fields={
+                        "label": serializers.CharField(),
+                        "count": serializers.IntegerField(),
+                    },
+                ),
+                "samples": inline_serializer(
+                    "RecordClusterSample",
+                    many=True,
+                    fields={
+                        "id": serializers.UUIDField(),
+                        "original_filename": serializers.CharField(),
+                        "review_state": serializers.CharField(),
+                        "advisory_suggested_state": serializers.CharField(allow_null=True),
+                        "advisory_confidence": serializers.FloatField(allow_null=True),
+                    },
+                ),
+                "record_item_ids": serializers.ListField(child=serializers.UUIDField()),
+            },
+        ),
+    },
+)
+
+
 class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                          viewsets.GenericViewSet):
     serializer_class = RecordItemSerializer
@@ -354,11 +471,17 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         "retrieve": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER, StaffRole.ADMIN},
         "preview_metadata": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
         "preview_page": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
+        "text": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
         "review": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
+        "undo_review": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
         # Any review role may bulk-review; the cap and the per-item audit row
         # are what bound the action, not a narrower role.
         "bulk_review": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
+        "bulk_selection": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
         "facets": {
+            StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER, StaffRole.ADMIN,
+        },
+        "clusters": {
             StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER, StaffRole.ADMIN,
         },
         "second_review": {StaffRole.RECORDS_OFFICER, StaffRole.REVIEWER},
@@ -398,6 +521,17 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         "-confidence": ("-advisory_confidence", "pk"),
     }
 
+    #: Actions that read the review filters rather than a primary key. Bulk
+    #: review by filter resolves exactly the set the list shows.
+    FILTERED_ACTIONS = frozenset({
+        "list", "facets", "clusters", "bulk_selection", "bulk_review",
+    })
+
+    def _filter_params(self):
+        # A filter-mode bulk review carries the filters in its JSON body, so
+        # the decision is resolved against the same query the list ran.
+        return getattr(self, "_body_filter", None) or self.request.query_params
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         # Read the administrator-managed counsel list once per request rather
@@ -406,37 +540,7 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         return context
 
     def _advisory_annotations(self, qs):
-        """Expose the latest completed responsiveness proposal for sorting.
-
-        Advisory only: this is the model's suggestion and its confidence, shown
-        so a reviewer can choose what to look at first. Nothing here changes
-        review state, and no filter on it applies a decision.
-        """
-        latest = AdvisoryRun.objects.filter(
-            record_item=models.OuterRef("pk"),
-            kind=AdvisoryRun.Kind.RECORD_RESPONSIVENESS,
-            state=AdvisoryRun.State.COMPLETE,
-        ).order_by("-created_at")
-        # advisory_ai._validate_proposal refuses to complete a responsiveness
-        # run whose confidence is not a finite number in [0, 1], which is what
-        # makes this cast safe: Postgres raises on a non-numeric cast, while
-        # SQLite would quietly return 0.0.
-        return qs.annotate(
-            advisory_suggested_state=models.Subquery(
-                latest.annotate(
-                    _value=KeyTextTransform("suggested_state", "proposal"),
-                ).values("_value")[:1],
-                output_field=models.CharField(),
-            ),
-            advisory_confidence=Cast(
-                models.Subquery(
-                    latest.annotate(
-                        _value=KeyTextTransform("confidence", "proposal"),
-                    ).values("_value")[:1],
-                ),
-                output_field=models.FloatField(),
-            ),
-        )
+        return annotate_latest_suggestion(qs)
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
@@ -456,35 +560,47 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         )
         qs = annotate_tags(qs, counsel=counsel)
         qs = self._advisory_annotations(qs)
-        request_number = self.request.query_params.get("request")
+        params = self._filter_params()
+        request_number = params.get("request")
         if request_number:
             qs = qs.filter(request__number=request_number)
-        review_state = self.request.query_params.get("review_state")
+        review_state = params.get("review_state")
         if review_state:
             qs = qs.filter(review_state=review_state)
-        source_system = self.request.query_params.get("source_system")
+        elif self.action in self.FILTERED_ACTIONS:
+            # A superseded collection's records left review on purpose. They
+            # stay one filter away, and every detail action still finds them.
+            qs = qs.exclude(review_state=RecordItem.ReviewState.SUPERSEDED)
+        source_system = params.get("source_system")
         if source_system:
             qs = qs.filter(source_system=source_system)
+        collection_task = (params.get("collection_task") or "").strip()
+        if collection_task:
+            if not collection_task.isdigit():
+                raise serializers.ValidationError(
+                    {"collection_task": ["Supply a collection task id."]}
+                )
+            qs = qs.filter(collection_task_id=int(collection_task))
         # Derived release filters. "release_ready" is the same condition
         # production enforces when it builds the ZIP; "unreleased" means no
         # live installment has claimed the record yet. Together they are the
         # Releases tab's ready-to-release list, so an officer never has to
         # reason about which records are eligible.
-        if _truthy_flag(self.request.query_params.get("release_ready")):
+        if _truthy_flag(params.get("release_ready")):
             qs = release_ready_record_items(qs)
-        if _truthy_flag(self.request.query_params.get("unreleased")):
+        if _truthy_flag(params.get("unreleased")):
             qs = unreleased_record_items(qs)
-        tag = (self.request.query_params.get("tag") or "").strip()
+        tag = (params.get("tag") or "").strip()
         if tag:
             # "privilege" is the counsel-domain/privilege-marker queue rather
             # than a tag of its own, and filter_by_tag resolves it.
             qs = filter_by_tag(qs, tag, counsel=counsel)
         sender_domain = (
-            self.request.query_params.get("sender_domain") or ""
+            params.get("sender_domain") or ""
         ).strip()
         if sender_domain:
             qs = qs.filter(email_sender_domain__iexact=sender_domain)
-        custodian = (self.request.query_params.get("custodian") or "").strip()
+        custodian = (params.get("custodian") or "").strip()
         if custodian:
             # Match the recorded custodian set, not just the primary name, so a
             # deduplicated message is found under every mailbox it was in.
@@ -493,11 +609,11 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                 | models.Q(custodian__iexact=custodian)
             ).distinct()
         advisory_state = (
-            self.request.query_params.get("advisory_state") or ""
+            params.get("advisory_state") or ""
         ).strip()
         if advisory_state:
             qs = qs.filter(advisory_suggested_state=advisory_state)
-        confidence_min = self.request.query_params.get("confidence_min")
+        confidence_min = params.get("confidence_min")
         if confidence_min not in (None, ""):
             try:
                 threshold = float(confidence_min)
@@ -510,7 +626,7 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                     {"confidence_min": ["Supply a number between 0 and 1."]}
                 )
             qs = qs.filter(advisory_confidence__gte=threshold)
-        search = (self.request.query_params.get("search") or "").strip()
+        search = (params.get("search") or "").strip()
         if search:
             # Archive expansion puts the container path in the filename, so a
             # reviewer looking for "2018 Resources" needs to match inside it.
@@ -531,7 +647,7 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                 )
             qs = qs.filter(matches)
         ordering = self.ORDERINGS.get(
-            self.request.query_params.get("ordering") or "newest",
+            params.get("ordering") or "newest",
             self.ORDERINGS["newest"],
         )
         # The correspondent address is blanked in the response for everyone but
@@ -544,8 +660,8 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                 if key.lstrip("-") not in RecordItemSerializer.IDENTITY_FIELDS
             )
         qs = qs.order_by(*ordering)
-        handling = self.request.query_params.get("handling")
-        if handling and self.action in {"list", "facets"}:
+        handling = params.get("handling")
+        if handling and self.action in self.FILTERED_ACTIONS:
             # Handling is derived from the media type rather than stored, so it
             # is filtered in Python. Restricted to the two actions that list,
             # because every other action filters this queryset further by
@@ -611,22 +727,62 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             ),
         })
 
+    @extend_schema(responses=RECORD_CLUSTERS_SCHEMA)
+    @action(detail=False, methods=["get"], url_path="clusters")
+    def clusters(self, request):
+        """Group the currently filtered records into clusters (#38).
+
+        A way to look at records, not a decision: each cluster reports its
+        size, a few samples, and the majority AI suggestion inside it.
+        """
+        # Every filtered record is read, not just the clusters returned: the
+        # review filters bound the set (one case, or a narrower filter), and a
+        # cluster's size and majority are only true over all of it.
+        grouping = request.query_params.get("group_by", "thread")
+        queryset = self.get_queryset()
+        try:
+            clusters = cluster_records(
+                queryset if isinstance(queryset, list) else queryset.order_by(),
+                grouping,
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"group_by": exc.messages}) from exc
+        return Response({
+            "group_by": grouping,
+            "cluster_count": len(clusters),
+            "clusters": clusters[:CLUSTER_LIMIT],
+        })
+
     @action(detail=False, methods=["post"], url_path="bulk-review")
     def bulk_review(self, request):
         """Record one human responsiveness decision over a selected set.
 
         A human decision about records the reviewer chose and could see. This
-        is not an accept-all of AI output: no advisory proposal is read, and
-        the model's recommendation changes nothing about what is written.
+        is not an accept-all of AI output: the model's recommendation changes
+        nothing about what is written. Each record's standing suggestion is
+        only stored beside the decision so agreement can be measured (#38).
         Withholding and duplicate outcomes are deliberately unavailable here
         because each needs its own citation or judgement.
         """
+        # A decision batch replaces this for token callers (#43): an agent
+        # proposes, the accountable person approves in the staff application.
+        handoff = human_only_handoff(
+            request,
+            capability_id="record_items.bulk_review",
+            action="Propose a review decision batch, or review in the staff application.",
+            required_role="reviewer",
+        )
+        if handoff is not None:
+            return handoff
         payload = BulkRecordReviewInputSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        if "filter" in data:
+            return self._bulk_review_by_filter(request, data)
         try:
             reviewed = bulk_review_records(
-                payload.validated_data["record_item_ids"],
-                state=payload.validated_data["state"],
+                data["record_item_ids"],
+                state=data["state"],
                 actor=request.user,
             )
         except DjangoValidationError as exc:
@@ -635,6 +791,84 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             "reviewed_count": len(reviewed),
             "review_state": payload.validated_data["state"],
             "record_item_ids": [str(item.pk) for item in reviewed],
+        })
+
+    def _matching_ids(self, filters):
+        self._body_filter = QueryDict(mutable=True)
+        self._body_filter.update(filters)
+        queryset = self.get_queryset()
+        if isinstance(queryset, list):
+            return [item.pk for item in queryset]
+        return list(queryset.order_by().values_list("pk", flat=True).distinct())
+
+    def _bulk_review_by_filter(self, request, data):
+        # A decision over everything a query matches is the accountable
+        # reviewer's own, made in the staff application. Tokens may preview
+        # the count (bulk-selection) but are handed off here, so the
+        # capability's human_confirmation is enforced, not just declared.
+        handoff = human_only_handoff(
+            request,
+            capability_id="record_items.bulk_review",
+            action=(
+                "Confirm a review outcome for every record a filter matches "
+                "in the staff application."
+            ),
+            required_role="reviewer",
+        )
+        if handoff is not None:
+            return handoff
+        filters = data["filter"]
+        try:
+            reviewed_count = bulk_review_confirmed_selection(
+                self._matching_ids(filters),
+                state=data["state"],
+                actor=request.user,
+                expected_count=data["expected_count"],
+                selection_sha256=data["selection_sha256"],
+                filter_detail=_auditable_filter(filters),
+            )
+        except BulkSelectionChanged as exc:
+            return Response(
+                {"code": "selection_changed", "detail": exc.messages[0]},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except DjangoValidationError as exc:
+            _raise_api_validation(exc)
+        return Response({
+            "reviewed_count": reviewed_count,
+            "review_state": data["state"],
+        })
+
+    @action(detail=False, methods=["get"], url_path="bulk-selection")
+    def bulk_selection(self, request):
+        """What one filter decision would change, before anyone confirms it.
+
+        Returns the exact count and a digest of the records a decision of
+        ``state`` would write; the confirmation must send both back.
+        """
+        state = request.query_params.get("state", "")
+        filters = _bulk_filter({
+            key: request.query_params.get(key, "") for key in BULK_FILTER_KEYS
+        })
+        try:
+            selection = bulk_review_selection(
+                self._matching_ids(filters), state=state,
+            )
+        except DjangoValidationError as exc:
+            _raise_api_validation(exc)
+        eligible = set(selection.eligible_ids)
+        privileged = filter_by_tag(
+            RecordItem.objects.filter(request__number=filters["request"]),
+            "privilege",
+            counsel=counsel_domains(),
+        ).values_list("pk", flat=True)
+        return Response({
+            "matching": selection.matching,
+            "eligible_count": len(selection.eligible_ids),
+            "excluded": selection.excluded,
+            "selection_sha256": selection.selection_sha256,
+            "privilege_count": sum(1 for pk in privileged if pk in eligible),
+            "max_items": BULK_REVIEW_FILTER_MAX_ITEMS,
         })
 
     @action(detail=True, methods=["get"], url_path="preview-metadata")
@@ -667,8 +901,29 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         response["X-Image-Height"] = str(preview.height)
         return response
 
+    @extend_schema(responses={200: RecordReadingTextSerializer})
+    @action(detail=True, methods=["get"], url_path="text")
+    def text(self, request, pk=None):
+        """The record's text for reading in review, without email markup.
+
+        The same audience and audit as a page preview; the stored text is
+        not changed.
+        """
+        item = self.get_object()
+        return Response(record_reading_text(item, actor=request.user))
+
     @action(detail=True, methods=["post"])
     def review(self, request, pk=None):
+        # A decision batch replaces this for token callers (#43): an agent
+        # proposes, the accountable person approves in the staff application.
+        handoff = human_only_handoff(
+            request,
+            capability_id="record_items.review",
+            action="Propose a review decision batch, or review in the staff application.",
+            required_role="reviewer",
+        )
+        if handoff is not None:
+            return handoff
         item = self.get_object()
         payload = RecordReviewInputSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
@@ -681,6 +936,17 @@ class RecordItemViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                     "withholding_exemption_ids"
                 ],
             )
+        except DjangoValidationError as exc:
+            _raise_api_validation(exc)
+        return Response(self.get_serializer(item).data)
+
+    @extend_schema(request=None, responses=RecordItemSerializer)
+    @action(detail=True, methods=["post"], url_path="undo-review")
+    def undo_review(self, request, pk=None):
+        """Undo the caller's own latest review decision on this record."""
+        item = self.get_object()
+        try:
+            item = undo_review(item.pk, actor=request.user)
         except DjangoValidationError as exc:
             _raise_api_validation(exc)
         return Response(self.get_serializer(item).data)

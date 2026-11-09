@@ -379,7 +379,7 @@ describe('Inbound correspondence review', () => {
 
     expect(
       await screen.findByRole('option', {
-        name: 'Opened 2026-07-22 — awaiting response',
+        name: 'Opened Jul 22, 2026 — awaiting response',
       }),
     ).toHaveValue(cycleId)
     await user.selectOptions(
@@ -1137,7 +1137,7 @@ describe('InboundCorrespondenceReview — paginated clarification cycles', () =>
     )
 
     expect(await screen.findByRole('option', {
-      name: 'Opened 2026-07-23 — awaiting response',
+      name: 'Opened Jul 23, 2026 — awaiting response',
     })).toBeInTheDocument()
   })
 })

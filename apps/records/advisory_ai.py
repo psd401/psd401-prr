@@ -7,7 +7,9 @@ import hashlib
 import json
 import logging
 import math
+import re
 from dataclasses import dataclass
+from email.utils import parseaddr
 from typing import Any
 
 import boto3
@@ -20,6 +22,7 @@ from botocore.exceptions import (
 )
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.api.identity import has_staff_role
@@ -35,6 +38,8 @@ from .models import (
     AdvisoryRun,
     ExemptionCitation,
     IntakeAttachment,
+    KnowledgeNoiseSender,
+    KnowledgeRoleAccount,
     PublicRecordsRequest,
     RecordItem,
     RecordSystem,
@@ -108,7 +113,10 @@ _BEDROCK_MAX_DOCUMENTS = 5
 _BEDROCK_MAX_DOCUMENT_BYTES = int(4.5 * 1024 * 1024)
 _BEDROCK_MAX_IMAGES = 20
 _BEDROCK_MAX_IMAGE_BYTES = int(3.75 * 1024 * 1024)
-_REQUEST_INTENT_SCHEMA_VERSION = 5
+_REQUEST_INTENT_SCHEMA_VERSION = 7
+# A registry checklist or search note longer than this is cut before it is
+# offered; one long checklist must not crowd out every other system.
+_REQUEST_INTENT_SYSTEM_TEXT_LIMIT = 2_000
 
 #: Longest advisory short title a request-intent proposal may carry. It is a
 #: scanning aid for one table column, not a summary, so it is bounded tightly
@@ -117,13 +125,92 @@ SHORT_TITLE_MAX_LENGTH = 80
 
 #: Request-intent keys a proposal may carry but need not. Optional so a run
 #: stored before the key existed, and a model that omits it, both stay valid.
-_REQUEST_INTENT_OPTIONAL = frozenset({"short_title"})
+_REQUEST_INTENT_OPTIONAL = frozenset(
+    {"short_title", "custodians", "sender_domains", "exclude_senders", "scope_rationale"}
+)
+
+#: Not an AdvisoryRun kind: the scope-refinement step of iterative scoping
+#: (#36) calls the model with its own output contract and records its answer
+#: on the ScopeIteration it produces.
+SCOPE_REFINEMENT = "scope_refinement"
+
+_EMAIL = re.compile(r"^[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+_DOMAIN = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
+
+
+def _validated_scope_fields(source: dict[str, Any]) -> dict[str, Any]:
+    """Custodians, sender domains, exclusions, and the scope rationale (#36).
+
+    Each is optional; a present one must be well formed. Values are folded to
+    lower case so the same sender is never listed twice.
+    """
+    out: dict[str, Any] = {}
+    shapes = (
+        ("custodians", 20, lambda v: bool(_EMAIL.match(v))),
+        ("sender_domains", 10, lambda v: bool(_DOMAIN.match(v))),
+        ("exclude_senders", 30, lambda v: bool(_EMAIL.match(v) or _DOMAIN.match(v))),
+    )
+    for key, maximum, valid in shapes:
+        if key not in source:
+            continue
+        values = [
+            value.lower()
+            for value in _bounded_string_list(
+                source[key], field=key, maximum_items=maximum, maximum_length=254,
+            )
+        ]
+        if not all(valid(value) for value in values):
+            raise AdvisoryOutputInvalid(f"{key} holds a value that is not an address or domain.")
+        out[key] = list(dict.fromkeys(values))
+    if "scope_rationale" in source:
+        out["scope_rationale"] = _bounded_string(
+            source["scope_rationale"], field="scope_rationale", maximum=1000,
+        )
+    return out
+
+
+def validate_scope_refinement(raw: Any) -> dict[str, Any]:
+    """Validate one scope-refinement answer: stop, or a tightened query."""
+    if not isinstance(raw, dict) or raw.get("decision") not in {"stop", "refine"}:
+        raise AdvisoryOutputInvalid("A scope refinement must decide stop or refine.")
+    allowed = {
+        "decision", "reason", "required_search_terms", "search_terms",
+        "custodians", "sender_domains", "exclude_senders",
+    }
+    if not set(raw) <= allowed or "reason" not in raw:
+        raise AdvisoryOutputInvalid("The scope refinement has unexpected fields.")
+    result: dict[str, Any] = {
+        "decision": raw["decision"],
+        "reason": _bounded_string(raw["reason"], field="reason", maximum=1000),
+    }
+    if raw["decision"] == "refine":
+        for key, maximum in (("required_search_terms", 5), ("search_terms", 19)):
+            if key not in raw:
+                raise AdvisoryOutputInvalid(f"A refined scope needs {key}.")
+            result[key] = _bounded_string_list(
+                raw[key], field=key, maximum_items=maximum, maximum_length=200,
+            )
+        if not (result["required_search_terms"] or result["search_terms"]):
+            # Senders alone are not a search for what the request asked.
+            raise AdvisoryOutputInvalid("A refined scope needs at least one search term.")
+        result.update(_validated_scope_fields(raw))
+    return result
 
 #: Longest case title a proposal may carry. Same bound as the request-intent
 #: short title, and for the same reason: it is one cell in one column.
 CASE_TITLE_MAX_LENGTH = 80
 
 _CASE_TITLE_SCHEMA_VERSION = 1
+_INTAKE_SCHEMA_VERSION = 2
+#: What an intake classification may say. The three that point at an earlier
+#: case must name one the model was shown; the rest must name none.
+INTAKE_LABELS_WITH_TARGET = frozenset({"follow_up", "duplicate_of", "related_to"})
+INTAKE_LABELS = INTAKE_LABELS_WITH_TARGET | {"new_request", "non_request", "spam"}
+#: How far back, and how many, earlier cases the classifier is shown.
+_INTAKE_LOOKBACK_DAYS = 180
+_INTAKE_MAX_CANDIDATES = 120
+_INTAKE_MAX_SAME_SENDER = 20
+_INTAKE_CANDIDATE_TEXT = 300
 
 #: How much of an inbound email's subject line the title proposal may read.
 #: Enough to carry what the message was about, short enough that a forwarded
@@ -191,7 +278,85 @@ def _automatic_kind_enabled(kind: str) -> bool:
         return runtime.get("PRR_AI_AUTOMATIC_REQUEST_INTENT_ENABLED")
     if kind == AdvisoryRun.Kind.CASE_TITLE:
         return runtime.get("PRR_AI_AUTOMATIC_CASE_TITLES_ENABLED")
+    if kind == AdvisoryRun.Kind.INTAKE_CLASSIFICATION:
+        return runtime.get("PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED")
     return runtime.get("PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED")
+
+
+#: Each advisory kind's in-app model setting. A blank one falls back to the
+#: shared PRR_AI_MODEL, so the district can move one kind at a time.
+_MODEL_SETTING_FOR_KIND: dict[str, str] = {
+    AdvisoryRun.Kind.REQUEST_INTENT: "PRR_AI_MODEL_INTENT",
+    AdvisoryRun.Kind.CASE_TITLE: "PRR_AI_MODEL_CASE_TITLE",
+    AdvisoryRun.Kind.RECORD_RESPONSIVENESS: "PRR_AI_MODEL_RESPONSIVENESS",
+    AdvisoryRun.Kind.RECORD_REDACTIONS: "PRR_AI_MODEL_REDACTION",
+    AdvisoryRun.Kind.INTAKE_CLASSIFICATION: "PRR_AI_MODEL_INTAKE",
+}
+
+#: The most output tokens one call of each kind may produce. Every reply is
+#: still bounded by PRR_AI_MAX_RESPONSE_BYTES and validated against its
+#: schema; this only gives room for the answer the schema asks for.
+MAX_OUTPUT_TOKENS: dict[str, int] = {
+    AdvisoryRun.Kind.REQUEST_INTENT: 2000,
+    "scope_refinement": 1500,
+    AdvisoryRun.Kind.CASE_TITLE: 1000,
+    AdvisoryRun.Kind.RECORD_RESPONSIVENESS: 1000,
+    AdvisoryRun.Kind.RECORD_REDACTIONS: 4000,
+    AdvisoryRun.Kind.INTAKE_CLASSIFICATION: 1000,
+}
+
+
+#: The four kinds whose output budget an administrator sets in the app
+#: (#31); each setting defaults to the budget above. The case title and the
+#: scope refinement keep their code budgets.
+_MAX_TOKENS_SETTING_FOR_KIND: dict[str, str] = {
+    AdvisoryRun.Kind.INTAKE_CLASSIFICATION: "PRR_AI_MAX_OUTPUT_TOKENS_INTAKE",
+    AdvisoryRun.Kind.REQUEST_INTENT: "PRR_AI_MAX_OUTPUT_TOKENS_INTENT",
+    AdvisoryRun.Kind.RECORD_RESPONSIVENESS: "PRR_AI_MAX_OUTPUT_TOKENS_RESPONSIVENESS",
+    AdvisoryRun.Kind.RECORD_REDACTIONS: "PRR_AI_MAX_OUTPUT_TOKENS_REDACTION",
+}
+
+
+def max_output_tokens(kind: str) -> int:
+    """The most output tokens one call of ``kind`` may produce."""
+    setting = _MAX_TOKENS_SETTING_FOR_KIND.get(kind)
+    if setting:
+        return int(runtime.get(setting))
+    return MAX_OUTPUT_TOKENS.get(kind, 1000)
+
+
+def account_data_retention_mode() -> str:
+    """The account's Bedrock data retention mode in the advisory Region.
+
+    Zero retention (``none``, district decision 2026-11-05) is an account
+    setting no CDK resource holds, so ``verify_advisory_ai`` reads it back.
+    Raises ``AdvisoryProviderError`` when it cannot be read.
+    """
+    try:
+        client = boto3.client("bedrock", region_name=runtime.get("PRR_AI_AWS_REGION"))
+        return str(client.get_account_data_retention().get("mode", ""))
+    except (ClientError, BotoCoreError) as exc:
+        raise AdvisoryProviderError("provider_unavailable") from exc
+
+
+def inference_config(kind: str, model_identifier: str) -> dict[str, Any]:
+    """The Converse inference settings for one call.
+
+    Only Amazon Nova is sent ``temperature`` 0. The Claude 5.x and GPT-6.1
+    models reject the field outright (production, 2026-11-05), so asking them
+    for it would fail every run; they are already steered by the instruction
+    and every reply is still validated against its schema.
+    """
+    config: dict[str, Any] = {"maxTokens": max_output_tokens(kind)}
+    if ".nova-" in f".{model_identifier}":
+        config["temperature"] = 0
+    return config
+
+
+def model_for_kind(kind: str) -> str:
+    """The Bedrock model a new run of ``kind`` is asked of and recorded with."""
+    setting = _MODEL_SETTING_FOR_KIND.get(kind)
+    return (runtime.get(setting) if setting else "") or runtime.get("PRR_AI_MODEL")
 
 
 def _feature_enabled() -> None:
@@ -326,8 +491,246 @@ def _case_title_subject(request) -> str:
     return (subject or "").strip()[:_CASE_TITLE_SUBJECT_LIMIT]
 
 
+def _json_length(value: Any) -> int:
+    return len(json.dumps(value))
+
+
+def _request_intent_context(budget: int) -> tuple[list[dict[str, Any]], dict[str, Any], bool]:
+    """The registry and district knowledge pack, cut to fit ``budget``.
+
+    Measured as default ``json.dumps`` length, which is never shorter than the
+    canonical encoding, so the sum with the description stays under the
+    input ceiling. Each system's slug, name and keywords are always kept:
+    they are the only vocabulary ``record_system_slugs`` may use. Custodian,
+    retention, checklist and search-note detail is then added system by
+    system, followed by role accounts and noise senders, until the next entry
+    would not fit. Returns the systems, the pack, and whether anything was cut.
+    """
+    rows = list(
+        RecordSystem.objects.filter(active=True)
+        .select_related("knowledge_note")
+        .order_by("slug")
+    )
+    systems: list[dict[str, Any]] = [
+        {"slug": row.slug, "name": row.name, "triage_keywords": row.triage_keywords}
+        for row in rows
+    ]
+    knowledge: dict[str, Any] = {"role_accounts": [], "noise_senders": []}
+    truncated = False
+
+    def fits() -> bool:
+        return (
+            _json_length(
+                {
+                    "available_record_systems": systems,
+                    "district_knowledge": knowledge,
+                }
+            )
+            <= budget
+        )
+
+    def bounded(text: str) -> str:
+        nonlocal truncated
+        if len(text) > _REQUEST_INTENT_SYSTEM_TEXT_LIMIT:
+            truncated = True
+        return text[:_REQUEST_INTENT_SYSTEM_TEXT_LIMIT]
+
+    for entry, row in zip(systems, rows, strict=True):
+        note = getattr(row, "knowledge_note", None)
+        detail = {
+            "custodian_title": row.custodian_title,
+            "custodian_email": row.custodian_email,
+            "retention_days": row.retention_days,
+            "retention_note": row.retention_note,
+            "search_checklist": bounded(row.search_checklist),
+            "search_notes": bounded(note.notes) if note else "",
+        }
+        entry.update(detail)
+        if not fits():
+            for key in detail:
+                del entry[key]
+            truncated = True
+    candidates: list[tuple[str, dict[str, Any]]] = [
+        (
+            "role_accounts",
+            {
+                "role": row.role,
+                "account_email": row.account_email,
+                "starts_on": row.starts_on.isoformat() if row.starts_on else None,
+                "ends_on": row.ends_on.isoformat() if row.ends_on else None,
+                "note": row.note,
+            },
+        )
+        for row in KnowledgeRoleAccount.objects.all()
+    ]
+    candidates += [
+        ("noise_senders", {"kind": row.kind, "value": row.value})
+        for row in KnowledgeNoiseSender.objects.filter(active=True)
+    ]
+    for section, item in candidates:
+        knowledge[section].append(item)
+        if not fits():
+            knowledge[section].pop()
+            truncated = True
+    return systems, knowledge, truncated
+
+
+_REPLY_SUBJECT = re.compile(r"^\s*(re|aw|sv)\s*:", re.IGNORECASE)
+_FORWARD_SUBJECT = re.compile(r"^\s*(fwd?|fw)\s*:", re.IGNORECASE)
+_LIST_OR_BULK_HEADERS = ("auto-submitted", "list-id", "list-unsubscribe", "precedence")
+_INTAKE_MAX_THREAD_CASES = 20
+
+
+def _intake_email_evidence(request) -> dict[str, Any] | None:
+    """Header and thread facts about the email that created this case (#33).
+
+    Facts only, fixed at intake: whether a district address sent it (never
+    the sender's domain, which can identify the requester), whether the email
+    presents as a reply or a forward, which list or bulk headers it carried
+    (named, never quoted), and which earlier cases of the same matter kind
+    it replies to -- an In-Reply-To or References id, or the Gmail thread, of
+    mail the district sent on that case before this email arrived. A
+    web-form or staff-entered case has none.
+    """
+    from apps.correspondence.models import (
+        Correspondence,
+        InboundCorrespondenceReceipt,
+    )
+
+    from .record_tags import district_email_domains
+
+    receipt = (
+        InboundCorrespondenceReceipt.objects.filter(
+            matched_request=request,
+            match_method=InboundCorrespondenceReceipt.MatchMethod.EMAIL_INTAKE,
+        )
+        .select_related("matched_correspondence")
+        .order_by("received_at", "pk")
+        .first()
+    )
+    if receipt is None:
+        return None
+    correspondence = receipt.matched_correspondence
+    headers = {
+        str(name).casefold()
+        for name in ((correspondence.received_headers or {}) if correspondence else {})
+    }
+    subject = correspondence.received_subject if correspondence else ""
+    sender = parseaddr(
+        (correspondence.received_sender if correspondence else "")
+        or receipt.envelope_sender
+    )[1]
+    message_ids = {receipt.in_reply_to, *(receipt.references or [])} - {""}
+    thread = Q(rfc_message_id__in=message_ids)
+    if receipt.provider_thread_id:
+        thread |= Q(
+            provider=receipt.provider,
+            provider_account=receipt.provider_account,
+            provider_thread_id=receipt.provider_thread_id,
+        )
+    replies_to = (
+        Correspondence.objects.filter(
+            thread,
+            direction=Correspondence.Direction.OUTBOUND,
+            status=Correspondence.Status.SENT,
+            sent_at__lte=receipt.received_at,
+            request__matter_kind=request.matter_kind,
+            request__received_at__lt=request.received_at,
+        )
+        .exclude(request=request)
+        .values_list("request__number", flat=True)
+        .distinct()
+        .order_by("request__number")
+    )
+    return {
+        # Whether staff sent it, never the sender's own domain: a personal or
+        # family domain can identify the requester (PR #93 review).
+        "sender_is_district": sender.rpartition("@")[2].lower()
+        in district_email_domains(),
+        "subject_marks_reply": bool(_REPLY_SUBJECT.match(subject)),
+        "subject_marks_forward": bool(_FORWARD_SUBJECT.match(subject)),
+        "has_reply_headers": bool(receipt.in_reply_to or receipt.references),
+        "list_or_bulk_headers": [h for h in _LIST_OR_BULK_HEADERS if h in headers],
+        "replies_to_cases": list(replies_to[:_INTAKE_MAX_THREAD_CASES]),
+    }
+
+
+def _intake_candidates(request, *, also=()) -> list[dict[str, Any]]:
+    """Earlier cases of the same matter kind the new one might belong to.
+
+    Only cases received before this one, and only fields that do not change
+    after intake, so the input -- and its fingerprint -- stays the same while
+    the run waits in the queue and later cases arrive. Kinds never mix
+    (AGENTS.md rule 13): a litigation pull is never offered as the case a
+    public records request duplicates.
+    """
+    email = (request.requester.email or "").strip().lower()
+    earlier = PublicRecordsRequest.objects.filter(
+        matter_kind=request.matter_kind,
+        received_at__lt=request.received_at,
+    ).exclude(pk=request.pk)
+    recent = list(
+        earlier.filter(
+            received_at__gte=request.received_at
+            - dt.timedelta(days=_INTAKE_LOOKBACK_DAYS),
+        )
+        .select_related("requester")
+        .order_by("-received_at", "pk")[:_INTAKE_MAX_CANDIDATES]
+    )
+    same_sender = list(
+        earlier.filter(requester__email__iexact=email)
+        .select_related("requester")
+        .order_by("-received_at", "pk")[:_INTAKE_MAX_SAME_SENDER]
+    ) if email else []
+    # Cases the email replies to are offered whatever their age, so the
+    # model can name the one the thread evidence points at.
+    threaded = list(
+        earlier.filter(number__in=list(also)).select_related("requester")
+    ) if also else []
+    seen = set()
+    rows = []
+    for case in sorted(
+        [*recent, *same_sender, *threaded], key=lambda c: (c.received_at, c.number),
+        reverse=True,
+    ):
+        if case.pk in seen:
+            continue
+        seen.add(case.pk)
+        rows.append({
+            "number": case.number,
+            "received_date": _received_date(case).isoformat(),
+            "same_requester_email": bool(email)
+            and (case.requester.email or "").strip().lower() == email,
+            "description": case.description[:_INTAKE_CANDIDATE_TEXT],
+        })
+    return rows
+
+
 def _build_advisory_input(run: AdvisoryRun) -> _AdvisoryInput:
     limit = runtime.get("PRR_AI_MAX_INPUT_CHARACTERS")
+    if run.kind == AdvisoryRun.Kind.INTAKE_CLASSIFICATION:
+        request = run.request
+        description = request.description
+        email_evidence = _intake_email_evidence(request)
+        payload = {
+            "kind": run.kind,
+            "advisory_schema_version": _INTAKE_SCHEMA_VERSION,
+            "request_description": description[:limit],
+            "request_email_subject": _case_title_subject(request),
+            "request_channel": request.channel,
+            "request_received_date": _received_date(request).isoformat(),
+            "email_evidence": email_evidence,
+            "candidate_cases": _intake_candidates(
+                request,
+                also=email_evidence["replies_to_cases"] if email_evidence else (),
+            ),
+        }
+        return _AdvisoryInput(
+            payload=payload,
+            attachments=(),
+            fingerprint=payload,
+            truncated=len(description) > limit,
+        )
     if run.kind == AdvisoryRun.Kind.CASE_TITLE:
         # Text only, and only the request's own text. No attachments are read,
         # no record systems are offered, and nothing here can become a search
@@ -348,12 +751,10 @@ def _build_advisory_input(run: AdvisoryRun) -> _AdvisoryInput:
             truncated=len(description) > limit,
         )
     if run.kind == AdvisoryRun.Kind.REQUEST_INTENT:
-        systems = list(
-            RecordSystem.objects.filter(active=True)
-            .order_by("slug")
-            .values("slug", "name", "triage_keywords")
-        )
         description = run.request.description
+        systems, knowledge, context_truncated = _request_intent_context(
+            max(0, limit - len(description[:limit]))
+        )
         attachments, attachment_manifest, attachment_omitted = (
             _request_intent_attachments(run.request)
         )
@@ -371,6 +772,7 @@ def _build_advisory_input(run: AdvisoryRun) -> _AdvisoryInput:
                 for attachment in attachments
             ],
             "available_record_systems": systems,
+            "district_knowledge": knowledge,
         }
         return _AdvisoryInput(
             payload=payload,
@@ -379,7 +781,9 @@ def _build_advisory_input(run: AdvisoryRun) -> _AdvisoryInput:
                 "payload": payload,
                 "attachment_manifest": attachment_manifest,
             },
-            truncated=len(description) > limit or attachment_omitted,
+            truncated=(
+                len(description) > limit or attachment_omitted or context_truncated
+            ),
         )
     if run.record_item_id is None:
         raise ValidationError("A record advisory requires a record item.")
@@ -624,7 +1028,7 @@ def _request_request_intent_advisory(request_id, *, actor, trigger) -> AdvisoryR
             request=request,
             trigger=trigger,
             requested_by=actor,
-            model_identifier=runtime.get("PRR_AI_MODEL"),
+            model_identifier=model_for_kind(AdvisoryRun.Kind.REQUEST_INTENT),
             input_sha256="",
         )
         advisory_input = _build_advisory_input(provisional)
@@ -717,7 +1121,7 @@ def _request_case_title_advisory(request_id, *, actor, trigger) -> AdvisoryRun:
             request=request,
             trigger=trigger,
             requested_by=actor,
-            model_identifier=runtime.get("PRR_AI_MODEL"),
+            model_identifier=model_for_kind(AdvisoryRun.Kind.CASE_TITLE),
             input_sha256="",
         )
         advisory_input = _build_advisory_input(provisional)
@@ -728,6 +1132,90 @@ def _request_case_title_advisory(request_id, *, actor, trigger) -> AdvisoryRun:
         # The same request text, through the same model, is the same proposal.
         # Re-running it is a bill without an answer, which is what makes the
         # backfill command safe to run twice.
+        existing = AdvisoryRun.objects.filter(
+            kind=provisional.kind,
+            request=request,
+            record_item__isnull=True,
+            model_identifier=provisional.model_identifier,
+            input_sha256=provisional.input_sha256,
+            state__in=[
+                AdvisoryRun.State.PENDING,
+                AdvisoryRun.State.RUNNING,
+                AdvisoryRun.State.COMPLETE,
+            ],
+        ).first()
+        if existing is not None:
+            return existing
+        provisional.full_clean()
+        provisional.save()
+    return _queue(provisional)
+
+
+def request_intake_classification(request_id, *, actor) -> AdvisoryRun:
+    _feature_enabled()
+    _require_actor(actor, records_officer_only=True)
+    return _request_intake_classification(
+        request_id, actor=actor, trigger=AdvisoryRun.Trigger.MANUAL
+    )
+
+
+def request_automatic_intake_classification(request_id) -> AdvisoryRun:
+    _feature_enabled()
+    if not runtime.get("PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED"):
+        raise ValidationError("Automatic intake classification is not enabled.")
+    return _request_intake_classification(
+        request_id, actor=None, trigger=AdvisoryRun.Trigger.AUTOMATIC
+    )
+
+
+def defer_automatic_intake_classification(request_id) -> bool:
+    """Classify a new case once its intake write has committed.
+
+    Like case titles, this reads only the request's text and earlier cases'
+    immutable fields, starts nothing, and changes nothing, so it does not wait
+    on attachment scanning. A failure is logged and the case simply has no
+    classification.
+    """
+    if not (
+        runtime.get("PRR_AI_ADVISORY_ENABLED")
+        and runtime.get("PRR_AI_AUTOMATIC_INTAKE_CLASSIFICATION_ENABLED")
+    ):
+        return False
+
+    def request_after_commit():
+        try:
+            request_automatic_intake_classification(request_id)
+        except Exception:
+            # Never log request or model content.
+            logger.exception(
+                "Automatic intake classification could not be queued",
+                extra={"request": str(request_id)},
+            )
+
+    transaction.on_commit(request_after_commit)
+    return True
+
+
+def _request_intake_classification(request_id, *, actor, trigger) -> AdvisoryRun:
+    with transaction.atomic():
+        request = (
+            PublicRecordsRequest.objects.select_for_update()
+            .select_related("requester")
+            .get(pk=request_id)
+        )
+        provisional = AdvisoryRun(
+            kind=AdvisoryRun.Kind.INTAKE_CLASSIFICATION,
+            request=request,
+            trigger=trigger,
+            requested_by=actor,
+            model_identifier=model_for_kind(AdvisoryRun.Kind.INTAKE_CLASSIFICATION),
+            input_sha256="",
+        )
+        advisory_input = _build_advisory_input(provisional)
+        provisional.input_sha256 = hashlib.sha256(
+            _canonical_json(advisory_input.fingerprint)
+        ).hexdigest()
+        provisional.input_truncated = advisory_input.truncated
         existing = AdvisoryRun.objects.filter(
             kind=provisional.kind,
             request=request,
@@ -767,7 +1255,7 @@ def _request_record_advisory(
             record_item=item,
             trigger=trigger,
             requested_by=actor,
-            model_identifier=runtime.get("PRR_AI_MODEL"),
+            model_identifier=model_for_kind(kind),
             input_sha256="",
         )
         advisory_input = _build_advisory_input(provisional)
@@ -825,6 +1313,32 @@ def request_record_redaction_advisory(record_item_id, *, actor) -> AdvisoryRun:
         actor=actor,
         reuse_complete=False,
     )
+
+
+def first_pass_progress(prr) -> dict:
+    """How far the automatic first pass has read this case's records.
+
+    A record counts as read once its responsiveness proposal is complete.
+    Superseded records are out of review and are not counted. Counts only;
+    no record or model text is returned.
+    """
+    from .models import AdvisoryRun, RecordItem
+
+    in_review = RecordItem.objects.filter(request=prr).exclude(
+        review_state=RecordItem.ReviewState.SUPERSEDED,
+    )
+    read = in_review.filter(
+        advisory_runs__kind=AdvisoryRun.Kind.RECORD_RESPONSIVENESS,
+        advisory_runs__state=AdvisoryRun.State.COMPLETE,
+    ).distinct().count()
+    return {
+        "enabled": bool(
+            runtime.get("PRR_AI_ADVISORY_ENABLED")
+            and runtime.get("PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED")
+        ),
+        "read": read,
+        "total": in_review.count(),
+    }
 
 
 def request_automatic_record_advisory(
@@ -1014,9 +1528,44 @@ def _validate_proposal(
     proposal: Any,
     *,
     received_date: dt.date | None = None,
+    candidate_numbers: frozenset[str] | set[str] = frozenset(),
 ) -> dict[str, Any]:
     if not isinstance(proposal, dict):
         raise AdvisoryOutputInvalid("The model output must be an object.")
+    if kind == AdvisoryRun.Kind.INTAKE_CLASSIFICATION:
+        if set(proposal) != {"label", "target_case_number", "confidence", "evidence"}:
+            raise AdvisoryOutputInvalid(
+                "The intake classification has unexpected fields."
+            )
+        label = proposal["label"]
+        if not isinstance(label, str) or label not in INTAKE_LABELS:
+            raise AdvisoryOutputInvalid("The intake label is not one of the allowed labels.")
+        target = proposal["target_case_number"]
+        if label in INTAKE_LABELS_WITH_TARGET:
+            # Only a case the model was actually shown: an invented number
+            # must never reach an officer as a merge target.
+            if not isinstance(target, str) or target not in candidate_numbers:
+                raise AdvisoryOutputInvalid(
+                    "The intake label must name one of the cases supplied."
+                )
+        elif target is not None:
+            raise AdvisoryOutputInvalid("This intake label names no case.")
+        confidence = proposal["confidence"]
+        if (
+            isinstance(confidence, bool)
+            or not isinstance(confidence, (int, float))
+            or not math.isfinite(float(confidence))
+            or not 0 <= float(confidence) <= 1
+        ):
+            raise AdvisoryOutputInvalid("Confidence must be between zero and one.")
+        return {
+            "label": label,
+            "target_case_number": target,
+            "confidence": round(float(confidence), 4),
+            "evidence": _bounded_string(
+                proposal["evidence"], field="evidence", maximum=1000
+            ),
+        }
     if kind == AdvisoryRun.Kind.CASE_TITLE:
         # One key, one string, one bound. A title proposal has no room to
         # carry anything else, which is the point: there is nothing in it for
@@ -1129,6 +1678,7 @@ def _validate_proposal(
             field="short_title",
             maximum=SHORT_TITLE_MAX_LENGTH,
         )
+    validated.update(_validated_scope_fields(proposal))
     return validated
 
 
@@ -1138,7 +1688,35 @@ def _advisory_system_message(kind: str) -> str:
     Separate from the provider call so the instruction text is assertable
     without a Bedrock round trip.
     """
-    if kind == AdvisoryRun.Kind.CASE_TITLE:
+    if kind == AdvisoryRun.Kind.INTAKE_CLASSIFICATION:
+        output_contract = (
+            "Classify the new case for a person to confirm. Return exactly: "
+            f"label (one of {sorted(INTAKE_LABELS)}), target_case_number "
+            "(string or null), confidence (number from 0 to 1), and evidence "
+            "(string, at most 1000 characters, naming the facts you relied "
+            "on). new_request: a records request not already being handled. "
+            "follow_up: the requester writing again about one of the "
+            "candidate_cases (a question, an addition, a status check). "
+            "duplicate_of: substantially the same request as a candidate "
+            "case, usually from the same requester. related_to: a separate "
+            "request about the same subject as a candidate case, often from a "
+            "different requester. non_request: correspondence that asks for "
+            "no records (a complaint, a general question, a notice, a "
+            "vendor pitch). spam: unsolicited bulk or automated mail. "
+            "email_evidence, when present, holds facts about the email that "
+            "created the case: replies_to_cases names earlier cases whose "
+            "district mail this email replies to (strong evidence of a "
+            "follow_up), and list_or_bulk_headers names list or automated-mail "
+            "headers it carried (evidence of spam or a non_request, never "
+            "proof). "
+            "For follow_up, duplicate_of, and related_to, target_case_number "
+            "must be the number of one of the supplied candidate_cases; for "
+            "every other label it must be null. Never invent a case number. "
+            "Do not judge the merits of the request, its requester, or any "
+            "legal outcome; a request that is broad, hostile, or repeated is "
+            "still a request."
+        )
+    elif kind == AdvisoryRun.Kind.CASE_TITLE:
         output_contract = (
             "Return exactly: title (string). "
             f"title is at most {CASE_TITLE_MAX_LENGTH} characters: a neutral "
@@ -1164,6 +1742,13 @@ def _advisory_system_message(kind: str) -> str:
             "(object with exactly start and end, each an ISO date or null), "
             f"and narrowing_options (at most {MAX_NARROWING_OPTIONS} objects, "
             "each with exactly terms (string array) and rationale (string)). "
+            "Optionally also return custodians (district email addresses whose "
+            "mailboxes hold the records, when the request names people or "
+            "roles), sender_domains (domains the responsive mail comes from, "
+            "only when the request is about correspondence with them), "
+            "exclude_senders (noise_senders addresses or domains to leave out "
+            "of the search), and scope_rationale (one or two sentences on why "
+            "this scope). "
             f"short_title is at most {SHORT_TITLE_MAX_LENGTH} characters: a "
             "neutral noun phrase naming what was asked for, for a staff list "
             "column. It never names, describes, or characterises the "
@@ -1185,7 +1770,36 @@ def _advisory_system_message(kind: str) -> str:
             "choose, whose rationale says in plain language what that option "
             "would cover and what it would leave out. Narrowing options are "
             "drafting material for a human conversation; never state or imply "
-            "that a requester must narrow, and never propose a denial."
+            "that a requester must narrow, and never propose a denial. "
+            "The supplied district_knowledge is the Records Officer's own "
+            "context. role_accounts say which district account held a named "
+            "role and between which dates; prefer that account over a "
+            "district-wide search when the request names a role, and match "
+            "the holder to the dates the request reaches. noise_senders are "
+            "district mass mail, newsletters, and notifications that a "
+            "responsive search almost never wants; never propose one of them "
+            "as a search term. Each available record system's custodian, "
+            "retention, search_checklist, and search_notes describe how that "
+            "system is actually searched; use them to choose systems and "
+            "terms, not to state an outcome."
+        )
+    elif kind == SCOPE_REFINEMENT:
+        output_contract = (
+            "You are refining a Google Vault count of Gmail, Drive, and Chat "
+            "for a public records request. iterations lists each query already "
+            "counted, with its total, source_totals per source (null where "
+            "Vault could not count that source), and the Gmail accounts "
+            "holding the most matches. Decide "
+            "whether the last scope is reasonable. Return exactly: decision "
+            "(stop or refine) and reason (string); when decision is refine, "
+            "also required_search_terms (string array), search_terms (string "
+            "array), and optionally custodians, sender_domains, and "
+            "exclude_senders as in the intent proposal. Refine only to remove "
+            "plainly irrelevant mail -- district mass mail, newsletters, "
+            "notifications (noise_senders), or mailboxes the request does not "
+            "reach -- never to shrink a request below what was asked. Prefer "
+            "stop when the last scope is already specific. This proposes a "
+            "count only; it never holds, exports, or decides anything."
         )
     elif kind == AdvisoryRun.Kind.RECORD_RESPONSIVENESS:
         output_contract = (
@@ -1197,7 +1811,9 @@ def _advisory_system_message(kind: str) -> str:
         output_contract = (
             "Return exactly: candidates (array). Each candidate must contain exactly "
             "span_ids (non-empty array using only supplied text-span IDs), exemption_id "
-            "(integer using only a supplied active exemption ID), confidence (0..1), and "
+            "(integer using only a supplied active exemption ID), pattern (one of "
+            + ", ".join(RedactionProposal.Pattern.values)
+            + "), confidence (0..1), and "
             "rationale (string). Never return coordinates. Propose the narrowest spans "
             "that may contain exempt information. These are candidates for human legal "
             "review, not legal conclusions. Return an empty candidates array when none apply."
@@ -1219,9 +1835,22 @@ def invoke_advisory_model(
     payload: dict[str, Any],
     *,
     attachment_blocks: list[dict[str, Any]] | None = None,
+    model_identifier: str,
+    usage: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    """Call the district's keyless Amazon Bedrock runtime identity."""
+    """Call the district's keyless Amazon Bedrock runtime identity.
+
+    A run passes the model it recorded, so the call is made with exactly the
+    model the run says it used even if the setting changed in between. A
+    caller that passes ``usage`` gets the provider's token counts written
+    into it (model evaluation prices runs from them).
+    """
     _feature_enabled()
+    # Zero data retention before every call, not only at verification: if the
+    # account's mode ever stops reading `none`, no request or record text is
+    # sent (district decision, 2026-11-05).
+    if account_data_retention_mode() != "none":
+        raise AdvisoryProviderError("provider_rejected")
     system_message = _advisory_system_message(kind)
     try:
         client = boto3.client(
@@ -1234,7 +1863,7 @@ def invoke_advisory_model(
             ),
         )
         response = client.converse(
-            modelId=runtime.get("PRR_AI_MODEL"),
+            modelId=model_identifier,
             system=[{"text": system_message}],
             messages=[
                 {
@@ -1245,14 +1874,7 @@ def invoke_advisory_model(
                     ],
                 },
             ],
-            inferenceConfig={
-                "maxTokens": (
-                    4000
-                    if kind == AdvisoryRun.Kind.RECORD_REDACTIONS
-                    else 1000
-                ),
-                "temperature": 0,
-            },
+            inferenceConfig=inference_config(kind, model_identifier),
             requestMetadata={
                 "application": "psd401-prr",
                 "feature": "advisory",
@@ -1278,16 +1900,26 @@ def invoke_advisory_model(
         raise AdvisoryProviderError(safe_code) from exc
     except BotoCoreError as exc:
         raise AdvisoryProviderError("provider_unavailable") from exc
+    if usage is not None:
+        reported = response.get("usage") or {}
+        for key in ("inputTokens", "outputTokens"):
+            if isinstance(reported.get(key), int):
+                usage[key] = reported[key]
     try:
         content_blocks = response["output"]["message"]["content"]
-        if (
-            not isinstance(content_blocks, list)
-            or len(content_blocks) != 1
-            or not isinstance(content_blocks[0], dict)
-            or set(content_blocks[0]) != {"text"}
+        if not isinstance(content_blocks, list) or not all(
+            isinstance(block, dict) for block in content_blocks
         ):
             raise ValueError
-        content = content_blocks[0]["text"]
+        # Reasoning models (Claude 5.x, GPT-6.1) send a reasoningContent block
+        # before the answer. It is dropped here: never parsed, stored, or
+        # logged. Exactly one plain text block must remain, and nothing else.
+        answer_blocks = [
+            block for block in content_blocks if set(block) != {"reasoningContent"}
+        ]
+        if len(answer_blocks) != 1 or set(answer_blocks[0]) != {"text"}:
+            raise ValueError
+        content = answer_blocks[0]["text"]
         if (
             not isinstance(content, str)
             or len(content.encode("utf-8")) > runtime.get("PRR_AI_MAX_RESPONSE_BYTES")
@@ -1413,11 +2045,16 @@ def execute_advisory_run(run_id) -> None:
                 run.kind,
                 advisory_input.payload,
                 attachment_blocks=attachment_blocks,
+                model_identifier=run.model_identifier,
             )
             proposal = _validate_proposal(
                 run.kind,
                 raw_proposal,
                 received_date=_received_date(run.request),
+                candidate_numbers={
+                    row["number"]
+                    for row in advisory_input.payload.get("candidate_cases", ())
+                },
             )
     except AdvisorySourceChanged:
         _fail_run(run.pk, code="source_changed")
@@ -1528,3 +2165,8 @@ def execute_advisory_run(run_id) -> None:
         from .vault_counts import defer_automatic_vault_count_from_intent
 
         defer_automatic_vault_count_from_intent(run.request_id, proposal)
+    if run.kind == AdvisoryRun.Kind.INTAKE_CLASSIFICATION:
+        # The trust ladder (#34): only spam and non-request, only in auto mode.
+        from . import intake_trust
+
+        intake_trust.auto_apply_intake_label(run.pk)

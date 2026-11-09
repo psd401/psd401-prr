@@ -84,6 +84,22 @@ and serves Django on `127.0.0.1:8000` with `config.e2e_settings` and `PRR_AUTH_M
 The second server is the Vite dev server on port 4173. The e2e script deletes
 `.verification/e2e.sqlite3` on each start, so it never reuses earlier browser state.
 
+Two e2e-only stand-ins keep the browser run away from the real Vault and private bucket. Each
+one is honoured only while `PRR_TEST_FIXTURE_SEED_ENABLED` is also on, so a deployed
+environment cannot reach either one:
+
+- `config/e2e_settings.py` sets `PRR_E2E_FAKE_VAULT`. `_e2e_stand_in` in
+  [`apps/integrations/vault/client.py`](../../apps/integrations/vault/client.py) then answers
+  matter, count, and export calls with synthetic identifiers and totals. The focused test is
+  `apps/records/tests/test_vault_e2e_stand_in.py`, which also asserts that the real service is
+  called when either switch is off. See [collection and Vault](../domain/collection-and-vault.md).
+- `PRR_E2E_FILESYSTEM_OBJECT_STORE` makes `_object_store_client` in
+  [`apps/secure_files.py`](../../apps/secure_files.py) use a local directory instead of the
+  bucket. Its focused test is `apps/records/tests/test_filesystem_object_store.py`. See
+  [object storage and scanning](../architecture/object-storage-and-scanning.md#local-acceptance-store).
+
+Focused command: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_vault_e2e_stand_in apps.records.tests.test_filesystem_object_store --settings=config.test_settings`.
+
 ## Why the lanes are shaped this way
 
 - **Sharding is by app label.** `config/test_settings.py` uses SQLite `:memory:`, so each
@@ -97,12 +113,24 @@ The second server is the Vite dev server on port 4173. The e2e script deletes
   under `config.postgres_test_settings`. Those include `test_matter_kinds`, `test_next_response_due`,
   `test_lifecycle_authorization_concurrency`, `test_inbound_concurrency`, and
   `test_outbound_concurrency`. It then seeds a casework fixture and runs
-  `measure_casework_performance`.
+  `measure_casework_performance` under `config.casework_performance_settings`. That module
+  imports `config.postgres_test_settings` and calls `validate_disposable_database()` in
+  [`apps/correspondence/performance_safety.py`](../../apps/correspondence/performance_safety.py) at
+  import. The guard refuses fixture writes unless the explicit disposable sentinel is set and
+  the database is a loopback URL with an allowlisted user. Do not point the performance
+  settings at a shared database.
 - **Quarantine excludes tests from gating.** `GATING` in `verify-fast.sh` passes
   `--exclude-tag=quarantine`. [`FLAKY.md`](../../FLAKY.md) is the register. A row needs an
   owner, an issue, an expiry no more than four weeks out, and two CI runs on the same commit,
   one red and one green. `apps/api/tests/test_flaky_register.py` fails when a row expires or
   is incomplete, or when a test is tagged without a row.
+- **Regression contracts.** `apps/api/tests/test_feature_inventory_regressions.py` groups
+  cases for defects a feature audit found: the staff API, hosted MCP, the Alta verify
+  command, last-admin mapping deletion, the Vault client and polling, and the OpenAPI
+  schema. Its header says the cases were written before the fixes they describe, so a
+  failure can mean a fix is still outstanding rather than a new regression. Check the
+  file's history and the owning page before you change a case. Focused command:
+  `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_feature_inventory_regressions --settings=config.test_settings`.
 
 ## Test-quality gates
 
@@ -133,6 +161,11 @@ workflows in `.github/workflows/`, and each workflow has a different gating role
 | `mutation-testing.yml` | Monthly on the 1st at 12:00 UTC, and manual | Never blocks a merge | `mutmut` over the critical modules, scored by `scripts/mutation_score.py`. A report job files surviving mutants as an issue |
 | `mcp-scan.yml` (MCP Scan) | Push to `main` that touches `integrations/mcp/`, `server.json`, `pyproject.toml`, `uv.lock`, or the workflow; weekly on Monday at 09:30 UTC; manual | Not a PR gate | Snyk Agent Scan analysis of `integrations/mcp/mcp-scan.json`. Without the `SNYK_TOKEN` secret it writes a skip notice to the step summary instead of passing. The token-free tool enumeration runs inside `psd-ci-jobs.yml` |
 | `openwiki-update.yml` (OpenWiki Update) | Push to `main` that does not touch `openwiki/**`; weekly on Monday at 08:00 UTC; manual | Not a test gate | Calls the organization's reusable OpenWiki workflow to regenerate this wiki |
+| `security-scan.yml` (Security Scan) | Pull request, push to `main`, weekly on Monday at 09:00 UTC, manual | Calls the reusable security-scan workflow pinned in the shared `PSD401/.github` repository | Scan logic lives in that shared repository, not in this one. This repository's tests do not cover the reusable job's contents |
+| `license-check.yml` (License Check) | Pull request and push to `main` | Calls the reusable license-check workflow in `PSD401/.github` | Same boundary as the security scan: the license rules are defined outside this repository |
+| `dependabot-auto-merge.yml` (Dependabot auto-merge) | `pull_request` | Auto-merges only patch-level dev-dependency Dependabot updates, under `permissions: contents: write`, `pull-requests: write` | `test_only_patch_level_dev_dependency_updates_auto_merge` in `apps/api/tests/test_security_boundaries.py` pins the trigger and the write permissions. Do not switch the trigger to `pull_request_target`, which would lose the write token |
+| `claude.yml` (Claude Code) | Issue, issue comment, or review comment created by an owner or member that mentions `@claude` | Not a merge gate | Runs a bounded agent session with a 20-minute timeout, one run per issue or PR |
+| `claude-code-review.yml` (Claude Review) | Pull request opened, synchronized, marked ready, or reopened | Provides the `claude-review` check | Calls the reusable Claude review workflow. Dependabot pull requests get a no-op job that reports the same check name |
 
 The workflow shape is itself under test. `apps/api/tests/test_quality_gates.py` has
 `CiShapeTests` for the caller and the reusable workflow, `NightlyFullSuiteTests` for the

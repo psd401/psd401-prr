@@ -10,7 +10,21 @@ import {
 import { useSearchParams } from 'react-router'
 import { api, unwrap, type Page } from '../api/client'
 import type { StaffRole } from '../api/auth'
+import { DiscardBatchCard } from '../case/BatchReview'
+import { RecordClusters } from '../case/RecordClusters'
+import { RedactionProposals } from '../case/RedactionProposals'
 import { RecordHandlingPanel } from '../case/RecordHandlingPanel'
+import {
+  normalizedBox,
+  pointerPosition,
+  tooSmall,
+  type Exemption,
+  type NormalizedBox,
+  type PreviewMetadata,
+  type Redaction,
+  type RedactionProposal,
+} from '../case/redactionCanvas'
+import { Region } from '../case/RedactionRegion'
 import {
   Badge,
   Button,
@@ -33,6 +47,8 @@ import {
   useToast,
 } from '../ui'
 import type { Column } from '../ui/Table'
+import { formatDay } from '../date'
+import { sourceSystemLabel } from '../vaultSources'
 
 interface RecordItem {
   id: string
@@ -76,37 +92,6 @@ interface RecordItem {
   reviewable: boolean
 }
 
-interface Exemption {
-  id: number
-  citation: string
-  short_name: string
-  requires_second_review: boolean
-  active: boolean
-}
-
-interface Redaction {
-  id: number
-  record_item: string
-  page_number: number
-  x0: number
-  y0: number
-  x1: number
-  y1: number
-  exemption: number
-  citation: string
-  exemption_name: string
-  requires_second_review: boolean
-  explanation: string
-  created_by_username: string | null
-  created_at: string
-  voided_at: string | null
-  void_reason: string
-}
-
-interface PreviewMetadata {
-  page_count: number
-}
-
 interface ResponsivenessAdvisoryRun {
   id: string
   trigger: 'manual' | 'automatic'
@@ -129,42 +114,10 @@ interface ResponsivenessAdvisoryLatest {
   latest: ResponsivenessAdvisoryRun | null
 }
 
-interface RedactionProposalDecision {
-  outcome: 'accepted' | 'rejected'
-  decided_by_username: string
-  reason: string
-  redaction: number | null
-  decided_at: string
-}
-
-interface RedactionProposal extends NormalizedBox {
-  id: string
-  advisory_run: string
-  record_item: string
-  page_number: number
-  exemption: number
-  citation: string
-  exemption_name: string
-  requires_second_review: boolean
-  confidence: number
-  rationale: string
-  source_span_ids: string[]
-  source_text_sha256: string
-  created_at: string
-  decision: RedactionProposalDecision | null
-}
-
 interface RedactionAdvisoryLatest {
   enabled: boolean
   latest: ResponsivenessAdvisoryRun | null
   proposals: RedactionProposal[]
-}
-
-interface NormalizedBox {
-  x0: number
-  y0: number
-  x1: number
-  y1: number
 }
 
 const REVIEW_STATES = [
@@ -173,9 +126,13 @@ const REVIEW_STATES = [
   { value: 'non_responsive', label: 'Non-responsive' },
   { value: 'duplicate', label: 'Duplicate' },
   { value: 'withheld', label: 'Withheld (fully exempt)' },
+  // Set only by superseding a collection; the default list leaves these out.
+  { value: 'superseded', label: 'Superseded' },
 ] as const
 
-const HUMAN_REVIEW_STATES = REVIEW_STATES.filter((state) => state.value !== 'unreviewed')
+const HUMAN_REVIEW_STATES = REVIEW_STATES.filter(
+  (state) => state.value !== 'unreviewed' && state.value !== 'superseded',
+)
 
 const RECORD_PAGE_SIZE = 50
 
@@ -232,9 +189,13 @@ const PRIVILEGE_TAGS = ['counsel_domain', 'privilege_marker']
 // duplicate carries a judgement about which copy is the record. Both are
 // one-at-a-time decisions -- the service refuses a batch that carries either
 // -- so neither is ever staged for a bulk decision here.
-const ONE_AT_A_TIME = 'Withheld and duplicate records are reviewed one at a time'
+const ONE_AT_A_TIME = 'Withheld, duplicate, and superseded records are reviewed one at a time'
 function bulkEligible(row: RecordItem): boolean {
-  return row.review_state !== 'withheld' && row.review_state !== 'duplicate'
+  return (
+    row.review_state !== 'withheld'
+    && row.review_state !== 'duplicate'
+    && row.review_state !== 'superseded'
+  )
 }
 
 const GROUP_OPTIONS = [
@@ -243,6 +204,7 @@ const GROUP_OPTIONS = [
   { value: 'sender_domain', label: 'Group by sender domain' },
   { value: 'custodian', label: 'Group by custodian' },
   { value: 'confidence', label: 'Group by AI confidence' },
+  { value: 'cluster', label: 'Group by cluster' },
 ]
 
 const CONFIDENCE_OPTIONS = [
@@ -264,6 +226,27 @@ const BULK_REVIEW_STATES = [
 interface FacetRow {
   value: string
   count: number
+}
+
+interface BulkSelectionPreview {
+  matching: number
+  eligible_count: number
+  excluded: Record<'withheld' | 'duplicate' | 'superseded' | 'already' | 'redacted', number>
+  selection_sha256: string
+  privilege_count: number
+  max_items: number
+}
+
+// [one, many]: what each skipped group is, said as a sentence.
+const EXCLUDED_LABELS: Record<keyof BulkSelectionPreview['excluded'], [string, string]> = {
+  already: ['record already has this outcome', 'records already have this outcome'],
+  withheld: ['record is withheld in full', 'records are withheld in full'],
+  duplicate: ['record is marked a duplicate', 'records are marked duplicates'],
+  superseded: [
+    'record was superseded with its collection',
+    'records were superseded with their collection',
+  ],
+  redacted: ['record carries active redactions', 'records carry active redactions'],
 }
 
 interface RecordFacets {
@@ -345,57 +328,6 @@ function truncateHash(hash: string): string {
   return hash.length > 16 ? `${hash.slice(0, 16)}…` : hash
 }
 
-function clamp(value: number): number {
-  return Math.max(0, Math.min(1, value))
-}
-
-function pointerPosition(event: ReactPointerEvent<HTMLElement>) {
-  const bounds = event.currentTarget.getBoundingClientRect()
-  return {
-    x: clamp((event.clientX - bounds.left) / bounds.width),
-    y: clamp((event.clientY - bounds.top) / bounds.height),
-  }
-}
-
-function normalizedBox(start: { x: number; y: number }, end: { x: number; y: number }) {
-  const round = (value: number) => Number(value.toFixed(4))
-  return {
-    x0: round(Math.min(start.x, end.x)),
-    y0: round(Math.min(start.y, end.y)),
-    x1: round(Math.max(start.x, end.x)),
-    y1: round(Math.max(start.y, end.y)),
-  }
-}
-
-function Region({
-  box,
-  draft = false,
-  proposal = false,
-}: {
-  box: NormalizedBox
-  draft?: boolean
-  proposal?: boolean
-}) {
-  return (
-    <span
-      aria-hidden="true"
-      className={`pointer-events-none absolute border-2 ${
-        draft
-          ? 'border-amber-300 bg-amber-300/40'
-          : proposal
-            ? 'border-sky-600 bg-sky-300/30'
-            : 'border-red-700 bg-black/70'
-      }`}
-      style={{
-        left: `${box.x0 * 100}%`,
-        top: `${box.y0 * 100}%`,
-        width: `${(box.x1 - box.x0) * 100}%`,
-        height: `${(box.y1 - box.y0) * 100}%`,
-      }}
-    />
-  )
-}
-
 export function RecordItems({
   roles = ['reviewer'],
   requestNumber: scopedRequestNumber,
@@ -424,16 +356,22 @@ export function RecordItems({
   const activeSenderDomain = searchParams.get('sender') ?? ''
   const activeCustodian = searchParams.get('custodian') ?? ''
   const activeConfidence = searchParams.get('confidence') ?? ''
+  // Set by "View records" on a Collect stage card (#45): one collection only.
+  const activeCollection = searchParams.get('collection_task') ?? ''
   const activeGroup = searchParams.get('group') ?? ''
   const listPage = Math.max(1, Number(searchParams.get('page') ?? '1') || 1)
   const [searchDraft, setSearchDraft] = useState(activeSearch)
   const [bulkSelection, setBulkSelection] = useState<string[]>([])
   const [bulkState, setBulkState] = useState('')
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false)
+  // "Every record this filter matches" rather than rows ticked on this page.
+  const [matchingMode, setMatchingMode] = useState(false)
   const [selected, setSelected] = useState<RecordItem | null>(null)
   // Distinct from `listPage`: this is the page *inside* the selected PDF.
   const [pageNumber, setPageNumber] = useState(1)
-  const [reviewDraft, setReviewDraft] = useState('responsive')
+  // Empty until a person (or a completed AI suggestion) picks one: a blind
+  // default would let one click confirm a judgment nobody made.
+  const [reviewDraft, setReviewDraft] = useState('')
   const [reviewDraftTouched, setReviewDraftTouched] = useState(false)
   const [withholdingExemption, setWithholdingExemption] = useState('')
   const [redactionExemption, setRedactionExemption] = useState('')
@@ -458,12 +396,13 @@ export function RecordItems({
     if (activeSenderDomain) params.set('sender_domain', activeSenderDomain)
     if (activeCustodian) params.set('custodian', activeCustodian)
     if (activeConfidence) params.set('confidence_min', activeConfidence)
+    if (activeCollection) params.set('collection_task', activeCollection)
     return params
   }
 
   const filterKey = [
     request, activeReviewState, activeHandling, activeSearch, activeTag,
-    activeSenderDomain, activeCustodian, activeConfidence,
+    activeSenderDomain, activeCustodian, activeConfidence, activeCollection,
   ] as const
 
   const list = useQuery({
@@ -519,7 +458,7 @@ export function RecordItems({
     setSelected(item)
     setPageNumber(1)
     setReviewDraft(
-      item.review_state === 'unreviewed' ? 'responsive' : item.review_state,
+      item.review_state === 'unreviewed' ? '' : item.review_state,
     )
     setReviewDraftTouched(false)
     setWithholdingExemption('')
@@ -632,6 +571,55 @@ export function RecordItems({
   // A human decision about records this reviewer selected and could see, not
   // an accept-all of AI output: the request carries only the chosen ids and
   // the chosen outcome, and no advisory proposal takes part in it.
+  const hasFilter = Boolean(
+    activeReviewState || activeHandling || activeSearch || activeTag
+    || activeSenderDomain || activeCustodian || activeConfidence || activeCollection,
+  )
+  const selectionPreview = useQuery({
+    queryKey: ['record-bulk-selection', ...filterKey, bulkState],
+    enabled: bulkConfirmOpen && matchingMode && bulkState !== '',
+    queryFn: () => {
+      const params = filterParams()
+      params.set('state', bulkState)
+      return api<BulkSelectionPreview>(
+        `/api/staff/record-items/bulk-selection/?${params.toString()}`,
+      )
+    },
+    // The count is what the reviewer confirms; never show a stale one.
+    staleTime: 0,
+    gcTime: 0,
+  })
+  // A decision over the exact set the preview counted. The server re-counts
+  // under lock and refuses if anything changed in between.
+  const bulkFilterMutation = useMutation({
+    mutationFn: (preview: BulkSelectionPreview) => api<{ reviewed_count: number }>(
+      '/api/staff/record-items/bulk-review/',
+      {
+        method: 'POST',
+        body: {
+          filter: Object.fromEntries(filterParams()),
+          state: bulkState,
+          expected_count: preview.eligible_count,
+          selection_sha256: preview.selection_sha256,
+        },
+      },
+    ),
+    onSuccess: (result) => {
+      setMatchingMode(false)
+      setBulkState('')
+      setBulkConfirmOpen(false)
+      qc.invalidateQueries({ queryKey: ['record-items'] })
+      qc.invalidateQueries({ queryKey: ['record-item-facets'] })
+      if (request) {
+        qc.invalidateQueries({ queryKey: ['case-workspace-summary', request] })
+        qc.invalidateQueries({ queryKey: ['case-closure-readiness', request] })
+      }
+      toast('success', `Recorded ${result.reviewed_count} review outcomes.`)
+    },
+    onError: () => {
+      qc.invalidateQueries({ queryKey: ['record-bulk-selection'] })
+    },
+  })
   const bulkReviewMutation = useMutation({
     mutationFn: (payload: { ids: string[]; state: string }) => api<{
       reviewed_count: number
@@ -825,7 +813,7 @@ export function RecordItems({
     hydratedTarget.current = `${request}:${item.id}`
     setSelected(item)
     setPageNumber(1)
-    setReviewDraft(item.review_state === 'unreviewed' ? 'responsive' : item.review_state)
+    setReviewDraft(item.review_state === 'unreviewed' ? '' : item.review_state)
     setReviewDraftTouched(false)
     setWithholdingExemption('')
     setRedactionExemption('')
@@ -875,6 +863,7 @@ export function RecordItems({
   function changeFilter(changes: Record<string, string>) {
     setBulkSelection([])
     setBulkState('')
+    setMatchingMode(false)
     updateListParams(changes)
   }
 
@@ -888,6 +877,7 @@ export function RecordItems({
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!canReview || selected?.review_state !== 'responsive') return
+    event.currentTarget.setPointerCapture?.(event.pointerId)
     const start = pointerPosition(event)
     setDragStart(start)
     setDraftBox(normalizedBox(start, start))
@@ -895,6 +885,10 @@ export function RecordItems({
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     if (!dragStart) return
+    if (event.buttons === 0) {
+      setDragStart(null)
+      return
+    }
     setDraftBox(normalizedBox(dragStart, pointerPosition(event)))
   }
 
@@ -902,7 +896,7 @@ export function RecordItems({
     if (!dragStart) return
     const box = normalizedBox(dragStart, pointerPosition(event))
     setDragStart(null)
-    if (box.x1 - box.x0 < 0.005 || box.y1 - box.y0 < 0.005) {
+    if (tooSmall(box)) {
       setDraftBox(null)
       toast('error', 'Draw a larger redaction region.')
       return
@@ -1077,7 +1071,7 @@ export function RecordItems({
         </span>
       ) : '—',
     },
-    { header: 'Source system', cell: (row) => row.source_system || '—' },
+    { header: 'Source system', cell: (row) => (row.source_system ? sourceSystemLabel(row.source_system) : '—') },
     {
       header: 'Custodians',
       // Every mailbox the message was found in. One message deduplicated
@@ -1091,9 +1085,9 @@ export function RecordItems({
           <span title={names.join(', ')}>
             {names[0]}
             {names.length > 1 && (
-              // /80, not /70: at this size text-pacific/70 on white measures
+              // /80, not /70: at this size text-ink-muted on white measures
               // 4.44:1, below the WCAG 2 AA 4.5:1 minimum.
-              <span className="text-pacific/80"> +{names.length - 1} more</span>
+              <span className="text-ink-muted"> +{names.length - 1} more</span>
             )}
           </span>
         )
@@ -1105,7 +1099,7 @@ export function RecordItems({
         <span title="Advisory only — a named human still decides.">
           {row.advisory_suggested_state.replace('_', ' ')}
           {typeof row.advisory_confidence === 'number' && (
-            <span className="text-pacific/80">
+            <span className="text-ink-muted">
               {' '}({row.advisory_confidence.toFixed(2)})
             </span>
           )}
@@ -1141,12 +1135,12 @@ export function RecordItems({
     {
       header: 'SHA-256',
       cell: (row) => (
-        <span title={row.sha256} className="font-mono text-xs text-pacific/80">
+        <span title={row.sha256} className="font-mono text-xs text-ink-muted">
           {truncateHash(row.sha256)}
         </span>
       ),
     },
-    { header: 'Created', cell: (row) => row.created_at.slice(0, 10) },
+    { header: 'Created', cell: (row) => formatDay(row.created_at) },
     ]
   }
 
@@ -1324,13 +1318,30 @@ export function RecordItems({
           without anything moving focus, so a screen-reader user would
           otherwise get no feedback that a click changed what a confirmation
           covers. */}
-      {canReview && bulkSelection.length > 0 && (
+      {canReview && hasFilter && !matchingMode && (facets.data?.total ?? 0) > 0 && (
+        <div className="mb-2 flex justify-end">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setBulkSelection([])
+              setMatchingMode(true)
+            }}
+          >
+            Select all {facets.data?.total} matching
+          </Button>
+        </div>
+      )}
+
+      {canReview && (bulkSelection.length > 0 || matchingMode) && (
         <div
           aria-live="polite"
-          className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-driftwood/60 bg-skylight px-3 py-2"
+          className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-sunken px-3 py-2"
         >
-          <span className="text-sm text-pacific">
-            {bulkSelection.length} selected
+          <span className="text-sm text-ink">
+            {matchingMode
+              ? `All ${facets.data?.total ?? 0} records matching this filter`
+              : `${bulkSelection.length} selected`}
           </span>
           <Select
             aria-label="Bulk review outcome"
@@ -1348,13 +1359,14 @@ export function RecordItems({
             disabled={
               bulkState === ''
               || bulkReviewMutation.isPending
+              || bulkFilterMutation.isPending
               // The confirmation refuses an over-cap selection anyway, so
               // opening it would only be a dead end.
-              || bulkSelection.length > BULK_REVIEW_MAX
+              || (!matchingMode && bulkSelection.length > BULK_REVIEW_MAX)
             }
             onClick={() => setBulkConfirmOpen(true)}
           >
-            Review selected
+            {matchingMode ? 'Review all matching' : 'Review selected'}
           </Button>
           <Button
             variant="secondary"
@@ -1362,12 +1374,13 @@ export function RecordItems({
             onClick={() => {
               setBulkSelection([])
               setBulkState('')
+              setMatchingMode(false)
             }}
           >
             Clear selection
           </Button>
-          {bulkSelection.length > BULK_REVIEW_MAX && (
-            <span className="text-sm text-red-700">
+          {!matchingMode && bulkSelection.length > BULK_REVIEW_MAX && (
+            <span className="text-sm text-danger-ink">
               Select at most {BULK_REVIEW_MAX} records for one decision.
             </span>
           )}
@@ -1377,7 +1390,34 @@ export function RecordItems({
       {list.isPending && <Spinner />}
       {list.isError && <ErrorNote error={list.error} />}
       {targetedItem.isError && <ErrorNote error={targetedItem.error} />}
-      {list.isSuccess && (
+      {canReview && request !== '' && (
+        <DiscardBatchCard request={request} onOpen={(id) => updateListParams({ item: id })} />
+      )}
+      {/* Inside a case, redaction proposals are the Redact stage's (#45). */}
+      {canReview && request !== '' && !scopedRequestNumber && (
+        <RedactionProposals request={request} onOpen={(id) => updateListParams({ item: id })} />
+      )}
+      {activeCollection && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-line bg-surface-raised px-4 py-2 text-sm text-ink">
+          <span>Showing one collection&apos;s records.</span>
+          <Button variant="ghost" onClick={() => changeFilter({ collection_task: '' })}>
+            Show every collection
+          </Button>
+        </div>
+      )}
+      {activeGroup === 'cluster' && request !== '' && (
+        <RecordClusters
+          filters={filterParams()}
+          filterKey={filterKey}
+          clusterBy={searchParams.get('cluster_by') ?? 'thread'}
+          onClusterBy={(value) => updateListParams({ cluster_by: value })}
+          onOpen={(id) => updateListParams({ item: id })}
+        />
+      )}
+      {activeGroup === 'cluster' && request === '' && (
+        <Card><EmptyState>Open a case to group its records into clusters.</EmptyState></Card>
+      )}
+      {list.isSuccess && activeGroup !== 'cluster' && (
         <Card>
           {listRows.length === 0 ? (
             <EmptyState>No record items match these filters.</EmptyState>
@@ -1387,8 +1427,8 @@ export function RecordItems({
             <div className="space-y-4">
               {groupedRows.map(([label, rows]) => (
                 <section key={label}>
-                  <h3 className="mb-2 font-heading text-sm font-semibold text-pacific">
-                    {label} <span className="text-pacific/80">({rows.length})</span>
+                  <h3 className="mb-2 font-heading text-sm font-semibold text-ink">
+                    {label} <span className="text-ink-muted">({rows.length})</span>
                   </h3>
                   <Table
                     columns={columnsFor(rows, `Select every record in ${label}`)}
@@ -1453,7 +1493,7 @@ export function RecordItems({
                     >
                       Previous
                     </Button>
-                    <span className="text-sm text-pacific">Page {pageNumber} of {pageCount}</span>
+                    <span className="text-sm text-ink">Page {pageNumber} of {pageCount}</span>
                     <Button
                       variant="ghost"
                       disabled={pageNumber >= pageCount}
@@ -1481,7 +1521,7 @@ export function RecordItems({
               {selected.reviewable !== false && metadata.isSuccess && (
                 <div
                   aria-label={`Draw redactions on page ${pageNumber}`}
-                  className={`relative mx-auto w-fit max-w-full overflow-hidden rounded-md border border-driftwood bg-white ${
+                  className={`relative mx-auto w-fit max-w-full overflow-hidden rounded-md border border-line bg-surface-raised ${
                     canReview && selected.review_state === 'responsive' ? 'cursor-crosshair touch-none' : ''
                   }`}
                   onPointerDown={onPointerDown}
@@ -1504,23 +1544,21 @@ export function RecordItems({
                   {draftBox && <Region box={draftBox} draft />}
                 </div>
               )}
-              <p className="text-xs text-pacific/80">
-                The browser receives only a no-store raster preview. Draw from one corner to the
-                other; saved coordinates are normalized to the page. Blue regions are AI
-                candidates, amber is the current human-editable draft, and black regions are
-                approved redactions.
+              <p className="text-xs text-ink-muted">
+                Drag a box to redact. Blue is an AI suggestion, amber your draft, black
+                approved.
               </p>
             </section>
 
             <aside className="space-y-5">
               {canReview && (
-                <section className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4">
+                <section className="space-y-3 rounded-xl border border-warning bg-warning-soft p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="font-heading text-base font-bold text-pacific">
+                      <h3 className="font-heading text-base font-bold text-ink">
                         AI responsiveness recommendation
                       </h3>
-                      <p className="mt-1 text-xs text-pacific/80">
+                      <p className="mt-1 text-xs text-ink-muted">
                         Prepared automatically for human judgment. The recommendation is
                         permanently non-applying and cannot choose the legal review state.
                       </p>
@@ -1539,26 +1577,26 @@ export function RecordItems({
                     <ErrorNote error={responsivenessAdvisory.error} />
                   )}
                   {responsivenessAdvisory.data && !responsivenessAdvisory.data.enabled && (
-                    <p className="text-sm text-pacific/80">
+                    <p className="text-sm text-ink-muted">
                       Disabled pending district provider and data-handling approval.
                     </p>
                   )}
                   {responsivenessAdvisory.data?.enabled
                     && responsivenessAdvisory.data.latest === null && (
-                    <p className="text-sm text-pacific/80">
-                      Automatic analysis is queued as soon as this record becomes review-ready.
+                    <p className="text-sm text-ink-muted">
+                      No AI suggestion for this record yet.
                     </p>
                   )}
                   {['pending', 'running'].includes(
                     responsivenessAdvisory.data?.latest?.state ?? '',
-                  ) && <p className="text-sm text-pacific/80">Analysis in progress…</p>}
+                  ) && <p className="text-sm text-ink-muted">Analysis in progress…</p>}
                   {responsivenessAdvisory.data?.latest?.state === 'failed' && (
-                    <p className="text-sm text-red-700">
+                    <p className="text-sm text-danger-ink">
                       {responsivenessAdvisory.data.latest.failure_detail}
                     </p>
                   )}
                   {responsivenessAdvisory.data?.latest?.state === 'complete' && (
-                    <div className="space-y-2 text-sm text-pacific">
+                    <div className="space-y-2 text-sm text-ink">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge tone="amber">
                           Suggested: {responsivenessAdvisory.data.latest.proposal.suggested_state}
@@ -1571,11 +1609,11 @@ export function RecordItems({
                         </span>
                       </div>
                       <p>{responsivenessAdvisory.data.latest.proposal.rationale}</p>
-                      <p className="text-xs text-pacific/80">
+                      <p className="text-xs text-ink-muted">
                         Matched terms:{' '}
                         {responsivenessAdvisory.data.latest.proposal.matched_terms?.join(' · ') || 'none'}
                       </p>
-                      <p className="text-xs text-pacific/80">
+                      <p className="text-xs text-ink-muted">
                         Model {responsivenessAdvisory.data.latest.model_identifier} · input SHA-256{' '}
                         {responsivenessAdvisory.data.latest.input_sha256.slice(0, 16)}…
                         {responsivenessAdvisory.data.latest.input_truncated ? ' · input truncated' : ''}
@@ -1586,8 +1624,8 @@ export function RecordItems({
               )}
 
               {canReview && (
-                <section className="space-y-3 rounded-xl border border-driftwood bg-white p-4">
-                  <h3 className="font-heading text-base font-bold text-pacific">Human review</h3>
+                <section className="space-y-3 rounded-xl border border-line bg-surface-raised p-4">
+                  <h3 className="font-heading text-base font-bold text-ink">Human review</h3>
                   <Field label="Review outcome">
                     <Select
                       className="w-full"
@@ -1597,6 +1635,7 @@ export function RecordItems({
                         setReviewDraftTouched(true)
                       }}
                     >
+                      <option value="" disabled>Choose an outcome</option>
                       {HUMAN_REVIEW_STATES.map((state) => (
                         <option key={state.value} value={state.value}>{state.label}</option>
                       ))}
@@ -1622,25 +1661,26 @@ export function RecordItems({
                     onClick={() => reviewMutation.mutate()}
                     disabled={
                       reviewMutation.isPending
+                      || reviewDraft === ''
                       || (reviewDraft === 'withheld' && !withholdingExemption)
                     }
                   >
                     Confirm review outcome
                   </Button>
-                  <p className="text-xs text-pacific/80">
+                  <p className="text-xs text-ink-muted">
                     This is a named legal judgment. Automation may propose but cannot confirm it.
                   </p>
                 </section>
               )}
 
               {canReview && selected.review_state === 'responsive' && (
-                <section className="space-y-3 rounded-xl border border-sky-300 bg-sky-50 p-4">
+                <section className="space-y-3 rounded-xl border border-info bg-info-soft p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="font-heading text-base font-bold text-pacific">
+                      <h3 className="font-heading text-base font-bold text-ink">
                         AI redaction proposals
                       </h3>
-                      <p className="mt-1 text-xs text-pacific/80">
+                      <p className="mt-1 text-xs text-ink-muted">
                         Bedrock prepares grounded candidates and reasons automatically. Every
                         candidate remains unapplied until a named reviewer accepts an editable
                         region, legal citation, and explanation.
@@ -1659,30 +1699,30 @@ export function RecordItems({
                   {redactionAdvisory.isPending && <Spinner label="Loading redaction proposals…" />}
                   {redactionAdvisory.isError && <ErrorNote error={redactionAdvisory.error} />}
                   {redactionAdvisory.data && !redactionAdvisory.data.enabled && (
-                    <p className="text-sm text-pacific/80">AI advisory is disabled in this environment.</p>
+                    <p className="text-sm text-ink-muted">AI advisory is disabled in this environment.</p>
                   )}
                   {redactionAdvisory.data?.enabled
                     && redactionAdvisory.data.latest === null && (
-                    <p className="text-sm text-pacific/80">
+                    <p className="text-sm text-ink-muted">
                       Automatic redaction analysis is being prepared after the responsive decision.
                     </p>
                   )}
                   {['pending', 'running'].includes(
                     redactionAdvisory.data?.latest?.state ?? '',
-                  ) && <p className="text-sm text-pacific/80">Redaction analysis in progress…</p>}
+                  ) && <p className="text-sm text-ink-muted">Redaction analysis in progress…</p>}
                   {redactionAdvisory.data?.latest?.state === 'failed' && (
-                    <p className="text-sm text-red-700">
+                    <p className="text-sm text-danger-ink">
                       {redactionAdvisory.data.latest.failure_detail}
                     </p>
                   )}
                   {redactionAdvisory.data?.latest?.state === 'complete' && (
                     <>
-                      <p className="text-sm font-semibold text-pacific">
+                      <p className="text-sm font-semibold text-ink">
                         {undecidedProposals.length}{' '}
                         {undecidedProposals.length === 1 ? 'candidate needs' : 'candidates need'} review
                       </p>
                       {redactionProposals.length === 0 && (
-                        <p className="text-sm text-pacific/80">
+                        <p className="text-sm text-ink-muted">
                           No redaction candidates were found. Human page review is still required.
                         </p>
                       )}
@@ -1692,12 +1732,12 @@ export function RecordItems({
                             key={proposal.id}
                             className={`rounded-lg border p-3 text-sm ${
                               selectedProposal === proposal.id
-                                ? 'border-amber-400 bg-amber-50'
-                                : 'border-sky-200 bg-white'
+                                ? 'border-warning bg-warning-soft'
+                                : 'border-info bg-surface-raised'
                             }`}
                           >
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-heading font-bold text-pacific">
+                              <span className="font-heading font-bold text-ink">
                                 Page {proposal.page_number} · {proposal.citation}
                               </span>
                               <Badge tone={
@@ -1710,10 +1750,10 @@ export function RecordItems({
                                 {proposal.decision?.outcome ?? `${Math.round(proposal.confidence * 100)}% candidate`}
                               </Badge>
                             </div>
-                            <p className="mt-1 text-pacific/80">{proposal.exemption_name}</p>
-                            <p className="mt-1 text-pacific">{proposal.rationale}</p>
+                            <p className="mt-1 text-ink-muted">{proposal.exemption_name}</p>
+                            <p className="mt-1 text-ink">{proposal.rationale}</p>
                             {proposal.decision?.reason && (
-                              <p className="mt-1 text-xs text-pacific/80">
+                              <p className="mt-1 text-xs text-ink-muted">
                                 Human reason: {proposal.decision.reason}
                               </p>
                             )}
@@ -1730,7 +1770,7 @@ export function RecordItems({
                         ))}
                       </div>
                       {redactionAdvisory.data.latest && (
-                        <p className="text-xs text-pacific/80">
+                        <p className="text-xs text-ink-muted">
                           Model {redactionAdvisory.data.latest.model_identifier} · input SHA-256{' '}
                           {redactionAdvisory.data.latest.input_sha256.slice(0, 16)}…
                         </p>
@@ -1741,11 +1781,11 @@ export function RecordItems({
               )}
 
               {canReview && selected.review_state === 'responsive' && (
-                <section className="space-y-3 rounded-xl border border-driftwood bg-white p-4">
-                  <h3 className="font-heading text-base font-bold text-pacific">
+                <section className="space-y-3 rounded-xl border border-line bg-surface-raised p-4">
+                  <h3 className="font-heading text-base font-bold text-ink">
                     {selectedProposal ? 'Review AI proposal' : 'Add redaction'}
                   </h3>
-                  <p className="text-sm text-pacific/80">
+                  <p className="text-sm text-ink-muted">
                     {selectedProposal
                       ? 'Adjust the proposed box on the page, verify or change the legal exemption, then explicitly accept or reject it.'
                       : 'Draw a box on the page preview, then choose the legal exemption and add the redaction.'}
@@ -1809,7 +1849,7 @@ export function RecordItems({
                         />
                       </Field>
                       {reasonShortfall(proposalRejectReason) && (
-                        <p aria-live="polite" className="text-sm text-pacific/80">
+                        <p aria-live="polite" className="text-sm text-ink-muted">
                           {reasonShortfall(proposalRejectReason)}
                         </p>
                       )}
@@ -1836,9 +1876,9 @@ export function RecordItems({
               )}
 
               {canReview && selected.review_state !== 'responsive' && (
-                <section className="space-y-2 rounded-xl border border-driftwood bg-white p-4">
-                  <h3 className="font-heading text-base font-bold text-pacific">Redaction workflow</h3>
-                  <p className="text-sm text-pacific/80">
+                <section className="space-y-2 rounded-xl border border-line bg-surface-raised p-4">
+                  <h3 className="font-heading text-base font-bold text-ink">Redaction workflow</h3>
+                  <p className="text-sm text-ink-muted">
                     Redaction tools are available only after a record is confirmed Responsive. If
                     this record includes content that must be disclosed with protected information
                     removed, confirm Responsive above, draw a box on the page preview, choose the
@@ -1847,20 +1887,20 @@ export function RecordItems({
                 </section>
               )}
 
-              <section className="space-y-3 rounded-xl border border-driftwood bg-white p-4">
-                <h3 className="font-heading text-base font-bold text-pacific">Active redactions</h3>
+              <section className="space-y-3 rounded-xl border border-line bg-surface-raised p-4">
+                <h3 className="font-heading text-base font-bold text-ink">Active redactions</h3>
                 {redactions.isPending && <Spinner label="Loading redactions…" />}
                 {redactions.isError && <ErrorNote error={redactions.error} />}
                 {redactions.isSuccess && activeRedactions.length === 0 && (
-                  <p className="text-sm text-pacific/80">No active redactions.</p>
+                  <p className="text-sm text-ink-muted">No active redactions.</p>
                 )}
                 {activeRedactions.map((redaction) => (
-                  <div key={redaction.id} className="rounded-lg border border-driftwood/70 p-3 text-sm">
-                    <p className="font-heading font-bold text-pacific">
+                  <div key={redaction.id} className="rounded-lg border border-line p-3 text-sm">
+                    <p className="font-heading font-bold text-ink">
                       Page {redaction.page_number} · {redaction.citation}
                     </p>
-                    <p className="text-pacific/80">{redaction.exemption_name}</p>
-                    {redaction.explanation && <p className="mt-1 text-pacific">{redaction.explanation}</p>}
+                    <p className="text-ink-muted">{redaction.exemption_name}</p>
+                    {redaction.explanation && <p className="mt-1 text-ink">{redaction.explanation}</p>}
                     {canReview && (
                       <Button
                         variant="ghost"
@@ -1873,7 +1913,7 @@ export function RecordItems({
                   </div>
                 ))}
                 {voidTarget !== null && (
-                  <div className="space-y-2 rounded-lg border border-red-300 bg-red-50 p-3">
+                  <div className="space-y-2 rounded-lg border border-danger bg-danger-soft p-3">
                     <Field
                       label="Reason for voiding"
                       hint={reasonHint('this redaction stays in the exemption log')}
@@ -1886,7 +1926,7 @@ export function RecordItems({
                       />
                     </Field>
                     {reasonShortfall(voidReason) && (
-                      <p aria-live="polite" className="text-sm text-pacific/80">
+                      <p aria-live="polite" className="text-sm text-ink-muted">
                         {reasonShortfall(voidReason)}
                       </p>
                     )}
@@ -1944,8 +1984,80 @@ export function RecordItems({
         title="Record this review outcome"
         onClose={() => setBulkConfirmOpen(false)}
       >
+        {matchingMode ? (
+          <div className="space-y-4">
+            {selectionPreview.isPending && <Spinner />}
+            {selectionPreview.isError && <ErrorNote error={selectionPreview.error} />}
+            {selectionPreview.data && (
+              <>
+                <p className="text-sm text-ink">
+                  You are recording{' '}
+                  <strong>
+                    {BULK_REVIEW_STATES.find((option) => option.value === bulkState)?.label
+                      ?? bulkState}
+                  </strong>{' '}
+                  for <strong>{selectionPreview.data.eligible_count}</strong> of the{' '}
+                  {selectionPreview.data.matching} records matching this filter. This is
+                  your decision, not an acceptance of any AI suggestion. Each record is
+                  audited separately in your name.
+                </p>
+                {Object.entries(selectionPreview.data.excluded)
+                  .filter(([, count]) => count > 0)
+                  .map(([key, count]) => (
+                    <p key={key} className="text-sm text-ink-muted">
+                      {count}{' '}
+                      {EXCLUDED_LABELS[key as keyof BulkSelectionPreview['excluded']][
+                        count === 1 ? 0 : 1
+                      ]}{' '}
+                      and will not change.
+                    </p>
+                  ))}
+                {selectionPreview.data.privilege_count > 0 && (
+                  <p className="text-sm font-semibold text-danger-ink">
+                    {selectionPreview.data.privilege_count}{' '}
+                    {selectionPreview.data.privilege_count === 1
+                      ? 'record carries'
+                      : 'records carry'}{' '}
+                    a district-counsel or privilege marker. Filter to the privilege queue
+                    and read them before deciding.
+                  </p>
+                )}
+                {selectionPreview.data.eligible_count > selectionPreview.data.max_items && (
+                  <p className="text-sm text-danger-ink">
+                    One decision covers at most {selectionPreview.data.max_items} records.
+                    Narrow the filter.
+                  </p>
+                )}
+              </>
+            )}
+            <ErrorNote error={bulkFilterMutation.error} />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                disabled={
+                  !selectionPreview.data
+                  || bulkFilterMutation.isPending
+                  || selectionPreview.data.eligible_count === 0
+                  || selectionPreview.data.eligible_count > selectionPreview.data.max_items
+                }
+                onClick={() => {
+                  if (selectionPreview.data) bulkFilterMutation.mutate(selectionPreview.data)
+                }}
+              >
+                Record {selectionPreview.data?.eligible_count ?? 0} outcomes
+              </Button>
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={() => setBulkConfirmOpen(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
         <div className="space-y-4">
-          <p className="text-sm text-pacific">
+          <p className="text-sm text-ink">
             You are recording{' '}
             <strong>
               {BULK_REVIEW_STATES.find((option) => option.value === bulkState)?.label
@@ -1962,7 +2074,7 @@ export function RecordItems({
             // record is not automatically exempt, and only a named reviewer
             // with a citation may withhold one -- but the reviewer is told
             // what is in front of them rather than deciding blind.
-            <p className="text-sm font-semibold text-red-700">
+            <p className="text-sm font-semibold text-danger-ink">
               {privilegeSelectedCount}{' '}
               {privilegeSelectedCount === 1 ? 'record carries' : 'records carry'}{' '}
               a district-counsel or privilege marker. Read{' '}
@@ -1971,7 +2083,7 @@ export function RecordItems({
               second review.
             </p>
           )}
-          <p className="text-sm text-pacific/80">
+          <p className="text-sm text-ink-muted">
             Withholding a record in full, and marking one a duplicate, stay
             one-at-a-time decisions: each needs its own exemption citation or
             its own judgement. A record already in either state is left out of
@@ -2006,6 +2118,7 @@ export function RecordItems({
             </Button>
           </div>
         </div>
+        )}
       </Modal>
     </>
   )

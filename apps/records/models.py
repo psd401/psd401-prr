@@ -667,7 +667,11 @@ class CollectionTask(models.Model):
     class Kind(models.TextChoices):
         VAULT_MAIL = "vault_mail", "Vault – Gmail"
         VAULT_DRIVE = "vault_drive", "Vault – Drive"
+        VAULT_CHAT = "vault_chat", "Vault – Chat"
         MANUAL = "manual", "Manual / Department"
+
+    #: The Vault-backed kinds, one per Google Workspace source.
+    VAULT_KINDS = ("vault_mail", "vault_drive", "vault_chat")
 
     class State(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -676,22 +680,32 @@ class CollectionTask(models.Model):
         COMPLETE = "complete", "Complete"
         FAILED = "failed", "Failed"
 
+    class Trigger(models.TextChoices):
+        MANUAL = "manual", "Manual"
+        #: Started by the trust policy from a completed automatic scoping
+        #: session's final count (#37, rule 11). Recorded and shown.
+        AUTOMATIC = "automatic", "Automatic"
+
     request = models.ForeignKey(PublicRecordsRequest, on_delete=models.CASCADE, related_name="collection_tasks")
     system = models.ForeignKey("RecordSystem", null=True, blank=True,
                                on_delete=models.SET_NULL, related_name="collection_tasks")
     kind = models.CharField(max_length=20, choices=Kind.choices)
+    trigger = models.CharField(max_length=20, choices=Trigger.choices, default=Trigger.MANUAL)
     state = models.CharField(max_length=20, choices=State.choices, default=State.PENDING)
     instructions = models.TextField(blank=True)
     custodian_emails = models.JSONField(default=list, blank=True)
     search_terms = models.CharField(max_length=1000, blank=True)
     date_range_start = models.DateField(null=True, blank=True)
     date_range_end = models.DateField(null=True, blank=True)
-    source_vault_count = models.OneToOneField(
+    #: The reviewed count this Vault collection exports. One count starts
+    #: one task per source it collects (Gmail, Drive, Chat), never two of
+    #: the same source.
+    source_vault_count = models.ForeignKey(
         "VaultCountRun",
         null=True,
         blank=True,
         on_delete=models.PROTECT,
-        related_name="collection_task",
+        related_name="collection_tasks",
     )
     assigned_to = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     due_date = models.DateField(null=True, blank=True)
@@ -704,6 +718,15 @@ class CollectionTask(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source_vault_count", "kind"],
+                condition=Q(source_vault_count__isnull=False),
+                name="records_one_vault_task_per_count_source",
+            ),
+        ]
 
 
 class VaultCountRun(models.Model):
@@ -751,6 +774,17 @@ class VaultCountRun(models.Model):
         default=State.PENDING,
     )
     corpus = models.CharField(max_length=20, default="MAIL", editable=False)
+    #: The Google Workspace sources this count searched: ``mail``, ``drive``,
+    #: ``chat``. Empty means Gmail only (every count before Drive and Chat).
+    sources = models.JSONField(default=list, blank=True)
+    #: Per-source count state for every source but Gmail, whose result lives
+    #: in the columns below: ``{"drive": {"state": "counting" | "counted" |
+    #: "unavailable", "count": n, "reason": "...", ...}}``. Provider ids kept
+    #: here for resumable polling are not exposed by the staff serializer.
+    source_counts = models.JSONField(default=dict, blank=True)
+    #: The staff organizational unit a district-wide Drive or Chat search
+    #: used, captured when the count was requested.
+    org_unit_id = models.CharField(max_length=255, blank=True)
     search_scope = models.CharField(
         max_length=20,
         choices=SearchScope.choices,
@@ -778,11 +812,18 @@ class VaultCountRun(models.Model):
         null=True,
         blank=True,
     )
+    #: The busiest custodian accounts in the result, largest first (at most
+    #: 20), as ``{"email", "count"}``. Vault counts give no sender breakdown;
+    #: this is what scope refinement reads (#36).
+    account_counts = models.JSONField(default=list, blank=True)
     failure_code = models.CharField(max_length=100, blank=True)
     failure_detail = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    #: When the system drafted a scope letter covering this count, so a draft
+    #: a person deletes is not drafted again for the same count.
+    scope_letter_prepared_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -1009,6 +1050,10 @@ class RecordItem(models.Model):
         NON_RESPONSIVE = "non_responsive", "Non-responsive"
         DUPLICATE = "duplicate", "Duplicate"
         WITHHELD = "withheld", "Withheld (fully exempt)"
+        #: Left the review set when a Records Officer superseded the
+        #: collection that brought it in (an over-broad export). Never set by
+        #: a single-record review; see collection_supersession.
+        SUPERSEDED = "superseded", "Superseded (collection re-scoped)"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     request = models.ForeignKey(PublicRecordsRequest, on_delete=models.CASCADE, related_name="record_items")
@@ -1291,6 +1336,10 @@ class AdvisoryRun(models.Model):
             "Record responsiveness",
         )
         RECORD_REDACTIONS = "record_redactions", "Record redaction candidates"
+        #: Whether a newly created case is a new request, a follow-up to or
+        #: duplicate of an earlier case, related to one, not a records request,
+        #: or spam. A label for a person to confirm; it changes nothing itself.
+        INTAKE_CLASSIFICATION = "intake_classification", "Intake classification"
 
     class State(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -1363,6 +1412,7 @@ class AdvisoryRun(models.Model):
                             "case_title",
                             "record_responsiveness",
                             "record_redactions",
+                            "intake_classification",
                         ],
                     )
                 ),
@@ -1376,6 +1426,10 @@ class AdvisoryRun(models.Model):
                     )
                     | Q(
                         kind="case_title",
+                        record_item__isnull=True,
+                    )
+                    | Q(
+                        kind="intake_classification",
                         record_item__isnull=True,
                     )
                     | Q(
@@ -1394,6 +1448,21 @@ class AdvisoryRun(models.Model):
 
 class RedactionProposal(AppendOnlyModelMixin, models.Model):
     """One coordinate-grounded model candidate, never a legal redaction."""
+
+    class Pattern(models.TextChoices):
+        """What kind of information the candidate covers (#40), so proposals
+        can be reviewed a group at a time. Proposals made before the model
+        was asked for it are ``other``."""
+
+        PHONE = "phone", "Phone number"
+        EMAIL = "email", "Email address"
+        ADDRESS = "address", "Home address"
+        STUDENT_IDENTIFIER = "student_identifier", "Student identifier"
+        GOVERNMENT_ID = "government_id", "SSN or government ID"
+        FINANCIAL_ACCOUNT = "financial_account", "Financial account"
+        MEDICAL = "medical", "Medical or health information"
+        PERSON_NAME = "person_name", "Person's name"
+        OTHER = "other", "Other"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     advisory_run = models.ForeignKey(
@@ -1428,6 +1497,7 @@ class RedactionProposal(AppendOnlyModelMixin, models.Model):
         validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
     )
     rationale = models.CharField(max_length=1000)
+    pattern = models.CharField(max_length=40, choices=Pattern.choices, default=Pattern.OTHER)
     source_span_ids = models.JSONField()
     source_text_sha256 = models.CharField(max_length=64)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -2824,6 +2894,94 @@ class RecordSystem(models.Model):
         return self.name
 
 
+# District knowledge pack (#35). What a Records Officer knows about where
+# records live, kept in the app and edited only from the Knowledge page, so the
+# request-intent advisory scopes a search the way the officer would. Nothing
+# here routes, holds, collects, or reaches a requester; it is advisory input.
+
+
+class KnowledgeRoleAccount(models.Model):
+    """Which district account held a role, and when.
+
+    A request names "the principal" or "the HR director"; the mailbox to search
+    is whoever held that role during the dates the request reaches. Either end
+    of the range may be open.
+    """
+
+    role = models.CharField(max_length=200)
+    account_email = models.EmailField()
+    starts_on = models.DateField(null=True, blank=True)
+    ends_on = models.DateField(null=True, blank=True)
+    note = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["role", "starts_on", "pk"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(starts_on__isnull=True)
+                    | models.Q(ends_on__isnull=True)
+                    | models.Q(ends_on__gte=models.F("starts_on"))
+                ),
+                name="knowledge_role_account_range_ordered",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.role}: {self.account_email}"
+
+
+class KnowledgeNoiseSender(models.Model):
+    """A sender a responsive search almost never wants: district mass mail,
+    newsletters, vendor notifications. The advisory is told to exclude it."""
+
+    class Kind(models.TextChoices):
+        DOMAIN = "domain", "Sender domain"
+        ADDRESS = "address", "Sender address"
+        LIST = "list", "Mailing list"
+
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    value = models.CharField(max_length=254)
+    note = models.CharField(max_length=500, blank=True)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["kind", "value"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["kind", "value"],
+                name="knowledge_noise_sender_unique",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.kind}: {self.value}"
+
+
+class KnowledgeSystemNote(models.Model):
+    """The officer's own search notes for one registry system. Kept apart from
+    RecordSystem so re-seeding the registry never touches them."""
+
+    record_system = models.OneToOneField(
+        RecordSystem,
+        on_delete=models.PROTECT,
+        related_name="knowledge_note",
+    )
+    notes = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["record_system__name"]
+
+    def __str__(self):
+        return f"Search notes: {self.record_system}"
+
+
 class LegacyFileImport(AppendOnlyModelMixin, models.Model):
     """One migrated source file, and what became of it.
 
@@ -3050,3 +3208,512 @@ class OpaqueRecordDisposition(AppendOnlyModelMixin, models.Model):
 
     def __str__(self):
         return f"{self.record_item_id}: {self.basis}"
+
+
+class CollectionSupersession(AppendOnlyModelMixin, models.Model):
+    """A Records Officer took one collection's unreviewed records out of review.
+
+    An export can sweep in far more than the request asked for. The records it
+    brought in stay -- they are the evidence of what was searched -- but the
+    ones nobody has decided yet leave the review and release queues, and this
+    row says who did that, why, and how many.
+    """
+
+    collection_task = models.ForeignKey(
+        CollectionTask,
+        on_delete=models.PROTECT,
+        related_name="supersessions",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    reason = models.TextField()
+    record_count = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    def __str__(self):
+        return f"{self.collection_task.pk}: {self.record_count} superseded"
+
+
+class AdvisoryFeedback(AppendOnlyModelMixin, models.Model):
+    """What a person did with one advisory proposal.
+
+    One row per run. ``confirmed`` means the person agreed with the proposal;
+    applying it is still the ordinary staff action (merge, close, add to a
+    case), which this row does not record and the proposal never performs. ``dismissed`` means they did not
+    agree. ``final_label`` is what the person judged it to be, so agreement
+    between model and people can be measured and thresholds set from data.
+    """
+
+    class Outcome(models.TextChoices):
+        CONFIRMED = "confirmed", "Confirmed"
+        DISMISSED = "dismissed", "Dismissed"
+
+    advisory_run = models.OneToOneField(
+        AdvisoryRun,
+        on_delete=models.PROTECT,
+        related_name="feedback",
+    )
+    outcome = models.CharField(max_length=20, choices=Outcome.choices)
+    final_label = models.CharField(max_length=40, blank=True)
+    reason = models.TextField(blank=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    def __str__(self):
+        return f"{self.advisory_run.pk}: {self.outcome}"
+
+
+class ReviewDecision(AppendOnlyModelMixin, models.Model):
+    """One human responsiveness decision on one record, and the AI suggestion
+    standing when it was made.
+
+    Written by ``review.review_record`` for single and bulk review alike. The
+    suggestion is the record's latest complete responsiveness run at decision
+    time -- the rule the review list uses to show one -- copied here as label
+    and confidence so
+    agreement between model and people can be measured. It never influences
+    what the decision writes. Append-only: a later review is a new row.
+    """
+
+    record_item = models.ForeignKey(
+        RecordItem,
+        on_delete=models.PROTECT,
+        related_name="review_decisions",
+    )
+    request = models.ForeignKey(
+        PublicRecordsRequest,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    review_state = models.CharField(max_length=20, choices=RecordItem.ReviewState.choices)
+    advisory_run = models.ForeignKey(
+        AdvisoryRun,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    advisory_label = models.CharField(max_length=40, blank=True)
+    advisory_confidence = models.FloatField(null=True, blank=True)
+    bulk = models.BooleanField(default=False)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    class Meta:
+        indexes = [models.Index(fields=["request", "record_item", "created_at"])]
+
+    def __str__(self):
+        return f"{self.pk}: {self.review_state}"
+
+
+class RecordsEstimate(AppendOnlyModelMixin, models.Model):
+    """One computed estimate for a request (#41): responsive range, fee, and
+    completion date, with every input it was computed from.
+
+    Evidence only. Nothing here changes ``estimated_completion`` or reaches
+    the requester; a person revises the estimate (``letters.revise_estimate``)
+    and approves any letter. ``inputs`` holds the counts, rates, adopted
+    schedule, throughput window, and backlog the numbers came from, so a later
+    revision can show exactly why the estimate said what it did.
+    """
+
+    request = models.ForeignKey(
+        PublicRecordsRequest,
+        on_delete=models.PROTECT,
+        related_name="records_estimates",
+    )
+    as_of = models.DateField()
+    inputs = models.JSONField()
+    result = models.JSONField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.pk}: estimate as of {self.as_of}"
+
+
+class ReviewBatch(models.Model):
+    """A batch decision a reviewer approves after judging a random sample (#39).
+
+    ``cluster``: a reviewer proposes one outcome for a cluster's unreviewed
+    records; ``discard``: the Ready to discard pile of records the AI calls
+    non-responsive above the trust-policy floor. Either way a random sample
+    (``sample_ids``) is drawn when the batch is opened, the reviewer judges
+    each sampled record, and only if every judgment matches
+    ``proposed_state`` is that outcome applied to the rest, in the
+    reviewer's name. One disagreement blocks the batch: the sampled
+    judgments are recorded as ordinary reviews and every other record goes
+    back to per-record review. For a discard batch that sample is the
+    elusion test. The AI applies nothing; the reviewer's decision does.
+    """
+
+    class Kind(models.TextChoices):
+        CLUSTER = "cluster", "Cluster approval"
+        DISCARD = "discard", "Ready to discard"
+
+    class Outcome(models.TextChoices):
+        OPEN = "open", "Open"
+        APPLIED = "applied", "Applied"
+        BLOCKED = "blocked", "Blocked"
+
+    request = models.ForeignKey(
+        PublicRecordsRequest,
+        on_delete=models.PROTECT,
+        related_name="review_batches",
+    )
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    label = models.CharField(max_length=500, blank=True)
+    proposed_state = models.CharField(max_length=20)
+    record_item_ids = models.JSONField()
+    sample_ids = models.JSONField()
+    min_confidence = models.FloatField(null=True, blank=True)
+    judgments = models.JSONField(default=dict, blank=True)
+    outcome = models.CharField(max_length=20, choices=Outcome.choices, default=Outcome.OPEN)
+    applied_count = models.PositiveIntegerField(default=0)
+    skipped_count = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(proposed_state__in=["responsive", "non_responsive"]),
+                name="review_batch_proposed_state_allowed",
+            ),
+            # Nothing may discard as responsive: a discard batch only ever
+            # proposes non-responsive.
+            models.CheckConstraint(
+                condition=~Q(kind="discard") | Q(proposed_state="non_responsive"),
+                name="review_batch_discard_is_non_responsive",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.kind} batch {self.pk}: {self.outcome}"
+
+
+class RedactionBatch(models.Model):
+    """Accept a group of redaction proposals after a sampled check (#40).
+
+    A group is the pending proposals on one case with one exemption and one
+    pattern. When the batch opens a random sample is drawn; the reviewer
+    accepts or rejects each sampled proposal. Only if every sampled proposal
+    is accepted are the rest accepted, each through
+    ``redaction_ai.accept_redaction_proposal`` -> ``create_redaction`` with
+    its own exemption citation (rule 3) and its own second-review rule. One
+    rejection blocks the batch; the sample decisions stand and the rest stay
+    pending for one-at-a-time review.
+    """
+
+    class Outcome(models.TextChoices):
+        OPEN = "open", "Open"
+        APPLIED = "applied", "Applied"
+        BLOCKED = "blocked", "Blocked"
+
+    request = models.ForeignKey(
+        PublicRecordsRequest,
+        on_delete=models.PROTECT,
+        related_name="redaction_batches",
+    )
+    exemption = models.ForeignKey(
+        ExemptionCitation,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    pattern = models.CharField(max_length=40, choices=RedactionProposal.Pattern.choices)
+    proposal_ids = models.JSONField()
+    sample_ids = models.JSONField()
+    judgments = models.JSONField(default=dict, blank=True)
+    outcome = models.CharField(max_length=20, choices=Outcome.choices, default=Outcome.OPEN)
+    accepted_count = models.PositiveIntegerField(default=0)
+    skipped_count = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"redaction batch {self.pk}: {self.outcome}"
+
+
+class ScopingSession(models.Model):
+    """One run of iterative scoping for a request (#36).
+
+    The intent agent proposes a query, Vault counts it, the agent reads the
+    total and the per-custodian breakdown and either stops or tightens the
+    query and counts again, up to ``max_iterations``. Counts only: nothing
+    here holds, exports, collects, or changes a request's status (rule 11).
+    """
+
+    class Trigger(models.TextChoices):
+        AUTOMATIC = "automatic", "Automatic"
+        MANUAL = "manual", "Re-run by an officer"
+
+    class State(models.TextChoices):
+        RUNNING = "running", "Running"
+        COMPLETE = "complete", "Complete"
+        FAILED = "failed", "Failed"
+
+    request = models.ForeignKey(
+        PublicRecordsRequest,
+        on_delete=models.CASCADE,
+        related_name="scoping_sessions",
+    )
+    trigger = models.CharField(max_length=20, choices=Trigger.choices)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    reason = models.CharField(max_length=500, blank=True)
+    state = models.CharField(max_length=20, choices=State.choices, default=State.RUNNING)
+    max_iterations = models.PositiveIntegerField()
+    stop_reason = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"scoping {self.pk}: {self.state}"
+
+
+class ScopeIteration(models.Model):
+    """One proposed query in a scoping session, and the count it got."""
+
+    session = models.ForeignKey(
+        ScopingSession,
+        on_delete=models.CASCADE,
+        related_name="iterations",
+    )
+    number = models.PositiveIntegerField()
+    count_run = models.OneToOneField(
+        VaultCountRun,
+        on_delete=models.PROTECT,
+        related_name="scope_iteration",
+    )
+    #: The agent's reason for this query (the first iteration's is the
+    #: proposal's scope rationale).
+    reason = models.CharField(max_length=1000, blank=True)
+    required_search_terms = models.JSONField(default=list)
+    search_terms = models.JSONField(default=list)
+    custodians = models.JSONField(default=list)
+    sender_domains = models.JSONField(default=list)
+    exclude_senders = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["session", "number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["session", "number"], name="scope_iteration_number_unique",
+            ),
+        ]
+
+    def __str__(self):
+        return f"scope iteration {self.pk} #{self.number}"
+
+
+class EvaluationSet(models.Model):
+    """Labelled examples for comparing advisory models, taken from decisions
+    people already made (a merge, a non-request closure, a reviewed record).
+
+    ``examples`` holds references and labels only -- request and record IDs,
+    a coarse label, and a target case number -- never request or record
+    text; the input is rebuilt from the live rows when a run sends it. See
+    ``apps/records/evaluation.py``.
+    """
+
+    class Kind(models.TextChoices):
+        INTAKE = "intake", "Intake classification"
+        RESPONSIVENESS = "responsiveness", "Record responsiveness"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    kind = models.CharField(max_length=30, choices=Kind.choices)
+    examples = models.JSONField(default=list)
+    label_counts = models.JSONField(default=dict)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.PROTECT, related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.kind} set {self.pk} ({len(self.examples)} examples)"
+
+
+class EvaluationRun(models.Model):
+    """Every candidate model scored on one evaluation set.
+
+    ``results`` maps each model identifier to its metrics: accuracy, a
+    confusion matrix, the safety recall (real requests and responsive records
+    not lost), token use, cost when a price was given, and latency. Per-item
+    predictions are stored as labels only, so a disagreement can be traced to
+    its case or record without copying text.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    evaluation_set = models.ForeignKey(
+        EvaluationSet, on_delete=models.PROTECT, related_name="runs",
+    )
+    model_identifiers = models.JSONField(default=list)
+    results = models.JSONField(default=dict)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.PROTECT, related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"evaluation run {self.pk}"
+
+
+class DecisionBatch(AppendOnlyModelMixin, models.Model):
+    """A set of decisions an agent (or a person) proposes for a human to approve (#43).
+
+    The proposal is append-only: what was proposed, by whom, and on what
+    evidence never changes. The decision is a separate append-only
+    ``DecisionBatchDecision`` row, so a batch with no decision is proposed and
+    a decided batch can never be rewritten. Approval runs the kind's existing
+    service in ``apps/records/decision_batches.py``.
+    """
+
+    class Kind(models.TextChoices):
+        REVIEW = "review", "Review records"
+        SUPERSEDE = "supersede", "Supersede a collection"
+        SCOPE_AND_COLLECT = "scope_and_collect", "Collect a scope"
+        REDACTION_GROUP = "redaction_group", "Redaction group"
+        INTAKE_LABEL = "intake_label", "Intake label"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    kind = models.CharField(max_length=30, choices=Kind.choices)
+    request = models.ForeignKey(
+        PublicRecordsRequest, on_delete=models.PROTECT, related_name="decision_batches",
+    )
+    payload = models.JSONField()
+    evidence_summary = models.TextField(max_length=4000)
+    proposed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.kind} batch {self.pk}"
+
+
+class DecisionBatchDecision(AppendOnlyModelMixin, models.Model):
+    """The one human decision on a ``DecisionBatch``: approved or rejected."""
+
+    class Outcome(models.TextChoices):
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    batch = models.OneToOneField(DecisionBatch, on_delete=models.PROTECT, related_name="decision")
+    outcome = models.CharField(max_length=20, choices=Outcome.choices)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+",
+    )
+    reason = models.TextField(blank=True)
+    result = models.JSONField(default=dict)
+    decided_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    def __str__(self):
+        return f"{self.outcome} decision {self.pk}"
+
+
+class IntakeAutoApplication(AppendOnlyModelMixin, models.Model):
+    """An intake label the system applied with no human actor (#34).
+
+    Only ``spam`` and ``non_request`` can be applied, and only by
+    ``apps/records/intake_trust.auto_apply_intake_label`` under the label's
+    ``auto`` trust mode. The closure itself is the ``status_event``; this row
+    ties it to the classification that caused it, so the case can say it was
+    closed automatically and offer to undo it. Undoing is an ordinary reopen,
+    which appends a later event and leaves this row as it was.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request = models.ForeignKey(
+        PublicRecordsRequest, on_delete=models.PROTECT, related_name="intake_auto_applications",
+    )
+    advisory_run = models.OneToOneField(
+        AdvisoryRun, on_delete=models.PROTECT, related_name="auto_application",
+    )
+    label = models.CharField(max_length=40)
+    confidence = models.FloatField()
+    status_event = models.OneToOneField(
+        StatusEvent, on_delete=models.PROTECT, related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.label} auto-applied {self.pk}"

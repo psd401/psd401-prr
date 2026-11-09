@@ -17,11 +17,13 @@ import { login, signOut } from './message-workspace.helpers.js'
 // consequence in front of the administrator while they type.
 test('admin-district-settings', async ({ page }) => {
   await login(page, 'e2e-admin', 'e2e-admin-local-only')
-  await expect(page.getByRole('heading', { name: 'Configuration' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
 
   await page.getByRole('link', { name: 'District settings' }).click()
   await expect(page).toHaveURL(/\/configuration\/settings$/)
   await expect(page.getByRole('heading', { name: 'District settings' })).toBeVisible()
+  // Limits and timeouts live under Advanced; the switches lead in Main.
+  await page.getByText('Advanced settings').click()
 
   // The consequence is on the page, not only in the dialog: an admin has to be
   // able to read what a switch costs before deciding to open it.
@@ -82,6 +84,7 @@ test('admin-district-settings', async ({ page }) => {
   ).toBeVisible()
 
   // A setting that is not a switch: a bounded number, edited in place.
+  // Advanced stays open across the reload: the browser remembers it.
   const retention = page
     .getByRole('listitem')
     .filter({ hasText: /How long the district/ })

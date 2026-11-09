@@ -29,8 +29,8 @@
       "repositoryVisibility": "private",
       "gatewayOnly": true,
       "riskTier": "mcp-3",
-      "riskTierReason": "The staff API can return student education records governed by FERPA, so this server is Tier 3 under psd-dev-standards standards/07-mcp.md regardless of its tool surface being reads plus three draft/proposal tools. Tier 3 obligations are gateway-only access, per-user auth, human confirmation on destructive tools, and a full audit log.",
-      "whatItDoes": "Exposes the Public Records Act staff REST API to agents: request queues and status timelines, the statutory overdue list, collection tasks, the record-system registry, the RCW 42.56/FERPA exemption taxonomy, the append-only audit log, and the GUI/agent parity contract. Three hosted tools produce one editable clarification draft or a reviewable proposal and nothing else.",
+      "riskTierReason": "The staff API can return student education records governed by FERPA, so this server is Tier 3 under psd-dev-standards standards/07-mcp.md regardless of its tool surface being reads plus four draft/proposal tools. Tier 3 obligations are gateway-only access, per-user auth, human confirmation on destructive tools, and a full audit log.",
+      "whatItDoes": "Exposes the Public Records Act staff REST API to agents: request queues and status timelines, the statutory overdue list, collection tasks, the record-system registry, the RCW 42.56/FERPA exemption taxonomy, the append-only audit log, and the GUI/agent parity contract. Hosted tools also read one request's records, clusters, AI advisory labels, and decision batches. Five hosted tools produce an editable acknowledgment or clarification draft, a reviewable proposal, or a decision batch that a person approves or rejects in the staff application, and nothing else.",
       "whoCanUseIt": "Hosted /mcp: named district staff holding an attributed personal access token, subject to the same Django role policy and Google-group revalidation as the staff UI. Shared stdio: one dedicated nonstaff service identity holding only records.read_staff_api, which the write-tool allowlist rejects.",
       "dataTouched": [
         "Public records request metadata and staff-visible status timelines",
@@ -38,7 +38,8 @@
         "Student education records reachable through record items (FERPA)",
         "Collection tasks, custodians, and the record-system registry",
         "RCW 42.56 and FERPA exemption citations",
-        "The append-only compliance audit log"
+        "The append-only compliance audit log",
+        "Decision batches proposed for a person to approve (record ids, review states, evidence summaries)"
       ],
       "humanOnly": [
         "Status transitions, estimate revisions, denials, and closures",
@@ -50,7 +51,7 @@
         "document": "psd-dev-standards standards/07-mcp.md",
         "met": [
           "1 - stateless streamable HTTP, no HTTP+SSE, no Roots/Sampling/Logging",
-          "3 - 11 tools under the ~15 ceiling, namespaced psd_prr_*, paginated and truncated with response_format, and the one unbounded scan now bounded without capping the statutory count it reports",
+          "3 - 12 tools under the ~15 ceiling, namespaced psd_prr_*, paginated and truncated with response_format, and the one unbounded scan now bounded without capping the statutory count it reports",
           "4 - readOnlyHint and destructiveHint on every tool",
           "5 - no elicitation of credentials; tokens are set as a header out of band",
           "6 - this server.json, a README tool inventory, an eval suite, and an mcp-scan CI lane",
@@ -69,9 +70,15 @@
         {"name": "psd_prr_exemptions_list", "readOnlyHint": true, "destructiveHint": false},
         {"name": "psd_prr_audit_log_search", "readOnlyHint": true, "destructiveHint": false},
         {"name": "psd_prr_capabilities_list", "readOnlyHint": true, "destructiveHint": false},
+        {"name": "psd_prr_acknowledgment_draft", "readOnlyHint": false, "destructiveHint": false, "hostedOnly": true},
         {"name": "psd_prr_clarification_letter_draft", "readOnlyHint": false, "destructiveHint": false, "hostedOnly": true},
         {"name": "psd_prr_collection_task_notes_propose", "readOnlyHint": false, "destructiveHint": false, "hostedOnly": true},
-        {"name": "psd_prr_exemption_citations_suggest", "readOnlyHint": false, "destructiveHint": false, "hostedOnly": true}
+        {"name": "psd_prr_exemption_citations_suggest", "readOnlyHint": false, "destructiveHint": false, "hostedOnly": true},
+        {"name": "psd_prr_record_items_list", "readOnlyHint": true, "destructiveHint": false, "hostedOnly": true},
+        {"name": "psd_prr_record_clusters_list", "readOnlyHint": true, "destructiveHint": false, "hostedOnly": true},
+        {"name": "psd_prr_advisories_get", "readOnlyHint": true, "destructiveHint": false, "hostedOnly": true},
+        {"name": "psd_prr_decision_batch_get", "readOnlyHint": true, "destructiveHint": false, "hostedOnly": true},
+        {"name": "psd_prr_decision_batch_propose", "readOnlyHint": false, "destructiveHint": false, "hostedOnly": true}
       ],
       "publishToPublicRegistry": false,
       "publishToPublicRegistryReason": "The repository is private and the server reads PRA requester identity and FERPA-governed student records. This file exists for the internal PSD MCP directory only."

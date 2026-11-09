@@ -232,7 +232,7 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
         subtitle="Review the exact active content; draft and explicitly activate immutable new versions."
       />
 
-      <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+      <div className="mb-6 rounded-lg border border-warning bg-warning-soft p-4 text-sm text-warning-ink">
         Editing wording never changes who may send a message. Structured
         templates produce the requester's message from validated case data, so
         an activated version is used for future drafts of that kind. Starting
@@ -252,42 +252,42 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
                   ? 'Structured template'
                   : 'Starting point'}
               </Badge>
-              <span className="text-xs text-pacific/80">{slot.group}</span>
+              <span className="text-xs text-ink-muted">{slot.group}</span>
               {slot.active.source === 'built_in' ? (
-                <span className="text-xs text-pacific/80">Built-in application default</span>
+                <span className="text-xs text-ink-muted">Built-in application default</span>
               ) : (
-                <span className="text-xs text-pacific/80">
+                <span className="text-xs text-ink-muted">
                   Activated by {slot.active.activated_by_username ?? 'records officer'}
                 </span>
               )}
             </div>
-            <p className="mt-4 font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+            <p className="mt-4 font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
               Subject
             </p>
-            <pre className="mt-1 whitespace-pre-wrap rounded-md border border-driftwood/50 bg-skylight/60 p-3 text-sm text-pacific">
+            <pre className="mt-1 whitespace-pre-wrap rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink">
               {slot.active.subject_template}
             </pre>
-            <p className="mt-4 font-heading text-xs font-bold uppercase tracking-wide text-pacific/80">
+            <p className="mt-4 font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
               Body
             </p>
-            <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap rounded-md border border-driftwood/50 bg-skylight/60 p-3 text-sm text-pacific">
+            <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink">
               {slot.active.body_template}
             </pre>
-            <p className="mt-3 text-xs text-pacific/80">
+            <p className="mt-3 text-xs text-ink-muted">
               Required placeholders: {slot.required_tokens.map((token) => `{{ ${token} }}`).join(' · ')}
             </p>
 
             {slot.drafts.length > 0 && (
-              <div className="mt-5 space-y-3 border-t border-driftwood/50 pt-4">
-                <p className="font-heading text-sm font-bold text-pacific">Unactivated drafts</p>
+              <div className="mt-5 space-y-3 border-t border-line pt-4">
+                <p className="font-heading text-sm font-bold text-ink">Unactivated drafts</p>
                 {slot.drafts.map((draft) => (
-                  <div key={draft.id} className="rounded-md border border-driftwood/60 p-3">
+                  <div key={draft.id} className="rounded-md border border-line p-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <p className="font-heading font-semibold text-pacific">
+                        <p className="font-heading font-semibold text-ink">
                           Version {draft.template_version}
                         </p>
-                        <p className="text-xs text-pacific/80">{draft.change_reason}</p>
+                        <p className="text-xs text-ink-muted">{draft.change_reason}</p>
                       </div>
                       {canEdit && (
                         <div className="flex flex-wrap gap-2">
@@ -326,7 +326,7 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
 
       <Modal open={editing !== null} title="Edit automatic message template" onClose={closeEditor}>
         <form onSubmit={submitDraft} className="space-y-4">
-          <p className="text-sm text-pacific/80">
+          <p className="text-sm text-ink-muted">
             Saving creates or updates a draft only. It cannot affect queued,
             approved, sent, or future messages until separately activated.
           </p>
@@ -354,13 +354,13 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
             />
           </Field>
           {reasonShortfall(changeReason) && (
-            <p aria-live="polite" className="text-sm text-pacific/80">
+            <p aria-live="polite" className="text-sm text-ink-muted">
               {reasonShortfall(changeReason)}
             </p>
           )}
           {guardrail && (
             <div
-              className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-950"
+              className="rounded-md border border-warning bg-warning-soft px-3 py-3 text-sm text-warning-ink"
               aria-live="polite"
             >
               <p className="font-heading font-bold">
@@ -426,10 +426,10 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
         {preview && (
           <div className="space-y-4">
             <div>
-              <p className="font-heading text-xs font-bold uppercase text-pacific/80">Subject</p>
-              <p className="mt-1 text-sm text-pacific">{preview.subject}</p>
+              <p className="font-heading text-xs font-bold uppercase text-ink-muted">Subject</p>
+              <p className="mt-1 text-sm text-ink">{preview.subject}</p>
             </div>
-            <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-md border border-driftwood/60 bg-skylight/60 p-3 text-sm text-pacific">
+            <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink">
               {preview.body}
             </pre>
             <div className="flex justify-end">
@@ -445,7 +445,7 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
         onClose={() => setActivationTarget(null)}
       >
         <div className="space-y-4">
-          <p className="text-sm text-pacific/80">
+          <p className="text-sm text-ink-muted">
             Activation makes this exact version immutable and uses it for future
             automatic messages. Existing drafts and delivery snapshots do not change.
           </p>
@@ -462,11 +462,11 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
             />
           </Field>
           {reasonShortfall(activationReason) && (
-            <p aria-live="polite" className="text-sm text-pacific/80">
+            <p aria-live="polite" className="text-sm text-ink-muted">
               {reasonShortfall(activationReason)}
             </p>
           )}
-          <label className="flex items-start gap-2 text-sm text-pacific">
+          <label className="flex items-start gap-2 text-sm text-ink">
             <input
               className="mt-1"
               type="checkbox"

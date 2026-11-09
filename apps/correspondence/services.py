@@ -23,7 +23,7 @@ from django.core.exceptions import (
 )
 from django.core.validators import validate_email
 from django.db import DatabaseError, IntegrityError, transaction
-from django.db.models import Exists, Max, OuterRef, Q
+from django.db.models import Exists, Max, OuterRef, ProtectedError, Q
 from django.utils import timezone
 
 from apps.api.models import StaffRole
@@ -35,6 +35,7 @@ from apps.records.deadlines import add_business_days
 from apps.records.fees import CENT, DEPOSIT_PERCENT_CAP, current_fee_schedule
 from apps.records.models import (
     AdequateSearchAttestation,
+    AdvisoryRun,
     CollectionTask,
     EstimateRevision,
     ExemptionCitation,
@@ -42,6 +43,7 @@ from apps.records.models import (
     Installment,
     PublicRecordsRequest,
     RecordItem,
+    RecordsEstimate,
     RequestStatus,
     StatusEvent,
 )
@@ -245,6 +247,7 @@ LEGAL_TEMPLATE_VERSIONS = {
     Correspondence.Kind.CLARIFICATION_REQUEST: ("clarification_request", "1"),
     Correspondence.Kind.ESTIMATE_REVISION: ("estimate_revision", "2"),
     Correspondence.Kind.FEE_ESTIMATE: ("fee_estimate", "1"),
+    Correspondence.Kind.INTERPRETATION_ESTIMATE: ("interpretation_estimate", "1"),
     Correspondence.Kind.INSTALLMENT_NOTICE: ("installment_notice", "3"),
     Correspondence.Kind.SUBMISSION_RECEIPT: ("submission_receipt", "1"),
     Correspondence.Kind.NO_RECORDS_CLOSURE: ("no_records_closure", "2"),
@@ -303,11 +306,26 @@ AUTOMATED_CORRESPONDENCE_KINDS = frozenset(
     }
 )
 
+#: The kinds the system may *draft* without an author: the
+#: interpretation-and-estimate letter (#42) and, since the CIO's decision of
+#: 2026-11-08, the informational scope letter after a count. Unlike an
+#: automated kind neither is ever approved or queued by the system: a person
+#: approves and sends it, and the database constraint
+#: ``correspondence_system_prepared_kind_allowed`` holds the same line.
+SYSTEM_PREPARED_DRAFT_KINDS = frozenset(
+    {
+        Correspondence.Kind.INTERPRETATION_ESTIMATE,
+        Correspondence.Kind.SCOPE_CLARIFICATION,
+    }
+)
+
 REQUEST_LIFECYCLE_EFFECT_KINDS = frozenset(
     {
         Correspondence.Kind.ACKNOWLEDGMENT,
         Correspondence.Kind.CLARIFICATION_REQUEST,
         Correspondence.Kind.ESTIMATE_REVISION,
+        # It communicates a new estimated completion date on delivery.
+        Correspondence.Kind.INTERPRETATION_ESTIMATE,
         Correspondence.Kind.DENIAL,
         Correspondence.Kind.NO_RECORDS_CLOSURE,
         Correspondence.Kind.COMPLETION_CLOSURE,
@@ -333,6 +351,7 @@ UNRESOLVED_DELIVERY_STATUSES = frozenset(
 OFFICER_ONLY_DRAFT_KINDS = frozenset(
     {
         Correspondence.Kind.FEE_ESTIMATE,
+        Correspondence.Kind.INTERPRETATION_ESTIMATE,
         Correspondence.Kind.SCOPE_CLARIFICATION,
         Correspondence.Kind.INSTALLMENT_NOTICE,
         Correspondence.Kind.CLOSURE,
@@ -356,6 +375,7 @@ PRA_STATUTORY_CORRESPONDENCE_KINDS = frozenset(
         Correspondence.Kind.CLARIFICATION_REQUEST,
         Correspondence.Kind.SCOPE_CLARIFICATION,
         Correspondence.Kind.ESTIMATE_REVISION,
+        Correspondence.Kind.INTERPRETATION_ESTIMATE,
         Correspondence.Kind.FEE_ESTIMATE,
         Correspondence.Kind.NO_RECORDS_CLOSURE,
         Correspondence.Kind.NONPAYMENT_CLOSURE,
@@ -688,11 +708,18 @@ def _create_draft(
     template_identifier: str = "",
     template_version: str = "",
     automated: bool = False,
+    system_prepared: bool = False,
     replaces: Correspondence | None = None,
     denial_exemption_citation_ids: Iterable[int] | None = None,
 ) -> Correspondence:
     _require_kind_allows_correspondence(prr, kind)
-    if automated:
+    if system_prepared:
+        if kind not in SYSTEM_PREPARED_DRAFT_KINDS or actor is not None or automated:
+            raise PermissionDenied(
+                "Only an interpretation-and-estimate or scope letter may be "
+                "drafted by the system, and neither is ever automated."
+            )
+    elif automated:
         if kind not in AUTOMATED_CORRESPONDENCE_KINDS or actor is not None:
             raise PermissionDenied(
                 "Only an approved automated correspondence kind may be "
@@ -725,6 +752,7 @@ def _create_draft(
         template_version=template_version,
         created_by=actor,
         automated=automated,
+        system_prepared=system_prepared,
         replaces=replaces,
     )
     selected_recipients = (
@@ -747,6 +775,7 @@ def _create_draft(
         actor,
         kind=kind,
         automated=automated,
+        system_prepared=system_prepared,
         template_identifier=template_identifier,
         template_version=template_version,
         replaces_id=str(replaces.id) if replaces else "",
@@ -767,6 +796,7 @@ def _render_template_draft(
     metadata: dict,
     actor,
     automated: bool = False,
+    system_prepared: bool = False,
     recipients: Iterable[dict] | None = None,
 ) -> Correspondence:
     identifier, version = LEGAL_TEMPLATE_VERSIONS[kind]
@@ -792,6 +822,7 @@ def _render_template_draft(
         template_identifier=identifier,
         template_version=version,
         automated=automated,
+        system_prepared=system_prepared,
     )
 
 
@@ -1252,6 +1283,38 @@ def create_scope_clarification_draft(
     )
 
 
+def create_system_scope_letter_draft(
+    prr: PublicRecordsRequest,
+    *,
+    match_count: int,
+    query_summary: str,
+    narrowing_options,
+    response_by: dt.date,
+) -> Correspondence:
+    """Draft the scope letter with no author, in its informational form.
+
+    The system may draft it (CIO decision, 2026-11-08) but never send it,
+    and never in the clarification form: that form tolls the response period
+    on delivery, so choosing it stays a person's call. There is deliberately
+    no ``form`` argument. A person approves and sends the draft.
+    """
+    metadata = _validated_scope_clarification(
+        form="informational",
+        match_count=match_count,
+        query_summary=query_summary,
+        narrowing_options=narrowing_options,
+        response_by=response_by,
+    )
+    return _render_template_draft(
+        prr,
+        kind=Correspondence.Kind.SCOPE_CLARIFICATION,
+        context=_scope_clarification_context(metadata),
+        metadata=metadata,
+        actor=None,
+        system_prepared=True,
+    )
+
+
 def create_estimate_revision_draft(
     prr: PublicRecordsRequest,
     *,
@@ -1386,6 +1449,9 @@ def _task_snapshot(prr) -> tuple[dict, str]:
         not in {
             RecordItem.ReviewState.NON_RESPONSIVE,
             RecordItem.ReviewState.DUPLICATE,
+            # A Records Officer took these out of review with a recorded
+            # reason when the collection was re-scoped (CollectionSupersession).
+            RecordItem.ReviewState.SUPERSEDED,
         }
         or item.reviewed_by_id is None
         or item.reviewed_at is None
@@ -1771,6 +1837,158 @@ def create_fee_estimate_draft(
         context=validated,
         metadata=metadata,
         actor=actor,
+    )
+
+
+#: Bounds on the officer-editable interpretation paragraph.
+INTERPRETATION_MIN_LENGTH = 10
+INTERPRETATION_MAX_LENGTH = 2000
+_INTERPRETATION_KEYS = {
+    "estimate_id",
+    "intent_run_id",
+    "interpretation",
+    "record_estimate",
+    "charge_paragraph",
+    "completion_date",
+    "previous_date",
+}
+
+
+def _validated_interpretation(value) -> str:
+    text = str(value or "").strip()
+    if not INTERPRETATION_MIN_LENGTH <= len(text) <= INTERPRETATION_MAX_LENGTH:
+        raise ValidationError(
+            "The interpretation must be between "
+            f"{INTERPRETATION_MIN_LENGTH} and {INTERPRETATION_MAX_LENGTH} characters."
+        )
+    return text
+
+
+def _record_estimate_sentence(responsive: dict) -> str:
+    expected, low, high = responsive["expected"], responsive["low"], responsive["high"]
+    noun = "record" if expected == 1 else "records"
+    sentence = f"The District expects about {expected} responsive {noun}"
+    if low != high:
+        sentence += f" (between {low} and {high})"
+    sentence += "."
+    reviewed = responsive["reviewed_responsive"]
+    if reviewed:
+        verb = "has" if reviewed == 1 else "have"
+        sentence += f" {reviewed} {verb} already been reviewed and found responsive."
+    return sentence
+
+
+def _charge_paragraph(fee: dict | None) -> str:
+    if fee is None:
+        # Before a schedule is adopted the District may quote no cost at all
+        # (see automatic_templates.fee_paragraph); it promises nothing either.
+        return (
+            "The District will tell you before any copying charge applies to "
+            "these records."
+        )
+    expected, low, high = fee["expected"], fee["low"], fee["high"]
+    # "No charge" only when even the high case bills nothing.
+    if Decimal(high["total"]) == 0:
+        return "There is no copying charge for these records."
+    charge = f"${expected['total']}"
+    if low["total"] != high["total"]:
+        charge += f" (between ${low['total']} and ${high['total']})"
+    return (
+        f"The estimated copying charge is about {charge}, calculated under "
+        "RCW 42.56.120 from the District's adopted fee schedule. It covers "
+        "copying only; the District does not charge for the time its staff "
+        "spend locating or reviewing records. Please tell us whether you are "
+        "willing to pay this charge."
+    )
+
+
+def _interpretation_context(metadata: dict) -> dict:
+    _require_metadata_keys(metadata, _INTERPRETATION_KEYS)
+    for key in ("record_estimate", "charge_paragraph"):
+        if not str(metadata[key] or "").strip():
+            raise ValidationError(f"Structured template field {key} is required.")
+    return {
+        "interpretation": _validated_interpretation(metadata["interpretation"]),
+        "record_estimate": metadata["record_estimate"],
+        "charge_paragraph": metadata["charge_paragraph"],
+        "completion_date": _structured_date(
+            metadata["completion_date"], field="completion_date",
+        ),
+    }
+
+
+@transaction.atomic
+def create_interpretation_estimate_draft(
+    prr: PublicRecordsRequest,
+    *,
+    estimate: RecordsEstimate,
+    actor=None,
+) -> Correspondence:
+    """Draft the interpretation-and-estimate letter from a stored estimate.
+
+    With no ``actor`` the draft is *system-prepared*: the only requester
+    letter the system may draft without an author, and never one it may
+    approve or queue. A Records Officer approves and sends it
+    (``approve_and_send``); until then nothing reaches the requester (rule 6).
+    The interpretation is the latest complete request-intent summary, and the
+    count, charge, and date come from ``estimate``. On delivery the date is
+    recorded as an ``EstimateRevision`` naming the estimate.
+    """
+    system_prepared = actor is None
+    if not system_prepared:
+        actor = _require_records_officer(actor)
+    prr = _open_case_for_closure_draft(prr, what="an interpretation and estimate letter")
+    if estimate.request.pk != prr.pk:
+        raise ValidationError("The estimate belongs to a different request.")
+    result = estimate.result
+    if not result.get("completion_date"):
+        raise ValidationError(
+            "The estimate has no completion date, so the letter cannot state one."
+        )
+    intent = (
+        AdvisoryRun.objects.filter(
+            request=prr,
+            kind=AdvisoryRun.Kind.REQUEST_INTENT,
+            state=AdvisoryRun.State.COMPLETE,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if intent is None or not str(intent.proposal.get("summary") or "").strip():
+        raise ValidationError(
+            "A completed request-intent summary is required to state the "
+            "District's interpretation."
+        )
+    if Correspondence.objects.filter(
+        request=prr,
+        kind=Correspondence.Kind.INTERPRETATION_ESTIMATE,
+        status__in=[
+            Correspondence.Status.DRAFT,
+            Correspondence.Status.APPROVED,
+            Correspondence.Status.QUEUED,
+        ],
+    ).exists():
+        raise ValidationError(
+            "An interpretation and estimate letter is already outstanding."
+        )
+    metadata = {
+        "estimate_id": str(estimate.pk),
+        "intent_run_id": str(intent.pk),
+        "interpretation": _validated_interpretation(intent.proposal["summary"]),
+        "record_estimate": _record_estimate_sentence(result["responsive"]),
+        "charge_paragraph": _charge_paragraph(result.get("fee")),
+        "completion_date": result["completion_date"],
+        "previous_date": (
+            prr.estimated_completion.isoformat() if prr.estimated_completion else None
+        ),
+    }
+    return _render_template_draft(
+        prr,
+        kind=Correspondence.Kind.INTERPRETATION_ESTIMATE,
+        context=_interpretation_context(metadata),
+        metadata=metadata,
+        actor=actor,
+        system_prepared=system_prepared,
     )
 
 
@@ -2446,6 +2664,8 @@ def _render_structured_snapshot(
             deposit_amount=metadata["deposit_amount"],
             estimate_basis=metadata["estimate_basis"],
         )
+    elif correspondence.kind == Correspondence.Kind.INTERPRETATION_ESTIMATE:
+        context = _interpretation_context(metadata)
     elif correspondence.kind == Correspondence.Kind.COMPLETION_CLOSURE:
         _require_metadata_keys(metadata, {"production_summary"})
         context = {
@@ -2613,6 +2833,16 @@ def _structured_metadata_for_edit(
             "clarification_questions": questions,
             "clarification_due": due.isoformat(),
         }
+    if correspondence.kind == Correspondence.Kind.INTERPRETATION_ESTIMATE:
+        # Only the interpretation is the officer's to reword; the count, the
+        # charge, and the date are the stored estimate's.
+        _require_metadata_keys(structured_data, {"interpretation"})
+        return {
+            **correspondence.draft_metadata,
+            "interpretation": _validated_interpretation(
+                structured_data["interpretation"]
+            ),
+        }
     if correspondence.kind == Correspondence.Kind.ESTIMATE_REVISION:
         _require_metadata_keys(structured_data, {"new_date", "reason"})
         new_date = _structured_date(
@@ -2770,6 +3000,54 @@ def edit_draft(
 
 
 @transaction.atomic
+def delete_draft(
+    correspondence: Correspondence,
+    *,
+    actor,
+    expected_version: int,
+) -> None:
+    """Delete a never-approved draft; approved correspondence stays forever.
+
+    A draft is not yet a legal record (the model refuses deleting anything
+    else). Structured template drafts are deletable even though they cannot
+    be edited in place: discarding sends nothing, so there are no template
+    inputs to validate. The draft's own recipients, denial citations, and
+    search chunks cascade with it; a draft other evidence points at — an
+    attachment, a search attestation, a clarification cycle — is refused
+    rather than unwound.
+    """
+    correspondence = (
+        Correspondence.objects.select_for_update(of=("self",))
+        .select_related("request")
+        .get(pk=correspondence.pk)
+    )
+    if correspondence.kind in OFFICER_ONLY_DRAFT_KINDS:
+        actor = _require_records_officer(actor)
+    else:
+        actor = _require_human_staff(actor)
+    _check_version(correspondence, expected_version)
+    if correspondence.status != Correspondence.Status.DRAFT:
+        raise ValidationError("Only a draft may be deleted.")
+    from apps.work_queue.source_reconciliation import (
+        retire_deleted_correspondence_draft_work,
+    )
+
+    _audit_content(
+        "correspondence.draft_deleted",
+        correspondence,
+        actor,
+        kind=correspondence.kind,
+    )
+    retire_deleted_correspondence_draft_work(correspondence)
+    try:
+        correspondence.delete()
+    except ProtectedError as exc:
+        raise ValidationError(
+            "This draft is linked to other case records and cannot be deleted."
+        ) from exc
+
+
+@transaction.atomic
 def edit_structured_draft(
     correspondence: Correspondence,
     *,
@@ -2881,7 +3159,10 @@ def _validate_for_approval(correspondence: Correspondence) -> None:
                 "The acknowledgment estimate snapshot is stale; create and "
                 "approve a new acknowledgment from the current estimate."
             )
-    elif correspondence.kind == Correspondence.Kind.ESTIMATE_REVISION:
+    elif correspondence.kind in (
+        Correspondence.Kind.ESTIMATE_REVISION,
+        Correspondence.Kind.INTERPRETATION_ESTIMATE,
+    ):
         current_previous = (
             correspondence.request.estimated_completion.isoformat()
             if correspondence.request.estimated_completion
@@ -5607,6 +5888,55 @@ def apply_successful_delivery_effects(
                 new=str(new_date),
                 reason=reason,
                 correspondence_id=str(correspondence.id),
+            )
+        else:
+            event = correspondence.resulting_status_event
+
+    elif correspondence.kind == Correspondence.Kind.INTERPRETATION_ESTIMATE:
+        # The letter states an estimated completion date, so its delivery is
+        # an estimate revision whose reason names the computed estimate the
+        # date came from (#41); the RecordsEstimate row holds every input.
+        metadata = correspondence.approved_metadata
+        new_date = dt.date.fromisoformat(metadata["completion_date"])
+        reason = (
+            "Interpretation and estimate letter, from computed estimate "
+            f"{metadata['estimate_id']}."
+        )
+        _revision, created = EstimateRevision.objects.get_or_create(
+            correspondence=correspondence,
+            defaults={
+                "request": prr,
+                "previous_date": prr.estimated_completion,
+                "new_date": new_date,
+                "reason": reason,
+                "revised_by": actor,
+                "automated": False,
+                "communicated_at": correspondence.sent_at,
+            },
+        )
+        if created:
+            previous = prr.estimated_completion
+            prr.estimated_completion = new_date
+            prr.save(update_fields=["estimated_completion"])
+            event = StatusEvent.objects.create(
+                request=prr,
+                actor=actor,
+                note=f"Estimated completion set to {new_date}. Reason: {reason}",
+                visible_to_requester=True,
+                occurred_at=correspondence.sent_at,
+                correspondence_effect=(
+                    StatusEvent.CorrespondenceEffect.ESTIMATE_REVISION_DELIVERY
+                ),
+            )
+            audit(
+                "request.estimate_revised",
+                target=prr.number,
+                actor=actor,
+                previous=str(previous or ""),
+                new=str(new_date),
+                reason=reason,
+                correspondence_id=str(correspondence.id),
+                estimate_id=metadata["estimate_id"],
             )
         else:
             event = correspondence.resulting_status_event

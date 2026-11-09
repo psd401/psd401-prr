@@ -241,6 +241,9 @@ Editability does not relax a legal guarantee:
 - Editing wording never widens automation. `AUTOMATED_CORRESPONDENCE_KINDS`
   still governs which kinds may be system-authored, auto-approved, and
   auto-queued, and it remains the acknowledgment and the submission receipt.
+  `SYSTEM_PREPARED_DRAFT_KINDS` is separate and narrower: the system may
+  *draft* the interpretation-and-estimate letter with no author, and a Records
+  Officer must approve and send it (see compliance rule 6).
 
 ## Submission receipt: two paths, one guarantee
 

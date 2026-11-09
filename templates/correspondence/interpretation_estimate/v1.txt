@@ -1,0 +1,37 @@
+{# Interpretation and estimate: scope, record count, copying charge, and time estimate. Counsel review is required before production use. #}
+{% autoescape off %}
+Subject: Public Records Request {{ request.number }} — How We Understand Your Request and What to Expect
+
+Dear {{ request.requester.name|default:"Requester" }},
+
+Thank you for public records request {{ request.number }}, received
+{{ request.received_at|date:"F j, Y" }}. You asked for:
+
+"{{ request.description }}"
+
+How the District understands your request:
+
+{{ interpretation }}
+
+If we have misunderstood what you are looking for, please tell us. You may
+also narrow the request to receive records sooner or at a lower cost.
+
+What to expect:
+
+{{ record_estimate }}
+
+{{ charge_paragraph }}
+
+The District estimates it will complete its review of these records by
+{{ completion_date|date:"F j, Y" }}. This is the District's reasonable estimate under
+RCW 42.56.520 and may be revised as the work proceeds. The District will
+provide records in installments as they become ready.
+
+Please reply to {{ pra_officer_email }} to confirm that you would like the
+District to proceed on this basis, or to tell us what you would like to
+change.
+
+Sincerely,
+Public Records Officer
+Peninsula School District No. 401
+{% endautoescape %}

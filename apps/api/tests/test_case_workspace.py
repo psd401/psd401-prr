@@ -19,6 +19,7 @@ from apps.correspondence.models import (
     CorrespondenceDeliveryAttempt,
 )
 from apps.records.models import (
+    AdvisoryRun,
     CollectionTask,
     EstimateRevision,
     ExemptionCitation,
@@ -189,7 +190,28 @@ class CaseWorkspaceReadModelTests(TestCase):
                 "estimated_completion",
                 "counts",
                 "next_action",
+                "stages",
+                "title",
+                "summary",
+                "matter_kind",
+                "next_due",
+                "next_due_basis",
+                "ai_first_pass",
             },
+        )
+        # The stage rail (#45) is server-derived: seven stages in order, each
+        # with a state, and exactly one current or blocked while the case is open.
+        self.assertEqual(
+            [stage["id"] for stage in payload["stages"]],
+            ["intake", "scope", "collect", "review", "redact", "release", "close"],
+        )
+        self.assertEqual(
+            set(payload["stages"][0]),
+            {"id", "label", "state", "open_count", "summary", "reason"},
+        )
+        self.assertEqual(
+            sum(stage["state"] in {"current", "blocked"} for stage in payload["stages"]),
+            1,
         )
         # The Messages tab renders this tracker, so a field silently dropped by
         # the summary serializer would remove its call to action.
@@ -230,6 +252,111 @@ class CaseWorkspaceReadModelTests(TestCase):
         admin_payload = self.get_as(self.admin, "workspace-summary").json()
         self.assertEqual(admin_payload["counts"]["needs_attention"], 0)
         self.assertIsNone(admin_payload["next_action"])
+
+    def test_summary_leads_with_a_title_and_a_short_summary(self):
+        # The case page opens on what was asked, not on the whole email. The
+        # model's title and summary are officer-only advisory text; everyone
+        # else reads the opening of the description, which is never edited.
+        AdvisoryRun.objects.create(
+            kind=AdvisoryRun.Kind.REQUEST_INTENT,
+            state=AdvisoryRun.State.COMPLETE,
+            request=self.prr,
+            model_identifier="test-model",
+            input_sha256="0" * 64,
+            requested_by=self.officer,
+            proposal={
+                "short_title": "Board records",
+                "summary": "Board minutes and agendas for the spring term.",
+            },
+        )
+
+        officer = self.get_as(self.officer, "workspace-summary").json()
+        self.assertEqual(officer["title"], "Board records")
+        self.assertEqual(
+            officer["summary"], "Board minutes and agendas for the spring term.",
+        )
+        self.assertEqual(officer["matter_kind"], "public_records")
+        self.assertEqual(officer["next_due"], self.prr.statutory_response_due.isoformat())
+        self.assertEqual(officer["next_due_basis"], "statutory")
+
+        liaison = self.get_as(self.liaison, "workspace-summary").json()
+        self.assertEqual(liaison["title"], "Immutable request for board records.")
+        self.assertEqual(liaison["summary"], "Immutable request for board records.")
+        self.prr.refresh_from_db()
+        self.assertEqual(self.prr.description, "Immutable request for board records.")
+
+    @override_settings(
+        PRR_AI_ADVISORY_ENABLED=True,
+        PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED=True,
+    )
+    def test_summary_counts_how_many_records_the_ai_has_read(self):
+        case = PublicRecordsRequest.objects.create(
+            requester=self.requester,
+            description="Every email about the bus route.",
+            status=RequestStatus.GATHERING,
+        )
+
+        def record(name, **extra):
+            return RecordItem.objects.create(
+                request=case,
+                source_system="google_vault_gmail",
+                original_filename=name,
+                storage_key=f"records/{name}",
+                content_length=100,
+                content_type="application/pdf",
+                sha256=name[0] * 64,
+                **extra,
+            )
+
+        read = record("a.pdf")
+        waiting = record("b.pdf")
+        record("c.pdf", review_state=RecordItem.ReviewState.SUPERSEDED)
+        for item, state in (
+            (read, AdvisoryRun.State.COMPLETE),
+            (waiting, AdvisoryRun.State.PENDING),
+        ):
+            AdvisoryRun.objects.create(
+                kind=AdvisoryRun.Kind.RECORD_RESPONSIVENESS,
+                trigger=AdvisoryRun.Trigger.AUTOMATIC,
+                request=case,
+                record_item=item,
+                model_identifier="district-approved-model-v1",
+                input_sha256="0" * 64,
+                state=state,
+            )
+        self.client.force_login(self.reviewer)
+
+        payload = self.client.get(
+            f"/api/staff/requests/{case.number}/workspace-summary/"
+        ).json()
+
+        # Superseded records are out of review, so they are not counted.
+        self.assertEqual(payload["ai_first_pass"], {"enabled": True, "read": 1, "total": 2})
+
+    @override_settings(PRR_AI_AUTOMATIC_RECORD_REVIEW_ENABLED=False)
+    def test_summary_says_when_the_ai_first_pass_is_off(self):
+        self.client.force_login(self.officer)
+
+        payload = self.get_as(self.officer, "workspace-summary").json()
+
+        self.assertFalse(payload["ai_first_pass"]["enabled"])
+
+    def test_summary_without_a_model_answer_is_the_opening_of_the_request(self):
+        long_text = "Every email about the bus route change. " * 20
+        case = PublicRecordsRequest.objects.create(
+            requester=self.requester,
+            description=long_text,
+            status=RequestStatus.RECEIVED,
+        )
+        self.client.force_login(self.officer)
+
+        payload = self.client.get(
+            f"/api/staff/requests/{case.number}/workspace-summary/"
+        ).json()
+
+        self.assertTrue(payload["summary"].endswith("…"))
+        self.assertLessEqual(len(payload["summary"]), 281)
+        self.assertTrue(payload["summary"].startswith("Every email about the bus route change."))
 
     def test_liaison_with_assigned_draft_work_can_open_its_case_workspace(self):
         draft_only = PublicRecordsRequest.objects.create(

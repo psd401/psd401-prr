@@ -68,7 +68,75 @@ def _object_store_client_kwargs(config, *, client_config: Config) -> dict:
     return kwargs
 
 
+class _FilesystemObjectStore:
+    """A local stand-in for the private bucket, for browser acceptance runs.
+
+    Only ``config.e2e_settings`` sets ``PRR_E2E_FILESYSTEM_OBJECT_STORE``, and
+    it is honoured only while the test-fixture switch is on as well, so no
+    deployed environment can reach it. It implements exactly the two calls
+    the application makes, with the same no-overwrite rule as the bucket.
+    """
+
+    def __init__(self, root: str):
+        from pathlib import Path
+
+        self.root = Path(root)
+
+    def _path(self, bucket: str, key: str):
+        path = (self.root / bucket / key).resolve()
+        if self.root.resolve() not in path.parents:
+            raise ValueError("Object key escapes the local store.")
+        return path
+
+    def put_object(self, *, Bucket, Key, Body, IfNoneMatch=None, **_unused):
+        path = self._path(Bucket, Key)
+        if IfNoneMatch == "*" and path.exists():
+            raise ClientError(
+                {"Error": {"Code": "PreconditionFailed", "Message": "Object exists."}},
+                "PutObject",
+            )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(Body.read())
+        return {}
+
+    def _existing(self, bucket: str, key: str, operation: str):
+        path = self._path(bucket, key)
+        if not path.exists():
+            raise ClientError(
+                {"Error": {"Code": "NoSuchKey", "Message": "No such key."}},
+                operation,
+            )
+        return path
+
+    def get_object(self, *, Bucket, Key, **_unused):
+        import io
+
+        payload = self._existing(Bucket, Key, "GetObject").read_bytes()
+        return {"Body": io.BytesIO(payload), "ContentLength": len(payload)}
+
+    def head_object(self, *, Bucket, Key, **_unused):
+        return {"ContentLength": self._existing(Bucket, Key, "HeadObject").stat().st_size}
+
+    def copy_object(self, *, Bucket, Key, CopySource, **_unused):
+        payload = self._existing(CopySource["Bucket"], CopySource["Key"], "CopyObject").read_bytes()
+        path = self._path(Bucket, Key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        return {}
+
+    def delete_object(self, *, Bucket, Key, **_unused):
+        self._path(Bucket, Key).unlink(missing_ok=True)
+        return {}
+
+    def get_bucket_versioning(self, *, Bucket):
+        # A plain directory keeps no versions.
+        return {}
+
+
 def _object_store_client():
+    local_root = getattr(settings, "PRR_E2E_FILESYSTEM_OBJECT_STORE", "")
+    if local_root and getattr(settings, "PRR_TEST_FIXTURE_SEED_ENABLED", False):
+        return _FilesystemObjectStore(local_root)
     config = settings.OBJECT_STORE
     kwargs = _object_store_client_kwargs(
         config,

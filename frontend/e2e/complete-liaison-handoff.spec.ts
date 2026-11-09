@@ -10,6 +10,9 @@ import {
 
 test('complete-liaison-handoff', async ({ page }) => {
   await login(page, 'e2e-liaison', 'e2e-liaison-local-only')
+  // Login lands on Today; these queues live on the Inbox.
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
+  await page.goto('/inbox')
   await page.getByRole('link', { name: /Open Complete record search/ }).click()
   await expect(page.getByRole('heading', { name: 'Work context' })).toBeVisible()
   await page.getByRole('link', { name: 'Open source context' }).click()

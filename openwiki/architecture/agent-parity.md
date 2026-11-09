@@ -3,7 +3,7 @@ type: Architecture
 title: GUI and Agent Parity Contract
 description: The machine-readable capability catalog that maps every staff GUI operation to an agent-accessible REST primitive, classifies each by execution policy (anonymous, direct, human confirmation, human only), and drives the human-only handoff responses for token callers. Read before adding a staff action, an agent tool, or any path an API token can reach.
 tags: [architecture, agent, parity, capabilities, human-in-the-loop, authorization]
-timestamp: 2026-09-24T00:00:00Z
+timestamp: 2026-11-04T00:00:00Z
 openwiki:
   roles: [architecture, integration, workflow]
   change_kinds: [capability, agent-parity, human-handoff, public-api]
@@ -32,7 +32,9 @@ which MCP tool, if any, exposes the action.
 `CAPABILITIES` is a tuple of rows built by `_capability(...)`. A row carries:
 
 - `id`, `outcome`, `method`, and `path`, which is the REST primitive.
-- `ui_routes`, the canonical staff UI routes where the same outcome appears.
+- `ui_routes`, the canonical staff UI routes where the same outcome appears. Case routes
+  name a stage of the rail (`/requests/:number/<stage>`), and each stage must be one the
+  frontend authorizes ([case stage rail](../domain/case-workspace.md#case-stage-rail)).
 - `execution`, the policy below.
 - `risk` (`read`, `low`, `moderate`, or `high`).
 - `constraints`, names from `AGENT_CONSTRAINT_DEFINITIONS` such as
@@ -41,7 +43,7 @@ which MCP tool, if any, exposes the action.
 - `mcp_tool`, when a Model Context Protocol tool exposes the action. The value is the
   tool's wire name (`psd_prr_*`), the same string [MCP](../integrations/mcp.md) registers.
 
-The catalog holds about 176 rows, one per distinct operation the production
+The catalog holds about 178 rows, one per distinct operation the production
 React application calls. Query variations are inputs to one list operation, not
 separate powers. The live catalog is served by `AgentCapabilityCatalogView` at
 `/api/staff/capabilities/`. `capability_catalog()` returns a fresh copy on each
@@ -53,7 +55,7 @@ call, so a caller cannot mutate policy.
 |---|---|---|
 | `anonymous` | 1 | The public intake submission only (`requests.submit_public`). It is write-only, CSRF-protected, rate-limited, and idempotent. |
 | `direct` | 1 | An agent may execute with its attributed token through the REST API. |
-| `human_confirmation` | 61 | An agent may prepare the action, but a human must approve it explicitly before it runs. |
+| `human_confirmation` | 64 | An agent may prepare the action, but a human must approve it explicitly before it runs. |
 | `human_only` | 29 | The agent must hand off. The accountable human executes the action in the staff UI. |
 
 The `human_only` and `human_confirmation` rows cover legal and statutory actions
@@ -117,3 +119,10 @@ Related: [Compliance](../domain/compliance.md) (the statutory boundary this
 catalog enforces), [Work queue](../domain/work-queue.md) (work actions and
 their human-only decisions), [Advisory AI](../domain/advisory-ai.md) (proposal
 actions are human confirmation).
+
+The intake-label operations are registered as advisory-only rows.
+`requests.advisory_intake.read` and `requests.advisory_intake.request` carry the
+`advisory_only` constraint. The request row keeps the default `direct` policy and
+is registered at risk `high`. The officer's answer,
+`requests.advisory_intake.feedback`, is `human_confirmation`. The behavior behind
+these rows is in [advisory AI](../domain/advisory-ai.md#boundary).

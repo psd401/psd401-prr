@@ -388,6 +388,18 @@ class InstallmentMembershipTests(_InstallmentTestCase):
         )
         self.assertEqual(again.sequence, 2)
 
+    def test_more_than_one_page_of_records_all_reach_the_installment(self):
+        # #30: the Releases list pages at 50; an installment is not.
+        items = [self.make_item(f"record-{index}.pdf") for index in range(60)]
+
+        installment = create_installment(
+            self.prr.number,
+            actor=self.officer,
+            item_ids=[item.pk for item in items],
+        )
+
+        self.assertEqual(installment.items.count(), 60)
+
     def test_only_a_current_records_officer_may_create(self):
         item = self.make_item()
         with self.assertRaises(PermissionDenied):

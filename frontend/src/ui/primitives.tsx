@@ -1,5 +1,5 @@
-// ABOUTME: Small PSD-branded UI kit — buttons, inputs, cards, badges — shared
-// ABOUTME: by every screen so the app reads as one system.
+// ABOUTME: Small Nexus UI kit — buttons, inputs, cards, badges — shared by every
+// ABOUTME: screen so the app reads as one system. Styles are the vendored nx- classes.
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -9,15 +9,13 @@ import type {
 } from 'react'
 import { useEffect, useRef } from 'react'
 
+// Nexus has one outlined button; `ghost` is the same control without a fill,
+// for toolbars where a raised surface would be noise.
 const buttonStyles = {
-  primary:
-    'bg-cedar text-white hover:bg-pacific disabled:opacity-50 disabled:hover:bg-cedar',
-  secondary:
-    'bg-whulge text-white hover:bg-pacific disabled:opacity-50 disabled:hover:bg-whulge',
-  ghost:
-    'bg-transparent text-pacific border border-driftwood hover:bg-skylight disabled:opacity-50',
-  danger:
-    'bg-red-800 text-white hover:bg-red-900 disabled:opacity-50 disabled:hover:bg-red-800',
+  primary: 'nx-btn--primary',
+  secondary: 'nx-btn--secondary',
+  ghost: 'nx-btn--secondary bg-transparent',
+  danger: 'nx-btn--danger',
 } as const
 
 /**
@@ -42,10 +40,12 @@ export function FilterChip({
     <button
       type="button"
       aria-pressed={selected}
-      className={`rounded-full border px-3 py-1.5 font-heading text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-whulge ${
+      // nx-chip is Nexus's context chip (a pinned decision), not a filter, so
+      // the filter pill stays a pill drawn from the same tokens.
+      className={`rounded-full border px-3 py-1.5 font-heading text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${
         selected
-          ? 'border-cedar bg-cedar text-white'
-          : 'border-driftwood bg-white text-pacific hover:bg-skylight'
+          ? 'border-action bg-action text-on-action'
+          : 'border-line-strong bg-surface-raised text-ink hover:bg-surface-hover'
       }`}
       {...props}
     >
@@ -53,7 +53,12 @@ export function FilterChip({
       {count !== undefined && (
         <span
           aria-label={countLabel}
-          className="ml-2 rounded-full bg-current/10 px-1.5 py-0.5 text-xs tabular-nums"
+          // On a selected chip a tint over the action colour lightens it under
+          // the white count and fails WCAG AA (4.41:1); an outline keeps the
+          // chip's own, passing, contrast in every theme.
+          className={`ml-2 rounded-full px-1.5 py-0.5 text-xs tabular-nums ${
+            selected ? 'border border-current/60' : 'bg-current/10'
+          }`}
         >
           <span aria-hidden="true">{count}</span>
         </span>
@@ -71,7 +76,9 @@ export function Button({
 }) {
   return (
     <button
-      className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 font-heading text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-whulge ${buttonStyles[variant]} ${className}`}
+      // Nexus buttons are one line at a fixed height; these labels can be long
+      // and must wrap at 320 CSS px rather than widen the page.
+      className={`nx-btn ${buttonStyles[variant]} h-auto min-h-10 whitespace-normal py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${className}`}
       {...props}
     />
   )
@@ -83,7 +90,7 @@ export function Input({
 }: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
-      className={`w-full rounded-lg border border-driftwood bg-white px-3 py-2 text-sm text-pacific shadow-sm placeholder:text-pacific/80 focus:border-seaglass focus:outline-2 focus:outline-whulge/40 ${className}`}
+      className={`nx-input ${className}`}
       {...props}
     />
   )
@@ -95,7 +102,7 @@ export function Textarea({
 }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea
-      className={`w-full rounded-lg border border-driftwood bg-white px-3 py-2 text-sm text-pacific shadow-sm placeholder:text-pacific/80 focus:border-seaglass focus:outline-2 focus:outline-whulge/40 ${className}`}
+      className={`nx-textarea ${className}`}
       {...props}
     />
   )
@@ -107,7 +114,7 @@ export function Select({
 }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
-      className={`rounded-lg border border-driftwood bg-white px-3 py-2 text-sm text-pacific shadow-sm focus:border-seaglass focus:outline-2 focus:outline-whulge/40 ${className}`}
+      className={`nx-select max-w-full ${className}`}
       {...props}
     />
   )
@@ -123,10 +130,10 @@ export function Field({
   hint?: string
 }) {
   return (
-    <label className="block space-y-1">
-      <span className="font-heading text-sm font-semibold text-pacific">{label}</span>
+    <label className="nx-field">
+      <span className="nx-field__label">{label}</span>
       {children}
-      {hint && <span className="block text-xs text-pacific/80">{hint}</span>}
+      {hint && <span className="nx-field__help">{hint}</span>}
     </label>
   )
 }
@@ -144,11 +151,11 @@ export function Card({
 }) {
   return (
     <section
-      className={`min-w-0 rounded-xl border border-driftwood/60 bg-white shadow-[0_1px_2px_rgba(37,66,76,0.06),0_8px_24px_rgba(37,66,76,0.04)] ${className}`}
+      className={`nx-card min-w-0 p-0 ${className}`}
     >
       {(title || actions) && (
-        <header className="flex items-center justify-between border-b border-driftwood/40 px-5 py-3.5">
-          {title && <h2 className="text-base font-semibold text-pacific">{title}</h2>}
+        <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+          {title && <h2 className="nx-card__title">{title}</h2>}
           {actions}
         </header>
       )}
@@ -158,11 +165,11 @@ export function Card({
 }
 
 const badgeStyles = {
-  neutral: 'bg-seafoam text-pacific border-driftwood',
-  green: 'bg-seaglass/15 text-cedar border-seaglass/40',
-  blue: 'bg-ocean/15 text-whulge border-ocean/40',
-  amber: 'bg-amber-100 text-amber-900 border-amber-300',
-  red: 'bg-red-100 text-red-900 border-red-300',
+  neutral: 'nx-badge--plain bg-surface-sunken text-ink',
+  green: 'nx-badge--success',
+  blue: 'nx-badge--info',
+  amber: 'nx-badge--warning',
+  red: 'nx-badge--danger',
 } as const
 
 export function Badge({
@@ -174,7 +181,7 @@ export function Badge({
 }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 font-heading text-xs font-semibold uppercase tracking-[0.05em] ${badgeStyles[tone]}`}
+      className={`nx-badge ${badgeStyles[tone]}`}
     >
       {children}
     </span>
@@ -183,8 +190,8 @@ export function Badge({
 
 export function Spinner({ label = 'Loading…' }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center gap-3 p-10 text-pacific/80">
-      <span className="size-5 animate-spin rounded-full border-2 border-driftwood border-t-seaglass" />
+    <div className="flex items-center justify-center gap-3 p-10 text-ink-muted">
+      <span className="size-5 animate-spin rounded-full border-2 border-line border-t-flow" />
       <span className="font-heading text-sm font-semibold">{label}</span>
     </div>
   )
@@ -192,7 +199,7 @@ export function Spinner({ label = 'Loading…' }: { label?: string }) {
 
 export function EmptyState({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-md border border-dashed border-driftwood bg-skylight/60 p-8 text-center text-sm text-pacific/80">
+    <div className="nx-empty rounded-md border border-dashed border-line bg-surface-sunken p-8 text-sm text-ink-muted">
       {children}
     </div>
   )
@@ -210,7 +217,7 @@ export function ErrorNote({ error }: { error: unknown }) {
       ref={ref}
       role="alert"
       tabIndex={-1}
-      className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900"
+      className="nx-banner nx-banner--danger"
     >
       {message}
     </p>
@@ -239,8 +246,8 @@ export function Pager({
   const last = Math.min(page * pageSize, count)
   const plural = count === 1 ? noun : `${noun}s`
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-driftwood pt-3">
-      <p className="text-sm text-pacific" role="status">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
+      <p className="text-sm text-ink" role="status">
         {count === 0
           ? `No ${plural}`
           : `Showing ${first}–${last} of ${count} ${plural}`}
@@ -254,7 +261,7 @@ export function Pager({
           >
             Previous
           </Button>
-          <span className="font-heading text-sm font-semibold text-pacific">
+          <span className="font-heading text-sm font-semibold text-ink">
             Page {page} of {pageCount}
           </span>
           <Button

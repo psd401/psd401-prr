@@ -6,14 +6,16 @@ tags: [domain, record-review, redaction, derivatives, handling, media, opaque-re
 openwiki:
   roles: [domain, workflow]
   change_kinds: [review-workflow, rendering, handling-paths]
-  source_paths: [apps/records/handling.py, apps/records/derivatives.py, apps/records/preview.py, apps/records/review.py, apps/records/opaque_review.py, apps/records/media_review.py]
-  symbols: [handling_for, handling_for_item, build_derivative, review_record, approve_second_review, render_redacted_record, record_opaque_disposition, create_media_redaction, render_media_redactions]
-  test_paths: [apps/records/tests/test_handling.py, apps/records/tests/test_derivatives.py, apps/records/tests/test_record_review.py, apps/records/tests/test_media_and_opaque_review.py, apps/api/tests/test_records_misc.py]
+  source_paths: [apps/records/handling.py, apps/records/derivatives.py, apps/records/preview.py, apps/records/readable.py, apps/records/review.py, apps/records/opaque_review.py, apps/records/media_review.py, apps/records/clusters.py, apps/records/review_batches.py, apps/api/resources/records_misc.py, frontend/src/case/RecordClusters.tsx, frontend/src/case/BatchReview.tsx, frontend/src/case/ReviewFlight.tsx, frontend/src/case/RedactWorkspace.tsx, frontend/src/case/redactionCanvas.ts, frontend/src/case/RedactionProposals.tsx]
+  symbols: [handling_for, handling_for_item, build_derivative, readable_text, record_reading_text, review_record, bulk_review_records, bulk_review_selection, bulk_review_confirmed_selection, approve_second_review, render_redacted_record, record_opaque_disposition, create_media_redaction, render_media_redactions, cluster_records, RecordItemViewSet, create_redaction, void_redaction, RedactWorkspace, RedactStage]
+  test_paths: [apps/records/tests/test_handling.py, apps/records/tests/test_derivatives.py, apps/records/tests/test_readable_text.py, apps/records/tests/test_record_review.py, apps/records/tests/test_media_and_opaque_review.py, apps/records/tests/test_review_agreement.py, apps/records/tests/test_undo_review.py, apps/api/tests/test_records_misc.py, apps/api/tests/test_bulk_review_by_filter.py, apps/api/tests/test_record_review.py, apps/api/tests/test_redaction_ai.py, frontend/src/case/ReviewFlight.test.tsx, frontend/src/case/RedactWorkspace.test.tsx]
   invariants:
     - A record's original bytes are never replaced; a reading copy or redacted copy is always a new derived object.
     - A record that cannot be rendered is never marked reviewed by default; a named human records a basis and reasoning.
     - Every redaction cites an exemption, and a second-review exemption needs a distinct second reviewer before burn-in.
-  validation_commands: ["PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_handling apps.records.tests.test_derivatives --settings=config.test_settings"]
+    - A filter-driven bulk decision writes only the exact set the reviewer confirmed (same count and digest), or it writes nothing.
+    - A reading copy of extracted text is derived for display only; `ocr_text` is never rewritten, and each read is audited.
+  validation_commands: ["PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_handling apps.records.tests.test_derivatives --settings=config.test_settings", "PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_bulk_review_by_filter --settings=config.test_settings"]
 ---
 
 # Record Review, Handling, and Derivatives
@@ -87,12 +89,37 @@ reason. Outlook `.msg` files get guidance instead of a fake render. The Celery t
 (`is_previewable`, `has_ready_derivative`, `preview_pdf_metadata`) gives the reviewer a
 verified PDF for the converted or original copy.
 
+## Reading text without email markup
+
+Reviewers who read extracted text, rather than a PDF page, use a cleaned reading copy from
+`apps/records/readable.py`. `RecordItem.ocr_text` stays exactly as extracted, because search
+reads it. Email bodies arrive with Outlook conditional comments, style blocks, HTML tags, and
+markdown image and link syntax. `readable_text(raw)` removes that markup, collapses blank lines,
+and never writes back. It removes only real HTML element names and Office-namespaced tags, so
+text a person wrote in angle brackets, such as a redaction marker or an address, stays.
+
+`record_reading_text(item, actor=...)` serves the copy at
+`GET /api/staff/record-items/{id}/text/` (the `text` action on `RecordItemViewSet`, registered as
+capability `record_items.read_text`). The response is `{text, truncated}`, capped at
+`READABLE_TEXT_LIMIT` (200,000 characters). Each read writes a `record.text_viewed` audit entry,
+with the same audience as a page preview. `ReviewFlight` fetches this endpoint on the keyboard
+review screen ([keyboard review](#keyboard-review-in-the-case-review-tab)).
+
+Focused tests: `apps/records/tests/test_readable_text.py` for the cleaning rules, and
+`apps/api/tests/test_record_review.py` for the audited read and the role denial. Minimal
+validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_readable_text --settings=config.test_settings`.
+
 ## Human review and second review
 
 `apps/records/review.py` owns the reviewer's decisions:
 
 - `review_record` and `bulk_review_records` set a `RecordItem` review state. `_require_reviewer`
-  gates the actor.
+  gates the actor. `bulk_review_records` takes an explicit list of record IDs, capped at
+  `BULK_REVIEW_MAX_ITEMS` (200). It refuses records in the `superseded` state, which a
+  Records Officer sets when an over-broad collection is re-scoped. Those records are decided
+  one at a time through `review_record`. See
+  [collection and Vault](collection-and-vault.md#superseding-an-over-broad-collection).
+  Filter-driven decisions over larger sets use the preview-then-confirm flow below.
 - `create_redaction` and `void_redaction` add or void a `Redaction`. Every redaction requires
   an `ExemptionCitation`; a voided redaction keeps its row.
 - `approve_second_review` records the second decision. `RecordItem.second_review_required`
@@ -110,6 +137,254 @@ Invariants that tests enforce:
   in `apps/records/tests/test_record_review.py`.
 - Review and redaction evidence is read-only in the admin
   (`test_review_and_production_evidence_is_read_only_in_admin` in `test_feature_audit_regressions.py`).
+
+### Undoing your own decision
+
+`undo_review(record_item_id, actor=...)` in `apps/records/review.py` reverts the actor's
+own latest decision on one record. The staff endpoint is
+`POST /api/staff/record-items/{id}/undo-review/` (`RecordItemViewSet.undo_review` in
+[`apps/api/resources/records_misc.py`](../../apps/api/resources/records_misc.py)), and its
+capability is `record_items.undo_review`. The record returns to the state the decision's
+`record.reviewed` audit row recorded as `before`:
+
+- The state is `unreviewed`, or the actor's own earlier responsive, non-responsive, or
+  duplicate decision, which is re-recorded in the actor's name.
+- Only the reviewer who made the latest decision may undo it. An earlier decision by
+  another reviewer is never re-attributed; the record must be reviewed again.
+- A decision that involves `withheld`, on either side, is never undone. A record with
+  active redactions must have them voided first. A superseded prior state is not restored.
+- The undo writes a `record.review_undone` audit row. It schedules work reconciliation and
+  stores a new "none" decision, so the agreement report stops counting the undone decision
+  (see [advisory AI](advisory-ai.md#ai-human-agreement)).
+
+Focused tests are in `apps/records/tests/test_undo_review.py`. Its names describe each
+rule: `test_undo_returns_a_first_decision_to_unreviewed`,
+`test_undo_restores_your_own_previous_decision`,
+`test_another_reviewers_earlier_decision_is_not_restored_in_your_name`,
+`test_a_withheld_record_is_never_restored_by_undo`, and
+`test_a_record_with_active_redactions_is_not_undone`. The API status mapping is
+`test_the_api_reports_a_refused_undo_as_a_400`.
+
+Minimal validation: `PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_undo_review --settings=config.test_settings`.
+
+## The Redact stage
+
+The case's Redact stage (`RedactStage` in `frontend/src/case/CaseWorkspace.tsx`) has two parts.
+Group decisions on pending AI proposals come first, in `RedactionProposals.tsx`
+([trust ladder](trust-ladder.md#redaction-proposal-groups)). Below them,
+`RedactWorkspace` (`frontend/src/case/RedactWorkspace.tsx`) is the per-record drawing surface
+described here. Both use the same redaction endpoints. The Records tab has its own redaction
+panel in `frontend/src/pages/RecordItems.tsx` that calls those endpoints too, so the two
+surfaces must keep the same rules.
+
+```mermaid
+sequenceDiagram
+    participant R as Reviewer in RedactWorkspace
+    participant API as Staff API
+    participant S as apps/records/review.py
+    R->>API: POST "/api/staff/redactions/" (box, page, exemption, explanation)
+    API->>S: create_redaction
+    S-->>R: Redaction row (citation attached)
+    R->>API: POST "record-items/:id/second-review/" (only when required)
+    API->>S: approve_second_review (a different reviewer)
+    R->>API: POST "record-items/:id/render-redactions/"
+    API->>S: render_redacted_record (manifest digest, new PDF object)
+    S-->>R: redacted_artifact_ready
+```
+
+Caption: the per-record sequence from drawing a box to the built redacted PDF. Each step is
+enforced on the server, not only in the screen.
+
+What the screen does:
+
+- **Lists responsive records.** It loads `GET /api/staff/record-items/?request=<number>&review_state=responsive`.
+  The page image comes from `GET /api/staff/record-items/{id}/preview-page/?page=N`, and the
+  page count from the preview metadata. A record that cannot be drawn on shows
+  `RecordHandlingPanel` instead ([handling paths](#handling-paths)).
+- **Adds a redaction.** A pointer drag creates a normalized box (`normalizedBox`, `tooSmall` in
+  `frontend/src/case/redactionCanvas.ts`). Boxes under 0.5% of the page width or height are
+  treated as stray clicks. Add stays disabled until there is a box and an active exemption.
+  The server (`create_redaction`) owns the rules. The screen only mirrors them.
+- **Uses an AI candidate.** "Use suggestion" copies a `RedactionProposal` box, page, citation,
+  and rationale into the draft. Saving then calls
+  `POST /api/staff/redaction-proposals/{id}/accept/`, and dismissing posts a reason to
+  `.../reject/`. Drawing over a suggestion clears it, so the saved box is the reviewer's own
+  redaction. Candidate rules are in [advisory AI](advisory-ai.md#boundary).
+- **Removes a redaction.** `POST /api/staff/redactions/{id}/void/` needs a reason. The row is
+  kept, and the list shows only active redactions.
+- **Approves second review.** The button appears when `second_review_required` is true and no
+  second review exists yet. `approve_second_review` refuses the first reviewer.
+- **Builds the redacted PDF.** The button appears when at least one active redaction exists and
+  any required second review is done. `render_redacted_record` burns the active boxes into a
+  new copy, and the list shows "PDF built".
+- **Remembers the exemption choice.** The last chosen basis is kept in browser storage under
+  `prr.redact.basis`. A remembered basis that is no longer active shows as unchosen and cannot
+  be saved.
+- **Keyboard.** `j` and `k` move between records, the arrow keys turn pages, Enter saves the
+  draft when Add is enabled, and Esc clears it. Typing in a field is excluded.
+
+Invariants:
+
+- A redaction is never saved without an active exemption citation. The server enforces it, and
+  the screen's disabled state is only a mirror.
+- Burn-in is keyed by a manifest digest of the active redactions (`_redaction_manifest`). An
+  unchanged set returns the existing render, and a changed set produces a new immutable object.
+- A redacted record never falls back to the original bytes. The original stays as collected
+  ([record review](#human-review-and-second-review)).
+- Build refuses when there is no active redaction, and refuses while a required second review
+  is missing. Those are the two `ValidationError`s in `render_redacted_record`.
+
+Focused tests:
+
+- `frontend/src/case/RedactWorkspace.test.tsx` covers the rendered flow. Its test names include
+  `builds the redacted PDF when no second review is needed`, `removes a redaction only with a reason`,
+  and `treats a box drawn over a suggestion as your own redaction`.
+- `apps/api/tests/test_record_review.py` covers create through the domain service, void that keeps
+  the row (`test_redaction_void_retains_row_and_reason`), and the second-review and render actions.
+- `apps/api/tests/test_redaction_ai.py` covers the accept and reject endpoints.
+- `apps/records/tests/test_record_review.py` covers the distinct second reviewer before burn-in
+  (`test_ferpa_redaction_requires_distinct_second_review_before_burn_in`).
+
+Minimal validation: `cd frontend && bun run test -- src/case/RedactWorkspace.test.tsx`, and
+`PYTHON_DOTENV_DISABLED=1 python manage.py test apps.api.tests.test_record_review apps.api.tests.test_redaction_ai --settings=config.test_settings`.
+
+Change recipe: a new per-redaction field must pass through `create_redaction` and the
+`redactions.create` capability in `apps/api/capabilities.py`, use the TypeScript shapes in
+`redactionCanvas.ts`, and be added to `_redaction_manifest` when it changes the burned-in
+output. Scope: a change to this screen alone does not touch the domain rules, so the backend tests
+above are the ones to run with it. Escalate to the full suite only when a shared service changes.
+
+## Keyboard review in the case Review tab
+
+`ReviewFlight` (`frontend/src/case/ReviewFlight.tsx`) is the case workspace's Review stage:
+`CaseWorkspace.tsx` mounts it through `ReviewStage` when the segment is `review`.
+`CASE_TAB_ROLES.review` in `frontend/src/nav.ts` limits the stage to records officers and
+reviewers ([case stage rail](case-workspace.md#case-stage-rail)). The screen lists one
+request's records beside their preview, and each key sends one decision:
+
+- `r` responsive, `n` non-responsive, `d` duplicate, `u` undo, `x` select, and `j` or `k` to move.
+  `⌘K` (or Ctrl+K) opens a command palette with the same actions. Plain keys are ignored while
+  the user is typing, while the palette is open, or with a modifier key.
+- A single decision posts to `POST /api/staff/record-items/{id}/review/`. With a selection, the
+  screen sends one `POST /api/staff/record-items/bulk-review/` with explicit `record_item_ids`.
+  That is the explicit-ID path, not the filter preview above. The client refuses a bulk duplicate,
+  because duplicates are decided one record at a time.
+- Undo keeps one stack entry per decision action, so a bulk decision is undone as a whole. Each
+  entry calls `POST .../undo-review/` for every record (see
+  [undoing your own decision](#undoing-your-own-decision)). A refused undo is reported and removed
+  from the stack, so the next `u` reaches the decision before it.
+- No decision is sent while the list is loading the next page, so the highlighted record is never
+  one that was already decided. The AI responsiveness suggestion comes from
+  `GET .../advisory-responsiveness/` and is shown inline. It is read only, and the reviewer still
+  presses a key ([advisory AI](advisory-ai.md)).
+- Clusters can be toggled beside the list ([record clusters](#record-clusters)).
+
+Focused tests are in `frontend/src/case/ReviewFlight.test.tsx`, for example "shows the AI label
+inline and decides, undoes, and moves by key", "decides a selection together and refuses a bulk
+duplicate", "undoes a bulk decision as a whole and drops a refused undo from the stack", and
+"takes no decision while the next page is still loading". The server rules are in
+`apps/records/tests/test_undo_review.py` and `apps/api/tests/test_bulk_review_by_filter.py`. Run
+the client check with `cd frontend && bun run test -- src/case/ReviewFlight.test.tsx`.
+
+## Bulk decisions over a filter
+
+A reviewer can record one responsiveness outcome (`responsive` or `non_responsive`) for every
+record a filter matches, not only for an explicit ID list. Filter mode is a two-step
+preview-then-confirm flow, because the decision is written to every matching record at once.
+The staff record-items screen (`frontend/src/pages/RecordItems.tsx`) fetches the preview and sends the confirmation.
+
+- `GET /api/staff/record-items/bulk-selection/` (`RecordItemViewSet.bulk_selection`) runs
+  `bulk_review_selection`. It returns the matching count, the `eligible_count` a decision
+  would change, the `excluded` breakdown, and a `selection_sha256` digest of the eligible IDs.
+  Its `max_items` field reports `BULK_REVIEW_FILTER_MAX_ITEMS` (10,000).
+- `POST /api/staff/record-items/bulk-review/` with a `filter`, `state`, `expected_count`, and
+  `selection_sha256` runs `bulk_review_confirmed_selection`. It locks the matched rows with
+  `select_for_update`, re-splits them, and refuses the write with HTTP 409 and code
+  `selection_changed` unless the count and digest still match what the reviewer saw.
+- A request body sends either `record_item_ids` or `filter`, never both. A filter must name
+  exactly one request (`request`), and only the keys in `BULK_FILTER_KEYS` are accepted.
+
+Skipped records are counted, never overturned. A decision never changes a record that is
+`withheld`, `duplicate`, or `superseded`, and a record already in the requested state is
+counted as `already`. A non-responsive decision also skips a record with an active redaction
+(`redacted`), because that redaction must be voided on purpose. Each changed record gets its
+own `record.reviewed` audit row, and one `record.bulk_reviewed` row records the filter. Search
+text is stored only as `search_sha256`.
+
+The capability catalog marks `record_items.bulk_review` as `human_confirmation`, so a
+token caller gets a human handoff rather than a write. The check runs before any selection
+is computed (see [agent parity](../architecture/agent-parity.md)). The audit row is described
+in [compliance](compliance.md).
+
+```mermaid
+sequenceDiagram
+    participant R as Reviewer in staff app
+    participant API as RecordItemViewSet
+    participant S as review service
+    R->>API: GET bulk-selection with filter and state
+    API->>S: bulk_review_selection over matching IDs
+    S-->>API: matching, eligible_count, excluded, selection_sha256
+    API-->>R: counts and digest
+    R->>API: POST bulk-review with filter, expected_count, selection_sha256
+    API->>API: human_only_handoff refuses token callers
+    API->>S: bulk_review_confirmed_selection
+    S->>S: lock rows and re-split
+    alt count or digest changed
+        S-->>API: BulkSelectionChanged
+        API-->>R: 409 selection_changed, nothing written
+    else confirmed set matches
+        S-->>API: reviewed count, one audit row per record and one bulk row
+        API-->>R: reviewed_count and review_state
+    end
+```
+
+Caption: the preview-then-confirm flow for a filter decision; the write happens only when the
+confirmed count and digest still match.
+
+Focused tests in `apps/api/tests/test_bulk_review_by_filter.py`, including
+`test_every_matching_record_is_decided_beyond_the_explicit_cap`,
+`test_a_changed_set_is_refused_and_nothing_is_written`,
+`test_records_needing_their_own_judgement_are_skipped_and_counted`,
+`test_a_token_caller_is_handed_off_for_a_filter_decision`, and
+`test_too_many_matching_records_are_refused_before_any_lock`.
+
+## Record clusters
+
+The Records tab's **Group by cluster** view helps a reviewer look at related records
+together. Grouping is a way to read the queue, not a decision. The cluster's **Approve cluster as ...**
+action opens a sampled batch, which applies an outcome only after the reviewer judges a random
+sample. See [trust ladder](trust-ladder.md). `cluster_records(records,
+grouping)` in [`apps/records/clusters.py`](../../apps/records/clusters.py) takes the
+filtered set and one of four groupings:
+
+- `thread`: messages linked by `In-Reply-To` to `Message-ID` within the set. Records with
+  neither header share one "Not email" cluster.
+- `sender`: the mailing list (`List-Id`) when present, otherwise the sending domain.
+- `tag`: one cluster per review tag. A record with two tags appears in both. Tags come from
+  [record facts and tags](record-facts-and-tags.md).
+- `ai_label`: the latest suggested state and its confidence band, read from the standing
+  responsiveness suggestion described in [advisory AI](advisory-ai.md#ai-human-agreement).
+
+The staff endpoint is `GET /api/staff/record-items/clusters/` (`RecordItemViewSet.clusters`
+in [`apps/api/resources/records_misc.py`](../../apps/api/resources/records_misc.py)). It reads
+every record the current filters match, not only the page on screen, because a cluster's
+size and majority label are only true over the full set. The response reports `cluster_count`
+and returns at most the largest clusters. Each cluster carries its size, up to three samples,
+the majority AI suggestion, and the record IDs. An unknown `group_by` is a 400 response.
+`frontend/src/case/RecordClusters.tsx` renders the view and says when the list was cut short.
+
+Invariants:
+
+- Clustering reads stored facts only and never changes review state, tags, or a suggestion.
+- The thread grouping uses a union-find over the in-set `In-Reply-To` links, so a reply chain
+  is one cluster regardless of the order records load in.
+- A mailing list outranks the sender domain as the sender key.
+
+Focused tests are in `apps/records/tests/test_review_agreement.py`:
+`test_a_reply_chain_is_one_thread`, `test_a_mailing_list_outranks_the_sender_domain`,
+`test_tags_and_ai_label_clusters_report_the_majority_label`,
+`test_samples_are_capped_and_unknown_groupings_refused`, `test_a_reviewer_groups_a_case_by_cluster`,
+and `test_an_unknown_grouping_is_a_400`.
 
 ## Opaque record dispositions
 

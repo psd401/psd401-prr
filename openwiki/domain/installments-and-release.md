@@ -1,7 +1,7 @@
 ---
 type: Domain Concept
 title: Installments and Release
-description: How a PRR case's responsive records are grouped into requester installments, packaged with an exemption log, fee-gated, released behind an expiring requester link, and announced by notice. Covers membership rules, the release-and-send action, revocation, optional access codes, and the requester download pages.
+description: How a PRR case's responsive records are grouped into requester installments, packaged with an exemption log, fee-gated, released behind an expiring requester link, and announced by notice. Covers membership rules, the one-step "Build package" action, the release-and-send action, revocation, optional access codes, and the requester download pages.
 tags: [domain, public-records, release, installments, requester-delivery]
 ---
 
@@ -58,6 +58,48 @@ stateDiagram-v2
 - **Revoke** (`revoke_installment`) withdraws requester access with a recorded reason. The
   artifact and audit trail stay in place, and a revoked installment can never be released
   again.
+
+## The one-step package build
+
+`build_release_package(request_number, *, actor)` in `apps/records/release_package.py` is the
+Release stage's "1. Build package" step. The staff endpoint is
+`POST /api/staff/requests/{number}/release-package/` (`RequestsViewSet.release_package` in
+`apps/api/resources/requests.py`). It runs the create, exemption-log, and prepare stages above in
+the order an officer used to click through them. It never releases or sends.
+
+```mermaid
+flowchart TD
+    A["build_release_package"] --> B{"Closed request, open production deposit, or no ready records?"}
+    B -->|"yes"| X["ReleasePackageBlocked: code and case tab that fixes it"]
+    B -->|"no"| C{"Open unreleased installment?"}
+    C -->|"no"| D["create_installment from ready records"]
+    C -->|"yes"| E["finish it as the officer chose it"]
+    D --> F{"Withheld or redacted items and no ready log?"}
+    E --> F
+    F -->|"yes"| G["generate_exemption_log"]
+    F -->|"no"| H{"Package already prepared?"}
+    G --> H
+    H -->|"no"| I["prepare_installment"]
+    H -->|"yes"| J["Return the installment"]
+    I --> J
+```
+
+Caption: blockers are checked before any row is created. Each later stage is skipped when its
+output already exists, which is why a repeated build does not duplicate the installment.
+
+- **Blockers come first.** A closed request, a production deposit gate
+  (`open_deposit_gate` with the production scope), or no release-ready record raises
+  `ReleasePackageBlocked`. Each blocker carries a `code` and the case `tab` that fixes it:
+  `overview`, `releases`, or `review`. The API returns HTTP 400 with `blocker: {code, tab}`.
+- **An open installment is finished, not replaced.** The newest open installment is completed
+  as chosen and gains no records. Ready records outside it stay unclaimed for the next package.
+- **Exemption log.** Generated only when the installment has withheld or redacted items and no
+  ready log exists (`generate_exemption_log`).
+- **Preparation.** `prepare_installment` runs only when the package is not yet prepared.
+
+The matching capability is `installments.build_package` in `apps/api/capabilities.py`. It is
+`human_confirmation` and high risk, so an agent must not treat it as a release. Release and send
+stay separate actions, described next.
 
 ## The one-action release
 
@@ -164,12 +206,16 @@ together: a package, a revocation, or an access code cannot be half set. Object 
 `release-and-send`, `revoke`, `set-access-code`, and `clear-access-code`. Each write action
 maps to an `installments.*` entry in the capability catalog (`apps/api/capabilities.py`).
 Release-and-send and revoke are `human_only`, and plain release is `human_confirmation`. The
-parity contract is in [agent parity](../architecture/agent-parity.md).
+one-step build is the request-level `release-package` action described above. The parity
+contract is in [agent parity](../architecture/agent-parity.md).
 
 ## Invariants
 
 - Only a current Records Officer may create, prepare, release, revoke, or set access codes.
+  The one-step build uses the same authority check.
 - Membership changes only before packaging, and a record cannot sit in two live installments.
+- The one-step build checks its blockers before it creates anything, and it never releases or
+  sends a package.
 - A package is verified before release and before any byte reaches a requester.
 - A released installment cannot be re-released after revocation, and revocation never deletes
   the artifact or audit trail.
@@ -195,6 +241,9 @@ Focused tests:
   and release renewal.
 - `apps/records/tests/test_installment_downloads.py`: requester page and package delivery,
   including the integrity check.
+- `apps/records/tests/test_release_package.py`: the one-step build. `BuildReleasePackageTests`
+  covers the blockers and their tabs, reuse of an open package, and a withheld record getting
+  its exemption log first. `BuildReleasePackageApiTests` covers the HTTP 400 blocker shape.
 - `apps/records/tests/test_fees.py` and `apps/records/tests/test_exemption_logs.py`: fee
   assessment and the exemption log.
 - `apps/api/tests/test_records_misc.py` (`InstallmentApiTests`) and
@@ -203,7 +252,7 @@ Focused tests:
 Minimal validation:
 
 ```bash
-PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_installment_lifecycle apps.records.tests.test_installment_production apps.records.tests.test_installment_downloads --settings=config.test_settings
+PYTHON_DOTENV_DISABLED=1 python manage.py test apps.records.tests.test_installment_lifecycle apps.records.tests.test_installment_production apps.records.tests.test_installment_downloads apps.records.tests.test_release_package --settings=config.test_settings
 ```
 
 The full `apps` suite is needed only when a change touches a shared symbol such as

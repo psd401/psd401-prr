@@ -20,14 +20,18 @@ headers, dependency audits, and GitHub Actions workflows.
 | Staff login | Unauthenticated browser | Production uses Google OIDC authorization code flow with nonce and PKCE, exact callback URI, verified hosted domain/email, and immutable `sub`; local-only password login is CSRF-protected, throttled, and absent in Google mode |
 | Public request intake | Unauthenticated browser | Exactly one write-only POST; same-origin CSRF, signed HttpOnly form token, minimum/maximum fill age, honeypot, Redis-backed per-IP and global hard ceilings, minimal PII, content-bounded quarantine attachments, one-request idempotency receipt, and a request-number-only success response |
 | Staff API and API documentation | Staff session/token | Authenticated by default; sessions require CSRF; every resource declares a role policy; Liaison querysets are assignment-scoped; sensitive responses are `no-store` |
-| Hosted attributed MCP at `/mcp` | Personal staff token or dedicated nonstaff service identity | Streamable HTTP preflights the caller's `Authorization: Token` through Django before handshake/tool execution, then forwards that same credential to the staff REST primitives; both identities may use the eight reads, while exactly three gated draft/proposal tools require a personal token; current roles, expiry, revocation, attribution, resource policy, and human handoffs remain Django-owned; stateless workers, no token logging, and noncacheable responses |
+| Hosted attributed MCP at `/mcp` | Personal staff token or dedicated nonstaff service identity | Streamable HTTP preflights the caller's `Authorization: Token` through Django before handshake/tool execution, then forwards that same credential to the staff REST primitives; both identities may use the eight reads, while four role-gated record and decision-batch reads and exactly five gated draft/proposal tools require a personal token; current roles, expiry, revocation, attribution, resource policy, and human handoffs remain Django-owned; stateless workers, no token logging, and noncacheable responses |
 | Stdio read-only MCP | Personal token or dedicated nonstaff service identity | Shared tool registry; the service identity has exact `records.read_staff_api`, safe HTTP methods only, and cannot submit intake, mutate staff resources, or read role mappings or the requester directory |
 | In-process outbound requester correspondence | Migration-provisioned non-login system identity | Exact `correspondence.deliver_outbound_correspondence`; no token; row-locked lease/attempt, immutable Django-prepared MIME, claim-bound clean attachments, development recipient allowlist, idempotent result, and Gmail Message-ID reconciliation before any uncertain resend |
 | In-process inbound requester correspondence | Migration-provisioned non-login system identity | Exact `correspondence.submit_inbound_correspondence`; no token; committed-before-I/O reservation plus immutable hashed transport alias for every generated quarantine write, one bounded `PutObject`, processing/cleanup leases, immutable raw evidence, safe MIME parsing, and deterministic Django matching |
 | Django admin | Break-glass superuser | Disabled outside debug unless explicitly enabled; rejects ordinary staff and Application Admin accounts; not part of normal operations |
 
-Hosted `/mcp` exposes exactly three attributed personal-token draft/proposal
+Hosted `/mcp` exposes exactly five attributed personal-token draft/proposal
 tools; standalone stdio and the shared nonstaff MCP identity remain read-only.
+None of the five can approve, queue, or send: the worst case is an editable
+draft a Records Officer discards, or a decision batch a person rejects. The
+four record and decision-batch reads also need a personal token, because they
+belong to reviewer and Records Officer roles.
 
 The local login route exists only in local mode. Public intake is the one
 sanctioned anonymous business operation and exposes no read method: its success
@@ -86,7 +90,7 @@ district LAN or the internet.
 `config/asgi.py` is the single public application. Its top-level lifespan runs
 FastMCP's session manager, routes exact `/mcp` requests to the authenticated
 streamable-HTTP app, and delegates every other request to Django. Hosted MCP is
-stateless across the four workers. It performs staff reads and its three gated
+stateless across the four workers. It performs staff reads and its five gated
 draft/proposal operations in-process through Django's URL, middleware,
 authentication, permission, and serializer stack rather than making a public
 self-request that could deadlock the worker pool.
@@ -120,7 +124,7 @@ screenshots, logs, or query strings.
 
 The hosted `/mcp` endpoint accepts either an attributed personal token or the
 separately provisioned nonstaff MCP identity. The dedicated nonstaff service
-identity may use hosted `/mcp` for the eight read tools; the three draft/proposal
+identity may use hosted `/mcp` for the eight read tools; the five draft/proposal
 tools require an attributed personal token. That service identity also remains
 appropriate for shared stdio automation. Static-token hosted mode is not OAuth
 and must not be represented as compatible with a remote-connector UI that
@@ -269,7 +273,14 @@ These are not hidden behind a claim of production readiness:
   `quarantine/vault-messages/`, verified and classified by ClamAV, and only a
   clean message is promoted into immutable `vault-messages/` evidence and the
   review queue. An infected or unclassified message stays quarantined and the
-  ingest run fails without conversion or review exposure. Files a Records
+  ingest run fails without conversion or review exposure. Chat messages take
+  that same message path. Drive files from a Vault Drive export are written
+  under the same `quarantine/vault-messages/` prefix, scanned on the exact
+  bytes, and only a clean file is copied to an immutable `records/` key and
+  becomes a `RecordItem`; the quarantine copy is deleted either way, and an
+  infected or oversized file is recorded as a failed artifact while the rest
+  of the export proceeds. A count-only Drive or Chat export (rule 11) is never
+  downloaded. Files a Records
   Officer uploads onto a case (`POST /api/staff/requests/{number}/record-uploads/`)
   and migrated NextRequest files share one path
   (`apps/records/scanned_records.py`): generated keys under

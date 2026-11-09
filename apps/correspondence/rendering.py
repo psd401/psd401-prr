@@ -22,6 +22,7 @@ TEMPLATES = {
     ("estimate_revision", "1"): "correspondence/estimate_revision/v1.txt",
     ("estimate_revision", "2"): "correspondence/estimate_revision/v2.txt",
     ("fee_estimate", "1"): "correspondence/fee_estimate/v1.txt",
+    ("interpretation_estimate", "1"): "correspondence/interpretation_estimate/v1.txt",
     ("installment_notice", "1"): "correspondence/installment_notice/v1.txt",
     ("installment_notice", "2"): "correspondence/installment_notice/v2.txt",
     ("installment_notice", "3"): "correspondence/installment_notice/v3.txt",

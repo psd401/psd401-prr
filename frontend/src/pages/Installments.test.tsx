@@ -1,8 +1,9 @@
 // ABOUTME: Installment production requires an explicit Records Officer
 // ABOUTME: confirmation and uses the same registered REST primitive as agents.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Installments } from './Installments'
 import { at } from '../test/at'
@@ -87,9 +88,11 @@ function renderPage(
   const queryClient = new QueryClient()
   return {
     ...render(
-    <QueryClientProvider client={queryClient}>
-      <Installments roles={roles} requestNumber={requestNumber} />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <Installments roles={roles} requestNumber={requestNumber} />
+      </QueryClientProvider>
+    </MemoryRouter>,
     ),
     queryClient,
   }
@@ -771,4 +774,136 @@ it('requires a substantive reason before lifting a deposit gate', async () => {
     'Requester narrowed the request below the deposit threshold.',
   )
   expect(submit).toBeEnabled()
+})
+
+it('offers every release-ready record when the list spans more than one page', async () => {
+  const records = Array.from({ length: 60 }, (_, index) => ({
+    ...readyRecord,
+    id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, '0')}`,
+    original_filename: `record-${index}.pdf`,
+  }))
+  const posted: unknown[] = []
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url === '/api/staff/installments/' && init?.method === 'POST') {
+      posted.push(JSON.parse(String(init.body)))
+      return response({ id: 9, sequence: 1, items: [] })
+    }
+    if (url.startsWith('/api/staff/record-items/')) {
+      const second = url.includes('page=2')
+      return response({
+        count: records.length,
+        next: second ? null : `${url}&page=2`,
+        previous: null,
+        results: second ? records.slice(50) : records.slice(0, 50),
+      })
+    }
+    return listFor(input, [])
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  renderPage(['records_officer'], 'PRR-2026-0042')
+
+  const user = userEvent.setup()
+  await user.click(await screen.findByLabelText('Select all 60'))
+  await user.click(screen.getByRole('button', { name: 'Create installment (60)' }))
+
+  // Every record on both pages is sent, not just the first page's 50.
+  await waitFor(() => expect(posted).toHaveLength(1))
+  expect(posted[0]).toEqual({
+    request_number: 'PRR-2026-0042',
+    record_item_ids: records.map((record) => record.id),
+  })
+})
+
+it('builds the release package in one action and previews it before release', async () => {
+  let built = false
+  const prepared = {
+    ...row,
+    item_count: 1,
+    package_prepared_at: '2026-11-04T19:30:00Z',
+    package_size: 4096,
+    record_item_ids: [readyRecord.id],
+  }
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, options?: RequestInit) => {
+    if (String(input) === '/api/staff/requests/PRR-2026-0042/release-package/' && options?.method === 'POST') {
+      built = true
+      return response(prepared)
+    }
+    return listFor(input, built ? [prepared] : [])
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const user = userEvent.setup()
+  renderPage(['records_officer'], 'PRR-2026-0042')
+
+  expect(await screen.findByText(/1 record ready to release/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Build package' }))
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    '/api/staff/requests/PRR-2026-0042/release-package/',
+    expect.objectContaining({ method: 'POST' }),
+  )
+  const preview = await screen.findByRole('list', { name: 'Records in this package' })
+  expect(within(preview).getByText('board-minutes.pdf')).toBeInTheDocument()
+  expect(screen.getByText(/No exemption log is needed/)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Build package' })).not.toBeInTheDocument()
+  const steps = screen.getByRole('list', { name: 'Release steps' })
+  await user.click(within(steps).getByRole('button', { name: 'Release and send' }))
+  expect(screen.getByRole('dialog', { name: 'Release installment' })).toBeInTheDocument()
+})
+
+it('shows a build blocker with a link to the tab that fixes it', async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, options?: RequestInit) => {
+    if (String(input) === '/api/staff/requests/PRR-2026-0042/release-package/' && options?.method === 'POST') {
+      return {
+        ok: false,
+        status: 400,
+        text: async () => JSON.stringify({
+          detail: 'No records are ready to release.',
+          blocker: { code: 'no_ready_records', tab: 'review' },
+        }),
+      }
+    }
+    return listFor(input, [])
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const user = userEvent.setup()
+  renderPage(['records_officer'], 'PRR-2026-0042')
+
+  await user.click(await screen.findByRole('button', { name: 'Build package' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('No records are ready to release.')
+  expect(screen.getByRole('link', { name: 'Go to Review to fix this' })).toHaveAttribute(
+    'href', '/requests/PRR-2026-0042/review',
+  )
+})
+
+it('folds the fee panels away when no fee applies, and leads with them when one does', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => listFor(input, [row])))
+  const { unmount } = renderPage(['records_officer'], 'PRR-2026-0042')
+  const summary = await screen.findByText('Fees and deposits — no fee applies')
+  expect(summary.closest('details')).not.toHaveAttribute('open')
+  unmount()
+
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => listFor(input, [
+    { ...row, fee_amount: '4.20', fee_balance: '4.20' },
+  ])))
+  renderPage(['records_officer'], 'PRR-2026-0042')
+  expect(await screen.findByText('Adopted fee schedule')).toBeInTheDocument()
+  expect(screen.queryByText('Fees and deposits — no fee applies')).not.toBeInTheDocument()
+})
+
+it('says which ready records an open partial installment leaves out', async () => {
+  // listFor answers every record-items query with readyRecord, so it is both
+  // unclaimed and outside the open installment's own records here.
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => listFor(input, [
+    { ...row, item_count: 2, record_item_ids: ['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'] },
+  ])))
+  renderPage(['records_officer'], 'PRR-2026-0042')
+
+  const steps = await screen.findByRole('list', { name: 'Release steps' })
+  expect(within(steps).getByText(/Installment 1: 2 records, not prepared yet/)).toBeInTheDocument()
+  expect(within(steps).getByText(
+    /1 more ready record is not in this installment; build again after releasing it to package the rest/,
+  )).toBeInTheDocument()
+  expect(within(steps).getByRole('button', { name: 'Build package' })).toBeInTheDocument()
 })

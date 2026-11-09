@@ -21,7 +21,7 @@ test('staff-login-open-case', async ({ page }) => {
 
   // Wait for the authenticated shell before navigating: a goto issued while
   // the session is still being established lands back on the sign-in screen.
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
   await page.goto('/inbox?view=cases')
   await page
     .getByRole('link', { name: new RegExp(`^Open case ${fixtureRequestNumber}`) })
@@ -29,16 +29,16 @@ test('staff-login-open-case', async ({ page }) => {
     .click()
 
   await expect(page).toHaveURL(
-    new RegExp(`/requests/${fixtureRequestNumber}/overview$`),
+    new RegExp(`/requests/${fixtureRequestNumber}/intake$`),
   )
-  const requestHeader = page.locator('header').filter({
-    has: page.getByRole('heading', { name: fixtureRequestNumber }),
-  })
-  await expect(requestHeader).toBeVisible()
+  const requestHeader = page.getByRole('region', { name: 'Case summary' })
+  await expect(requestHeader).toContainText(fixtureRequestNumber)
   await expect(
     requestHeader.getByText(/Awaiting Clarification|Gathering Records/),
   ).toBeVisible()
-  await expect(page.getByText(fixtureDescription, { exact: true })).toBeVisible()
+  // The request text is in the Request card; a short one is also the
+  // header's summary.
+  await expect(page.getByText(fixtureDescription, { exact: true }).last()).toBeVisible()
 
   await page.screenshot({
     path: path.resolve('../.verification/staff-login-open-case.png'),

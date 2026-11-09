@@ -88,10 +88,14 @@ class AppSettingSerializer(serializers.Serializer):
     max_items = serializers.IntegerField(allow_null=True)
     allow_blank = serializers.BooleanField()
     choices = serializers.ListField(child=serializers.CharField())
+    suggestions = serializers.ListField(child=serializers.CharField())
     requires = serializers.ListField(child=serializers.CharField())
     required_by = serializers.ListField(child=serializers.CharField())
     last_change = AppSettingChangeSerializer(allow_null=True)
     verification = serializers.JSONField(allow_null=True)
+    #: For a trust setting that can act without a person: how the live model
+    #: scored on its latest evaluation, so the evidence sits beside the switch.
+    evaluation = serializers.JSONField(allow_null=True)
 
 
 class AppSettingPageSerializer(serializers.Serializer):
@@ -189,13 +193,29 @@ def _serialize(spec, *, values, last_change_by_key, secrets_by_key=None, checks=
         "max_items": spec.max_items if listed else None,
         "allow_blank": spec.allow_blank,
         "choices": list(spec.choices),
+        "suggestions": list(spec.suggestions),
         "requires": list(spec.requires),
         "required_by": list(dependents_of(spec.key)),
         "last_change": (
             AppSettingChangeSerializer(last_change).data if last_change else None
         ),
         "verification": (checks or {}).get(spec.key),
+        "evaluation": _evaluation_for(spec.key),
     }
+
+
+def _evaluation_for(key: str):
+    """The intake trust rows show "not a request" precision and recall (#34)."""
+    from apps.records.advisory_ai import model_for_kind
+    from apps.records.evaluation import latest_not_request_metrics
+    from apps.records.intake_trust import AUTO_LABEL_SETTINGS
+    from apps.records.models import AdvisoryRun
+
+    if key not in AUTO_LABEL_SETTINGS.values():
+        return None
+    return latest_not_request_metrics(
+        model_for_kind(AdvisoryRun.Kind.INTAKE_CLASSIFICATION),
+    )
 
 
 class AppSettingViewSet(viewsets.ViewSet):

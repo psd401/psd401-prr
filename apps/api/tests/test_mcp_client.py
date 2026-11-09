@@ -25,6 +25,8 @@ from integrations.mcp.client import (
     OVERDUE_MAX_LIMIT,
     OVERDUE_MAX_PAGES,
     PRRClient,
+    _validated_iso_date,
+    _validated_request_number,
 )
 
 
@@ -434,3 +436,79 @@ class OverdueScanBoundsTests(SimpleTestCase):
         self.assertEqual(payload["total"], OVERDUE_MAX_PAGES)
         self.assertTrue(payload["truncated"])
         self.assertFalse(payload["scan_complete"])
+
+
+class RequestNumberValidationTests(SimpleTestCase):
+    """The guard in front of every method that takes a matter number.
+
+    Tested directly for the same reason as the date guard below: the inputs
+    that matter are the ones the MCP schema never lets through but a direct
+    ``PRRClient`` caller can. In ``get_request`` the value is interpolated
+    into a REST path, so this is also the path-traversal guard.
+    """
+
+    def test_each_matter_kind_prefix_is_accepted(self):
+        for number in ("PRR-2026-0042", "LIT-2026-0001", "FER-2026-0001"):
+            with self.subTest(number=number):
+                self.assertEqual(
+                    _validated_request_number(number, field="number"),
+                    number,
+                )
+
+    def test_a_path_escape_is_rejected_before_any_request(self):
+        for number in ("../record-items", "PRR-2026-0042/../../x", "PRR-2026"):
+            with self.subTest(number=number):
+                with self.assertRaisesMessage(ValueError, "request number"):
+                    _validated_request_number(number, field="number")
+
+    def test_a_non_string_is_rejected_rather_than_stringified(self):
+        for value in (None, 20260042, ["PRR-2026-0042"]):
+            with self.subTest(value=value):
+                with self.assertRaisesMessage(ValueError, "request number"):
+                    _validated_request_number(value, field="request_number")
+
+    def test_the_error_names_the_caller_s_own_argument(self):
+        # get_request's parameter is `number`; the draft tools' is
+        # `request_number`. Each error has to name the one the caller passed.
+        with self.assertRaisesMessage(
+            ValueError,
+            "request_number must be a canonical PRR request number.",
+        ):
+            _validated_request_number("nope", field="request_number")
+
+
+class IsoDateValidationTests(SimpleTestCase):
+    """The date guard in front of the two drafting POSTs.
+
+    Both drafting tools document their date argument as ``YYYY-MM-DD``, and
+    both send it to a service that treats the value as a statutory date. The
+    guard is tested directly because the interesting inputs never arrive over
+    MCP -- the tool schema types them as strings -- but do arrive from code
+    importing ``PRRClient``, which the module supports.
+    """
+
+    def test_a_dashed_iso_date_is_accepted(self):
+        self.assertEqual(
+            _validated_iso_date("2026-10-20", field="estimated_completion"),
+            dt.date(2026, 10, 20),
+        )
+
+    def test_the_compact_form_is_rejected_though_fromisoformat_takes_it(self):
+        # date.fromisoformat accepts "20261020" on Python 3.12. Accepting it
+        # here would mean the documented format was not the only one, and an
+        # integer stringified to eight digits would sail through.
+        with self.assertRaisesMessage(ValueError, "YYYY-MM-DD"):
+            _validated_iso_date("20261020", field="estimated_completion")
+
+    def test_a_non_string_is_rejected_rather_than_stringified(self):
+        for value in (20261020, dt.date(2026, 10, 20), ["2026-10-20"]):
+            with self.subTest(value=value):
+                with self.assertRaisesMessage(ValueError, "YYYY-MM-DD"):
+                    _validated_iso_date(value, field="clarification_due")
+
+    def test_the_error_names_the_caller_s_own_argument(self):
+        with self.assertRaisesMessage(
+            ValueError,
+            "clarification_due must be an ISO date (YYYY-MM-DD).",
+        ):
+            _validated_iso_date("next Friday", field="clarification_due")

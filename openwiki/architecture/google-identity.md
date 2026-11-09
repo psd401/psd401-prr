@@ -206,7 +206,7 @@ they are application records rather than Google facts.
 |------|---------|
 | [`infra/terraform/google-identity/`](../../infra/terraform/google-identity/) | Terraform root for the Google project, APIs, service account |
 | [`infra/cdk/lib/terraform-state-stack.ts`](../../infra/cdk/lib/terraform-state-stack.ts) | S3 bucket for shared, versioned Terraform remote state |
-| `docs/google-identity-bootstrap.md` | One-time setup guide (operational document outside this wiki) |
+| Google identity bootstrap guide | One-time setup guide (operational document outside this wiki) |
 
 ## Configuration
 
@@ -243,8 +243,7 @@ no Google Admin, no AWS credentials required.
 4. **Deploy with break-glass** — Enable first admin, configure mappings, test login
 5. **Disable break-glass** — Remove password route, require Google SSO
 
-The complete guide is the operational document `docs/google-identity-bootstrap.md`, which
-is outside this wiki.
+The complete guide is an operational document outside this wiki.
 
 ## Security Properties
 
@@ -257,6 +256,3 @@ is outside this wiki.
 - **Fail closed** — Directory unavailability denies access, grants nothing
 
 Related: [Security Model](../../docs/security.md), [ADR 0001](../../docs/decisions/0001-google-workspace-identity.md)
-: [Security Model](../../docs/security.md), [ADR 0001](../../docs/decisions/0001-google-workspace-identity.md)
-ecisions/0001-google-workspace-identity.md)
-: [Security Model](../../docs/security.md), [ADR 0001](../../docs/decisions/0001-google-workspace-identity.md)

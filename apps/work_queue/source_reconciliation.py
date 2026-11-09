@@ -200,6 +200,21 @@ def reconcile_correspondence_draft_work(correspondence, *, seed_assignee=True):
     )
 
 
+def retire_deleted_correspondence_draft_work(correspondence):
+    """Exclude a draft's work before the draft row itself is deleted.
+
+    The deferred reconciliation task can no longer load a deleted source, so
+    the deleting transaction retires its projection directly.
+    """
+    return _reconcile(
+        source_type=WorkItem.SourceType.CORRESPONDENCE,
+        source_id=correspondence.pk,
+        work_kind=WorkItem.WorkKind.CORRESPONDENCE_DRAFT,
+        request=correspondence.request,
+        eligible=False,
+    )
+
+
 def reconcile_record_item_work(item, *, seed_assignee=True):
     from apps.records.models import RecordItem
 

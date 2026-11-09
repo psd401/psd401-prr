@@ -14,6 +14,22 @@ AGENT_NATIVE_PRINCIPLES = {
     "legibility": "Agent actions use the same records, actors, validation, events, and audit trail as the GUI.",
 }
 
+#: What ``mcp_tool`` means on the wire.
+#:
+#: This catalog is itself read by agents, over the MCP tool that serves it,
+#: and an agent that read ``mcp_tool: null`` as "parity promised but tool
+#: missing" is exactly what issue #12 reported. Explaining the field in the
+#: response is the fix that reaches that reader; a source comment is not.
+MCP_TOOL_FIELD_POLICY = (
+    "mcp_tool names the one MCP tool that executes this capability, for "
+    "discovery. It is not a parity promise, and null does not mean agents "
+    "are excluded: every row's agent_transport is rest, so a direct "
+    "capability with no MCP tool is executed by calling its own method and "
+    "path with an attributed personal access token. The MCP server exposes "
+    "the workflows agents drive rather than one tool per route, so most "
+    "rows name no tool."
+)
+
 AGENT_CONSTRAINT_DEFINITIONS = {
     "anonymous_write_only": (
         "The sole anonymous business operation accepts a new request and "
@@ -83,15 +99,19 @@ AGENT_CONSTRAINT_DEFINITIONS = {
         "an empty custodian list never silently widens a search."
     ),
     "no_export_or_hold": (
-        "The operation may create a Vault matter container and count operation, but no hold, export, saved query, collection task, or legal outcome."
+        "The operation may create a Vault matter container, a Gmail count operation, and, for Drive and Chat "
+        "(which Vault's count operation does not support), a count-only export that is never downloaded and is "
+        "deleted once its count is read; but no hold, collection export, saved query, collection task, record, "
+        "or legal outcome."
     ),
     "reviewed_vault_count": (
         "Collection must use the exact completed count input digest the "
         "Records Officer reviewed and confirmed."
     ),
     "targeted_hold_before_export": (
-        "Named-account Gmail collection places or reuses the targeted Vault "
-        "hold before starting the export; an all-account export is explicit "
+        "Named-account collection places or reuses the targeted Vault hold "
+        "before starting each export: Gmail always, Drive and Chat when a "
+        "person started the collection; an all-account export is explicit "
         "and does not claim an organization-wide hold."
     ),
     "append_only_audit": (
@@ -160,8 +180,10 @@ AGENT_CONSTRAINT_DEFINITIONS = {
         "substantive reason."
     ),
     "bounded_human_selection": (
-        "One confirmation applies to an explicitly selected, capped set the "
-        "reviewer could see, and never to an unbounded query or to a model's "
+        "One confirmation applies to an explicitly selected set of at most 200 "
+        "records, or -- in the staff application only -- to every record a "
+        "filter matches (at most 10,000) after the reviewer confirms the "
+        "server's exact count and digest of that set. Never to a model's "
         "proposals accepted in bulk."
     ),
     "human_legal_judgment": (
@@ -240,6 +262,25 @@ def _capability(
     mcp_tool=None,
     constraints=None,
 ):
+    """Build one catalog row.
+
+    ``execution`` is the policy: "direct" means an agent may execute this
+    with its own attributed token, "human_confirmation" that it needs an
+    explicit confirmed selection, "human_only" that a token caller gets a
+    handoff instead.
+
+    ``mcp_tool`` is a narrower claim, and the two are easy to confuse. It
+    names the one MCP tool that *executes this operation*, for discovery; it
+    is not a parity promise and ``None`` does not mean agents are shut out.
+    ``agent_transport`` is "rest" on every row, so a "direct" capability with
+    no MCP tool is reachable the same way the catalog itself says: a
+    ``POST``/``PATCH`` to ``path`` with a personal access token. The MCP
+    server stays well under psd-dev-standards standards/07-mcp.md's ~15-tool
+    ceiling by exposing the workflows an agent actually drives, not one tool
+    per REST route, so most rows name no tool and always will.
+    ``test_the_capability_catalog_names_every_executing_tool`` keeps the
+    rows that do name one from drifting.
+    """
     return {
         "id": capability_id,
         "outcome": outcome,
@@ -266,6 +307,7 @@ CAPABILITIES = (
         "GET",
         "/api/staff/capabilities/",
         ["/configuration/agent-access"],
+        mcp_tool="psd_prr_capabilities_list",
     ),
     _capability(
         "requests.submit_public",
@@ -346,10 +388,12 @@ CAPABILITIES = (
     ),
     _capability(
         "requests.list",
-        "Browse, filter, search, and prioritize the request queue.",
+        "Browse, filter, search, and prioritize the request queue. Each row "
+        "carries the stage the case is in now, which Today turns into its "
+        "one next step.",
         "GET",
         "/api/staff/requests/",
-        ["/cases"],
+        ["/today", "/cases"],
         mcp_tool="psd_prr_requests_list",
     ),
     _capability(
@@ -376,7 +420,7 @@ CAPABILITIES = (
         "Read one request with its staff-visible timeline and related work.",
         "GET",
         "/api/staff/requests/{number}/",
-        ["/requests/:number/overview", "/requests/:number/collection"],
+        ["/requests/:number/intake", "/requests/:number/collect"],
         mcp_tool="psd_prr_request_get",
     ),
     _capability(
@@ -384,7 +428,7 @@ CAPABILITIES = (
         "Assign or clear the active Records Officer accountable for one case.",
         "PATCH",
         "/api/staff/requests/{number}/",
-        ["/requests/:number/overview"],
+        ["/requests/:number/intake"],
         risk="moderate",
         constraints=[
             "accountable_human_actor",
@@ -394,15 +438,19 @@ CAPABILITIES = (
     ),
     _capability(
         "requests.workspace_summary",
-        "Read the bounded role-safe case header and canonical next-action projection.",
+        "Read the bounded role-safe case header, canonical next-action projection, "
+        "and stage rail.",
         "GET",
         "/api/staff/requests/{number}/workspace-summary/",
         [
-            "/requests/:number/overview",
+            "/requests/:number/intake",
+            "/requests/:number/scope",
+            "/requests/:number/collect",
+            "/requests/:number/review",
+            "/requests/:number/redact",
+            "/requests/:number/release",
+            "/requests/:number/close",
             "/requests/:number/messages",
-            "/requests/:number/collection",
-            "/requests/:number/records",
-            "/requests/:number/releases",
             "/requests/:number/activity",
         ],
     ),
@@ -418,14 +466,14 @@ CAPABILITIES = (
         "Read case closure blocker counts without applying a legal or transport outcome.",
         "GET",
         "/api/staff/requests/{number}/closure-readiness/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/close"],
     ),
     _capability(
         "requests.advisory_intent.read",
         "Read the latest bounded request-intent proposal and its provenance.",
         "GET",
         "/api/staff/requests/{number}/advisory-intent/",
-        ["/requests/:number/collection"],
+        ["/requests/:number/scope"],
         constraints=["advisory_only"],
     ),
     _capability(
@@ -433,7 +481,7 @@ CAPABILITIES = (
         "Queue a disabled-by-default model proposal for search terms, systems, and clarification questions.",
         "POST",
         "/api/staff/requests/{number}/advisory-intent/",
-        ["/requests/:number/collection"],
+        ["/requests/:number/scope"],
         risk="high",
         constraints=[
             "accountable_human_actor",
@@ -446,19 +494,112 @@ CAPABILITIES = (
         ],
     ),
     _capability(
+        "requests.estimate_letter.read",
+        "Read the system-prepared interpretation-and-estimate letter awaiting "
+        "approval, with the computed estimate it states. Sending it is "
+        "correspondence.approve_and_send, by a Records Officer.",
+        "GET",
+        "/api/staff/requests/{number}/estimate-letter/",
+        ["/requests/:number/intake"],
+        constraints=["records_officer_authority"],
+    ),
+    _capability(
+        "requests.advisory_intake.read",
+        "Read the latest suggested intake label (new, follow-up, duplicate, "
+        "related, non-request, spam) and whether an officer answered it.",
+        "GET",
+        "/api/staff/requests/{number}/advisory-intake/",
+        ["/requests/:number/intake"],
+        constraints=["advisory_only"],
+    ),
+    _capability(
+        "requests.advisory_intake.request",
+        "Queue a model's suggested intake label for this case; it merges, "
+        "closes, and sends nothing.",
+        "POST",
+        "/api/staff/requests/{number}/advisory-intake/",
+        ["/requests/:number/intake"],
+        risk="high",
+        constraints=[
+            "accountable_human_actor",
+            "approved_ai_provider",
+            "prompt_injection_resistant",
+            "advisory_only",
+            "external_side_effects",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
+        "requests.advisory_intake.feedback",
+        "Record whether the officer confirmed or dismissed the suggested "
+        "intake label, and what they judged it to be.",
+        "POST",
+        "/api/staff/requests/{number}/advisory-intake/feedback/",
+        ["/requests/:number/intake", "/inbox"],
+        execution="human_confirmation",
+        risk="moderate",
+        constraints=["accountable_human_actor", "append_only_audit"],
+    ),
+    _capability(
+        "requests.scoping.read",
+        "Read the latest iterative scoping session: each proposed query, its "
+        "Vault count total and busiest custodian accounts, the agent's "
+        "reason for each change, and the final proposed scope.",
+        "GET",
+        "/api/staff/requests/{number}/scoping/",
+        ["/requests/:number/scope"],
+        constraints=["records_officer_authority"],
+    ),
+    _capability(
+        "requests.scoping.rerun",
+        "Run iterative scoping again from the latest intent proposal, with a "
+        "stated reason, even when nothing changed. Counts only: no hold, "
+        "export, or status change.",
+        "POST",
+        "/api/staff/requests/{number}/scoping/",
+        ["/requests/:number/scope"],
+        execution="human_confirmation",
+        risk="moderate",
+        constraints=[
+            "accountable_human_actor",
+            "records_officer_authority",
+            "no_export_or_hold",
+            "external_side_effects",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
+        "requests.rescope",
+        "Collect a newly approved scope and supersede the previous finished "
+        "Vault collection's unreviewed records, with the officer's reason.",
+        "POST",
+        "/api/staff/requests/{number}/rescope/",
+        ["/requests/:number/scope"],
+        execution="human_confirmation",
+        risk="high",
+        constraints=[
+            "accountable_human_actor",
+            "records_officer_authority",
+            "reviewed_vault_count",
+            "substantive_reason",
+            "external_side_effects",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
         "requests.vault_counts.read",
-        "Read the latest human-scoped Google Vault Gmail count and its provenance.",
+        "Read the latest human-scoped Google Vault count, with a total per source (Gmail, Drive, Chat) and overall, and its provenance.",
         "GET",
         "/api/staff/requests/{number}/vault-counts/",
-        ["/requests/:number/collection"],
+        ["/requests/:number/scope"],
         constraints=["records_officer_authority", "append_only_audit"],
     ),
     _capability(
         "requests.vault_counts.request",
-        "Count possible Gmail messages for human-approved terms, an explicit district-account scope, and dates without exporting or applying a workflow outcome.",
+        "Count possible Gmail messages, Drive files, and Chat messages for human-approved terms, an explicit district-account scope, and dates without collecting or applying a workflow outcome.",
         "POST",
         "/api/staff/requests/{number}/vault-counts/",
-        ["/requests/:number/collection"],
+        ["/requests/:number/scope"],
         execution="human_confirmation",
         risk="moderate",
         constraints=[
@@ -473,10 +614,10 @@ CAPABILITIES = (
     ),
     _capability(
         "requests.vault_collection.start",
-        "Create a durable Vault Gmail collection task from the exact reviewed count, then hold named custodians and export into the review queue.",
+        "Create durable Vault collection tasks (one each for Gmail, Drive, and Chat) from the exact reviewed count, then hold named custodians and export into the review queue.",
         "POST",
         "/api/staff/requests/{number}/vault-collection/",
-        ["/requests/:number/collection"],
+        ["/requests/:number/scope"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -497,7 +638,7 @@ CAPABILITIES = (
         "SHA-256, and retained immutably, with a per-file outcome.",
         "POST",
         "/api/staff/requests/{number}/record-uploads/",
-        ["/requests/:number/records"],
+        ["/requests/:number/collect"],
         risk="moderate",
         constraints=[
             "accountable_human_actor",
@@ -514,7 +655,7 @@ CAPABILITIES = (
         "communication-driven denial is excluded.",
         "POST",
         "/api/staff/requests/{number}/transition/",
-        ["/requests/:number/overview"],
+        ["/requests/:number/intake", "/requests/:number/close"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -531,7 +672,7 @@ CAPABILITIES = (
         "inventing a response.",
         "POST",
         "/api/staff/requests/{number}/close/",
-        ["/requests/:number/overview"],
+        ["/requests/:number/intake", "/requests/:number/close"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -549,7 +690,7 @@ CAPABILITIES = (
         "and audit trail.",
         "POST",
         "/api/staff/requests/{number}/close-non-request/",
-        ["/inbox", "/requests/:number/overview"],
+        ["/inbox", "/requests/:number/intake", "/requests/:number/close"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -567,7 +708,7 @@ CAPABILITIES = (
         "timeline.",
         "POST",
         "/api/staff/requests/{number}/reopen/",
-        ["/requests/:number/overview"],
+        ["/requests/:number/intake", "/requests/:number/close"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -587,7 +728,7 @@ CAPABILITIES = (
         "date and statutory deadline.",
         "POST",
         "/api/staff/requests/{number}/merge/",
-        ["/requests/:number/overview"],
+        ["/requests/:number/intake", "/requests/:number/close"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -644,7 +785,7 @@ CAPABILITIES = (
         "record to that person.",
         "POST",
         "/api/staff/requests/{number}/ferpa-identity-verification/",
-        ["/requests/:number/overview"],
+        ["/requests/:number/intake"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -664,7 +805,7 @@ CAPABILITIES = (
         "can be found. Sends nothing and starts no clock.",
         "POST",
         "/api/staff/requests/{number}/external-initial-response/",
-        ["/requests/:number/overview"],
+        ["/requests/:number/intake"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -680,7 +821,7 @@ CAPABILITIES = (
         "Obtain a short-lived download for a malware-scanned intake attachment.",
         "POST",
         "/api/staff/intake-attachments/{id}/download/",
-        ["/requests/:number/overview"],
+        ["/requests/:number/intake"],
         risk="moderate",
         constraints=["malware_scanned"],
     ),
@@ -689,7 +830,7 @@ CAPABILITIES = (
         "Browse and filter collection assignments.",
         "GET",
         "/api/staff/collection-tasks/",
-        ["/requests/:number/collection"],
+        ["/requests/:number/scope", "/requests/:number/collect"],
         mcp_tool="psd_prr_collection_tasks_list",
     ),
     _capability(
@@ -697,14 +838,14 @@ CAPABILITIES = (
         "Open the exact authorized collection assignment linked from work.",
         "GET",
         "/api/staff/collection-tasks/{id}/",
-        ["/requests/:number/collection"],
+        ["/requests/:number/collect"],
     ),
     _capability(
         "collection_tasks.create",
         "Create and assign a manual department search task for one request.",
         "POST",
         "/api/staff/collection-tasks/",
-        ["/requests/:number/collection"],
+        ["/requests/:number/collect"],
         execution="human_confirmation",
         risk="moderate",
         constraints=[
@@ -718,9 +859,9 @@ CAPABILITIES = (
         "GET",
         "/api/staff/staff-users/",
         [
-            "/requests/:number/overview",
+            "/requests/:number/intake",
             "/requests/:number/messages",
-            "/requests/:number/collection",
+            "/requests/:number/collect",
         ],
     ),
     _capability(
@@ -728,23 +869,39 @@ CAPABILITIES = (
         "Update task state, due date, or assignee.",
         "PATCH",
         "/api/staff/collection-tasks/{id}/",
-        ["/requests/:number/collection"],
+        ["/requests/:number/collect"],
         execution="human_confirmation",
         risk="moderate",
+    ),
+    _capability(
+        "collection_tasks.supersede",
+        "Take one collection's unreviewed records out of review, keeping "
+        "every record as evidence.",
+        "POST",
+        "/api/staff/collection-tasks/{id}/supersede/",
+        ["/requests/:number/collect"],
+        execution="human_confirmation",
+        risk="high",
+        constraints=[
+            "records_officer_authority",
+            "substantive_reason",
+            "explicit_confirmation",
+            "append_only_audit",
+        ],
     ),
     _capability(
         "preservations.list",
         "Browse camera-footage preservations and holds.",
         "GET",
         "/api/staff/preservations/",
-        ["/requests/:number/collection"],
+        ["/requests/:number/collect"],
     ),
     _capability(
         "preservations.exclude_camera",
         "Exclude one camera from an active preservation hold.",
         "POST",
         "/api/staff/preservations/{id}/exclude-camera/",
-        ["/requests/:number/collection"],
+        ["/requests/:number/collect"],
         execution="human_only",
         risk="high",
         constraints=[
@@ -758,7 +915,11 @@ CAPABILITIES = (
         "Browse and filter the district record-system registry.",
         "GET",
         "/api/staff/record-systems/",
-        ["/configuration/registry", "/requests/:number/collection"],
+        [
+            "/configuration/registry",
+            "/configuration/knowledge",
+            "/requests/:number/collect",
+        ],
         mcp_tool="psd_prr_record_systems_list",
     ),
     _capability(
@@ -854,7 +1015,8 @@ CAPABILITIES = (
         [
             "/configuration/exemptions",
             "/requests/:number/messages",
-            "/requests/:number/records",
+            "/requests/:number/redact",
+            "/requests/:number/review",
         ],
         mcp_tool="psd_prr_exemptions_list",
     ),
@@ -921,14 +1083,15 @@ CAPABILITIES = (
         "Browse and filter the processed-record inventory.",
         "GET",
         "/api/staff/record-items/",
-        ["/requests/:number/records", "/requests/:number/releases"],
+        ["/requests/:number/review", "/requests/:number/redact", "/requests/:number/release"],
+        mcp_tool="psd_prr_record_items_list",
     ),
     _capability(
         "record_items.retrieve",
         "Open the exact authorized processed record linked from review work.",
         "GET",
         "/api/staff/record-items/{id}/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review"],
     ),
     _capability(
         "record_items.facets",
@@ -936,20 +1099,205 @@ CAPABILITIES = (
         "state, and advisory suggestion for the current filter.",
         "GET",
         "/api/staff/record-items/facets/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review"],
+    ),
+    _capability(
+        "redaction_batches.groups",
+        "Read a case's pending redaction proposals grouped by exemption and "
+        "pattern, the redaction trust mode, and how many records carry "
+        "active redactions.",
+        "GET",
+        "/api/staff/redaction-batches/groups/",
+        ["/requests/:number/redact"],
+    ),
+    _capability(
+        "redaction_batches.create",
+        "Open a group of pending redaction proposals (one exemption and "
+        "pattern on one case) and draw a random sample for the reviewer. "
+        "Opening accepts nothing.",
+        "POST",
+        "/api/staff/redaction-batches/",
+        ["/requests/:number/redact"],
+        risk="low",
+    ),
+    _capability(
+        "redaction_batches.decide",
+        "Record the reviewer's accept or reject of every sampled proposal; "
+        "accept the rest of the group, each as its own exemption-backed "
+        "redaction, only if every sampled proposal was accepted.",
+        "POST",
+        "/api/staff/redaction-batches/{id}/decide/",
+        ["/requests/:number/redact"],
+        execution="human_only",
+        risk="high",
+        constraints=[
+            "human_legal_judgment",
+            "exemption_citation_required",
+            "interactive_staff_session",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
+        "redaction_batches.build",
+        "Build the immutable redacted PDF for every responsive record on a "
+        "case whose redactions are approved, skipping any still awaiting a "
+        "required second review.",
+        "POST",
+        "/api/staff/redaction-batches/build/",
+        ["/requests/:number/redact"],
+        execution="human_only",
+        risk="high",
+        constraints=[
+            "distinct_second_reviewer",
+            "integrity_verified",
+            "immutable_artifact",
+            "rasterized_burn_in",
+            "interactive_staff_session",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
+        "review_batches.policy",
+        "Read the trust-ladder policy for responsiveness (suggest, batch, or "
+        "auto per outcome; sample sizes; the discard confidence floor) and "
+        "how many records a case has staged as Ready to discard.",
+        "GET",
+        "/api/staff/review-batches/policy/",
+        ["/requests/:number/review"],
+    ),
+    _capability(
+        "decision_batches.list",
+        "List decision batches an agent or person proposed, by state and case.",
+        "GET",
+        "/api/staff/decision-batches/",
+        ["/decisions"],
+        mcp_tool="psd_prr_decision_batch_get",
+    ),
+    _capability(
+        "decision_batches.retrieve",
+        "Read one decision batch: its items, evidence, and decision.",
+        "GET",
+        "/api/staff/decision-batches/{id}/",
+        [],
+    ),
+    _capability(
+        "decision_batches.propose",
+        "Propose a batch of decisions (review, supersede, scope-and-collect, "
+        "redaction group, intake label) with its evidence for a person to "
+        "approve. Records the proposal only; nothing else changes.",
+        "POST",
+        "/api/staff/decision-batches/",
+        [],
+        risk="low",
+        mcp_tool="psd_prr_decision_batch_propose",
+        constraints=["append_only_audit", "accountable_human_actor"],
+    ),
+    _capability(
+        "decision_batches.approve",
+        "Approve a proposed decision batch; runs the same service the staff "
+        "UI runs for that outcome, as the approving person.",
+        "POST",
+        "/api/staff/decision-batches/{id}/approve/",
+        ["/decisions"],
+        execution="human_only",
+        risk="high",
+        constraints=["append_only_audit", "interactive_staff_session", "accountable_human_actor"],
+    ),
+    _capability(
+        "decision_batches.reject",
+        "Reject a proposed decision batch with a reason; nothing else changes.",
+        "POST",
+        "/api/staff/decision-batches/{id}/reject/",
+        ["/decisions"],
+        execution="human_only",
+        risk="moderate",
+        constraints=["append_only_audit", "interactive_staff_session"],
+    ),
+    _capability(
+        "review_batches.create",
+        "Open a cluster batch: one proposed responsiveness outcome over a "
+        "cluster's unreviewed records, with a random sample drawn for the "
+        "reviewer to judge. Opening decides nothing.",
+        "POST",
+        "/api/staff/review-batches/",
+        ["/requests/:number/review"],
+        risk="low",
+    ),
+    _capability(
+        "review_batches.discard",
+        "Open the Ready to discard batch of records the AI calls "
+        "non-responsive above the auto floor, with a random elusion sample. "
+        "Opening decides nothing.",
+        "POST",
+        "/api/staff/review-batches/discard/",
+        ["/requests/:number/review"],
+        risk="low",
+    ),
+    _capability(
+        "review_batches.decide",
+        "Record the reviewer's judgment of every sampled record; apply the "
+        "batch's outcome to the rest only if every judgment agrees, "
+        "otherwise block it and leave the rest for per-record review.",
+        "POST",
+        "/api/staff/review-batches/{id}/decide/",
+        ["/requests/:number/review"],
+        execution="human_only",
+        risk="high",
+        constraints=[
+            "human_legal_judgment",
+            "interactive_staff_session",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
+        "record_items.undo_review",
+        "Undo the caller's own latest review decision on one record, back to "
+        "unreviewed or the earlier responsive, non-responsive, or duplicate "
+        "decision. Never undoes a withholding or a record with active "
+        "redactions.",
+        "POST",
+        "/api/staff/record-items/{id}/undo-review/",
+        ["/requests/:number/review"],
+        execution="human_confirmation",
+        risk="moderate",
+        constraints=[
+            "accountable_human_actor",
+            "human_legal_judgment",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
+        "record_items.clusters",
+        "Group the filtered records into clusters -- email thread, sender or "
+        "mailing list, tag, or AI label and confidence band -- with each "
+        "cluster's size, sample records, and majority AI suggestion.",
+        "GET",
+        "/api/staff/record-items/clusters/",
+        ["/requests/:number/review"],
+        mcp_tool="psd_prr_record_clusters_list",
+    ),
+    _capability(
+        "record_items.bulk_selection",
+        "Preview exactly which records one filter decision would change, "
+        "with the count and digest a confirmation must send back.",
+        "GET",
+        "/api/staff/record-items/bulk-selection/",
+        ["/requests/:number/review"],
     ),
     _capability(
         "record_items.bulk_review",
         "Record one named human responsiveness decision across a selected, "
-        "visible set of records.",
+        "visible set of records, or every record a filter matches after the "
+        "reviewer confirms the exact count.",
         "POST",
         "/api/staff/record-items/bulk-review/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review"],
         execution="human_confirmation",
         risk="high",
         constraints=[
             "human_legal_judgment",
             "bounded_human_selection",
+            "interactive_staff_session",
             "append_only_audit",
         ],
     ),
@@ -958,7 +1306,7 @@ CAPABILITIES = (
         "Read the latest bounded responsiveness proposal and its provenance.",
         "GET",
         "/api/staff/record-items/{id}/advisory-responsiveness/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review"],
         constraints=["advisory_only"],
     ),
     _capability(
@@ -966,7 +1314,7 @@ CAPABILITIES = (
         "Queue a model suggestion of responsive, non-responsive, or uncertain without applying review state.",
         "POST",
         "/api/staff/record-items/{id}/advisory-responsiveness/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review"],
         risk="high",
         constraints=[
             "accountable_human_actor",
@@ -983,7 +1331,7 @@ CAPABILITIES = (
         "Read the latest coordinate-grounded AI redaction candidates and their named human dispositions.",
         "GET",
         "/api/staff/record-items/{id}/advisory-redactions/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         constraints=["advisory_only", "integrity_verified"],
     ),
     _capability(
@@ -991,7 +1339,7 @@ CAPABILITIES = (
         "Queue a verified-PDF Bedrock pass that proposes bounded source spans and active exemption citations without creating redactions.",
         "POST",
         "/api/staff/record-items/{id}/advisory-redactions/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review"],
         risk="high",
         constraints=[
             "accountable_human_actor",
@@ -1009,7 +1357,7 @@ CAPABILITIES = (
         "Accept one human-edited AI candidate through the normal exemption-backed redaction service.",
         "POST",
         "/api/staff/redaction-proposals/{id}/accept/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1024,7 +1372,7 @@ CAPABILITIES = (
         "Reject one AI candidate with a substantive named human reason and no legal effect.",
         "POST",
         "/api/staff/redaction-proposals/{id}/reject/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1039,7 +1387,7 @@ CAPABILITIES = (
         "Render one non-PDF record into the reviewable PDF the preview and redaction burn-in require, leaving the original record untouched.",
         "POST",
         "/api/staff/record-items/{id}/build-derivative/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         risk="moderate",
         constraints=[
             "append_only_audit",
@@ -1050,7 +1398,7 @@ CAPABILITIES = (
         "Burn every marked interval into a released copy of an audio or video record by re-encoding, retaining the original and a manifest of exactly what was applied.",
         "POST",
         "/api/staff/record-items/{id}/render-media-redactions/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1065,7 +1413,7 @@ CAPABILITIES = (
         "Record a named human decision, with stated basis and reasoning, for a record no available renderer can open.",
         "POST",
         "/api/staff/record-items/{id}/opaque-disposition/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1080,7 +1428,7 @@ CAPABILITIES = (
         "Stream one audio or video record to the staff reviewer under the same role check and no-store headers as a page raster.",
         "GET",
         "/api/staff/record-items/{id}/stream/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         risk="read",
     ),
     _capability(
@@ -1088,7 +1436,7 @@ CAPABILITIES = (
         "List the timed withholdings marked on audio and video records.",
         "GET",
         "/api/staff/media-redactions/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         risk="read",
     ),
     _capability(
@@ -1096,7 +1444,7 @@ CAPABILITIES = (
         "Mark one interval of an audio or video record for withholding, with the exemption citation the log is built from.",
         "POST",
         "/api/staff/media-redactions/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1111,7 +1459,7 @@ CAPABILITIES = (
         "Inspect verified PDF page-count metadata without exposing an object-store URL.",
         "GET",
         "/api/staff/record-items/{id}/preview-metadata/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         constraints=["integrity_verified", "append_only_audit"],
     ),
     _capability(
@@ -1119,15 +1467,24 @@ CAPABILITIES = (
         "Render one verified candidate-record page as a no-store raster preview.",
         "GET",
         "/api/staff/record-items/{id}/preview-page/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         constraints=["integrity_verified", "append_only_audit"],
+    ),
+    _capability(
+        "record_items.read_text",
+        "Read one candidate record's extracted text with email markup removed, "
+        "for review. Audited like a page preview; the stored text is unchanged.",
+        "GET",
+        "/api/staff/record-items/{id}/text/",
+        ["/requests/:number/review"],
+        constraints=["append_only_audit"],
     ),
     _capability(
         "record_items.review",
         "Record a named human responsiveness or full-withholding decision.",
         "POST",
         "/api/staff/record-items/{id}/review/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1141,14 +1498,14 @@ CAPABILITIES = (
         "Read exemption-backed normalized redaction regions for one record.",
         "GET",
         "/api/staff/redactions/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
     ),
     _capability(
         "redactions.create",
         "Add one normalized redaction region after human review.",
         "POST",
         "/api/staff/redactions/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1162,7 +1519,7 @@ CAPABILITIES = (
         "Void a mistaken redaction while retaining its row, reason, and audit evidence.",
         "POST",
         "/api/staff/redactions/{id}/void/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=["substantive_reason", "append_only_audit"],
@@ -1172,7 +1529,7 @@ CAPABILITIES = (
         "Approve a heightened-risk review as a distinct named reviewer.",
         "POST",
         "/api/staff/record-items/{id}/second-review/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1186,7 +1543,7 @@ CAPABILITIES = (
         "Build one immutable image-only PDF from the approved redaction plan.",
         "POST",
         "/api/staff/record-items/{id}/render-redactions/",
-        ["/requests/:number/records"],
+        ["/requests/:number/review", "/requests/:number/redact"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1203,7 +1560,7 @@ CAPABILITIES = (
         "Review immutable district fee schedules and identify the currently effective adopted snapshot.",
         "GET",
         "/api/staff/fee-schedules/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
     ),
     _capability(
         "jlarc_reports.retrieve",
@@ -1240,7 +1597,7 @@ CAPABILITIES = (
         "Append the voluntarily known requester type, fulfillment format, scanning fact, and statutory request-log descriptions for one request.",
         "POST",
         "/api/staff/requests/{number}/jlarc-classification/",
-        ["/oversight/reporting", "/requests/:number/overview"],
+        ["/oversight/reporting", "/requests/:number/intake"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1255,7 +1612,7 @@ CAPABILITIES = (
         "Activate an immutable fee schedule after recording counsel approval and formal district adoption references.",
         "POST",
         "/api/staff/fee-schedules/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1272,14 +1629,14 @@ CAPABILITIES = (
         "Review the adopted amounts below which an assessment prompts a waiver, and which one is currently effective.",
         "GET",
         "/api/staff/fee-waiver-floors/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
     ),
     _capability(
         "fee_waiver_floors.activate",
         "Adopt, with a counsel reference, the amount below which an officer is prompted to waive a fee. It waives nothing on its own.",
         "POST",
         "/api/staff/fee-waiver-floors/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1294,14 +1651,14 @@ CAPABILITIES = (
         "Review the RCW 42.56.120(2) deposits holding collection or production on a case, and whether each is open, paid, or lifted.",
         "GET",
         "/api/staff/fee-deposit-gates/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
     ),
     _capability(
         "fee_deposit_gates.apply",
         "Hold collection or production on one case until the requester pays a deposit of no more than ten percent of the estimated charge.",
         "POST",
         "/api/staff/fee-deposit-gates/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1316,7 +1673,7 @@ CAPABILITIES = (
         "Record the deposit receipt that releases the held collection or production work on one case.",
         "POST",
         "/api/staff/fee-deposit-gates/{id}/record-payment/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1330,7 +1687,7 @@ CAPABILITIES = (
         "Release work the District was holding for an unpaid deposit, on a named officer's written reason.",
         "POST",
         "/api/staff/fee-deposit-gates/{id}/lift/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_only",
         risk="high",
         constraints=[
@@ -1346,14 +1703,14 @@ CAPABILITIES = (
         "Browse installment fees, payment state, and releases.",
         "GET",
         "/api/staff/installments/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
     ),
     _capability(
         "installments.create",
         "Open the next installment for one request from explicitly selected, release-ready record items.",
         "POST",
         "/api/staff/installments/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1367,7 +1724,7 @@ CAPABILITIES = (
         "Replace one open installment's record membership before any package is prepared.",
         "POST",
         "/api/staff/installments/{id}/set-items/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1382,7 +1739,7 @@ CAPABILITIES = (
         "Calculate or revise one installment fee under the current adopted schedule while retaining every prior assessment.",
         "POST",
         "/api/staff/installments/{id}/assess-fee/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1398,7 +1755,7 @@ CAPABILITIES = (
         "Record one attributable district receipt against the current installment fee assessment.",
         "POST",
         "/api/staff/installments/{id}/record-payment/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1412,7 +1769,7 @@ CAPABILITIES = (
         "Build one immutable, verified requester installment package.",
         "POST",
         "/api/staff/installments/{id}/prepare/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1423,11 +1780,29 @@ CAPABILITIES = (
         ],
     ),
     _capability(
+        "installments.build_package",
+        "Build the next release package in one action: open an installment "
+        "from every release-ready record, generate its exemption log when "
+        "needed, and prepare the package. Never releases or sends.",
+        "POST",
+        "/api/staff/requests/{number}/release-package/",
+        ["/requests/:number/release"],
+        execution="human_confirmation",
+        risk="high",
+        constraints=[
+            "records_officer_authority",
+            "exemption_citation_required",
+            "integrity_verified",
+            "immutable_artifact",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
         "installments.generate_exemption_log",
         "Generate one immutable RCW 42.56.210(3) exemption and withholding log from approved review evidence.",
         "POST",
         "/api/staff/installments/{id}/generate-exemption-log/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1464,7 +1839,7 @@ CAPABILITIES = (
         "Release one verified package and deliver its requester notice as a single accountable Records Officer action.",
         "POST",
         "/api/staff/installments/{id}/release-and-send/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_only",
         risk="high",
         constraints=[
@@ -1482,7 +1857,7 @@ CAPABILITIES = (
         "Withdraw the requester's access to one released package with a recorded reason, leaving the artifact and audit trail intact.",
         "POST",
         "/api/staff/installments/{id}/revoke/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_only",
         risk="high",
         constraints=[
@@ -1497,7 +1872,7 @@ CAPABILITIES = (
         "Require a separately communicated access code on one installment's requester download.",
         "POST",
         "/api/staff/installments/{id}/set-access-code/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1510,7 +1885,7 @@ CAPABILITIES = (
         "Remove the access code from one installment's requester download.",
         "POST",
         "/api/staff/installments/{id}/clear-access-code/",
-        ["/requests/:number/releases"],
+        ["/requests/:number/release"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -1523,14 +1898,14 @@ CAPABILITIES = (
         "Browse staff time logged against requests.",
         "GET",
         "/api/staff/time-entries/",
-        ["/requests/:number/overview"],
+        ["/requests/:number/intake"],
     ),
     _capability(
         "time_entries.create",
         "Log time against a request as the authenticated staff actor.",
         "POST",
         "/api/staff/time-entries/",
-        ["/requests/:number/overview"],
+        ["/requests/:number/intake"],
         execution="human_confirmation",
         risk="moderate",
     ),
@@ -1539,7 +1914,7 @@ CAPABILITIES = (
         "Delete a time entry.",
         "DELETE",
         "/api/staff/time-entries/{id}/",
-        ["/requests/:number/overview"],
+        ["/requests/:number/intake"],
         execution="human_confirmation",
         risk="high",
         constraints=["destructive"],
@@ -1582,6 +1957,120 @@ CAPABILITIES = (
         execution="human_confirmation",
         risk="moderate",
         constraints=["destructive", "append_only_audit"],
+    ),
+    _capability(
+        "knowledge.role_accounts.list",
+        "Browse which district account held each named role (a school's principal, the HR director) and between which dates, as the intent advisory reads it.",
+        "GET",
+        "/api/staff/knowledge/role-accounts/",
+        ["/configuration/knowledge"],
+        constraints=["records_officer_authority"],
+    ),
+    _capability(
+        "knowledge.role_accounts.create",
+        "Record which district account held a named role, with an optional date range, for the intent advisory to scope searches by.",
+        "POST",
+        "/api/staff/knowledge/role-accounts/",
+        ["/configuration/knowledge"],
+        execution="human_confirmation",
+        risk="low",
+        constraints=["records_officer_authority", "append_only_audit"],
+    ),
+    _capability(
+        "knowledge.role_accounts.update",
+        "Correct a role account mapping or its date range.",
+        "PATCH",
+        "/api/staff/knowledge/role-accounts/{id}/",
+        ["/configuration/knowledge"],
+        execution="human_confirmation",
+        risk="low",
+        constraints=["records_officer_authority", "append_only_audit"],
+    ),
+    _capability(
+        "knowledge.role_accounts.delete",
+        "Delete a role account mapping from the knowledge pack.",
+        "DELETE",
+        "/api/staff/knowledge/role-accounts/{id}/",
+        ["/configuration/knowledge"],
+        execution="human_confirmation",
+        risk="low",
+        constraints=["records_officer_authority", "destructive", "append_only_audit"],
+    ),
+    _capability(
+        "knowledge.noise_senders.list",
+        "Browse the sender domains, addresses, and mailing lists the intent advisory is told are district mass mail.",
+        "GET",
+        "/api/staff/knowledge/noise-senders/",
+        ["/configuration/knowledge"],
+        constraints=["records_officer_authority"],
+    ),
+    _capability(
+        "knowledge.noise_senders.create",
+        "Add a sender domain, address, or mailing list that responsive searches almost never want.",
+        "POST",
+        "/api/staff/knowledge/noise-senders/",
+        ["/configuration/knowledge"],
+        execution="human_confirmation",
+        risk="low",
+        constraints=["records_officer_authority", "append_only_audit"],
+    ),
+    _capability(
+        "knowledge.noise_senders.update",
+        "Correct or deactivate a noise sender entry.",
+        "PATCH",
+        "/api/staff/knowledge/noise-senders/{id}/",
+        ["/configuration/knowledge"],
+        execution="human_confirmation",
+        risk="low",
+        constraints=["records_officer_authority", "append_only_audit"],
+    ),
+    _capability(
+        "knowledge.noise_senders.delete",
+        "Delete a noise sender entry from the knowledge pack.",
+        "DELETE",
+        "/api/staff/knowledge/noise-senders/{id}/",
+        ["/configuration/knowledge"],
+        execution="human_confirmation",
+        risk="low",
+        constraints=["records_officer_authority", "destructive", "append_only_audit"],
+    ),
+    _capability(
+        "knowledge.system_notes.list",
+        "Browse the Records Officer's per-system search notes the intent advisory reads alongside the registry.",
+        "GET",
+        "/api/staff/knowledge/system-notes/",
+        ["/configuration/knowledge"],
+        constraints=["records_officer_authority"],
+    ),
+    _capability(
+        "knowledge.system_notes.create",
+        "Write search notes for one registry system; one note per system.",
+        "POST",
+        "/api/staff/knowledge/system-notes/",
+        ["/configuration/knowledge"],
+        execution="human_confirmation",
+        risk="low",
+        constraints=["records_officer_authority", "append_only_audit"],
+    ),
+    _capability(
+        "knowledge.system_notes.update",
+        "Correct a system's search notes.",
+        "PATCH",
+        "/api/staff/knowledge/system-notes/{id}/",
+        ["/configuration/knowledge"],
+        execution="human_confirmation",
+        risk="low",
+        constraints=["records_officer_authority", "append_only_audit"],
+    ),
+    _capability(
+        "knowledge.system_notes.delete",
+        "Delete a system's search notes.",
+        "DELETE",
+        "/api/staff/knowledge/system-notes/{id}/",
+        ["/configuration/knowledge"],
+        execution="human_confirmation",
+        risk="low",
+        constraints=["records_officer_authority", "destructive", "append_only_audit"],
     ),
     _capability(
         "app_settings.list",
@@ -1836,6 +2325,7 @@ CAPABILITIES = (
         "/api/staff/correspondence/drafts/acknowledgment/",
         ["/requests/:number/messages"],
         risk="moderate",
+        mcp_tool="psd_prr_acknowledgment_draft",
     ),
     _capability(
         "correspondence.draft_clarification",
@@ -1844,6 +2334,7 @@ CAPABILITIES = (
         "/api/staff/correspondence/drafts/clarification/",
         ["/requests/:number/messages"],
         risk="moderate",
+        mcp_tool="psd_prr_clarification_letter_draft",
     ),
     _capability(
         "correspondence.draft_estimate_revision",
@@ -2061,6 +2552,17 @@ CAPABILITIES = (
         risk="moderate",
     ),
     _capability(
+        "correspondence.delete_draft",
+        "Delete a never-approved draft with optimistic concurrency; "
+        "approved correspondence and drafts linked to other case evidence "
+        "are refused.",
+        "POST",
+        "/api/staff/correspondence/{id}/delete/",
+        ["/requests/:number/messages"],
+        execution="human_confirmation",
+        risk="moderate",
+    ),
+    _capability(
         "correspondence.preview",
         "Preview the exact recipient-visible content produced by delivery rendering.",
         "GET",
@@ -2104,7 +2606,7 @@ CAPABILITIES = (
         "Approve a draft and hand it to delivery in one accountable action.",
         "POST",
         "/api/staff/correspondence/{id}/approve-and-send/",
-        ["/requests/:number/messages"],
+        ["/requests/:number/messages", "/requests/:number/intake"],
         execution="human_only",
         risk="high",
         constraints=[
@@ -2198,7 +2700,7 @@ CAPABILITIES = (
         "request; nothing is deleted and no requester message is sent.",
         "POST",
         "/api/staff/inbound-correspondence-receipts/{id}/redirect/",
-        ["/inbox", "/requests/:number/overview"],
+        ["/inbox", "/requests/:number/intake"],
         execution="human_only",
         risk="high",
         constraints=[
@@ -2379,6 +2881,25 @@ CAPABILITIES = (
         ["/oversight/audit"],
         mcp_tool="psd_prr_audit_log_search",
     ),
+    _capability(
+        "advisory_evaluations.list",
+        "Read model-comparison evaluation runs: accuracy, safety recall, "
+        "cost, and latency per candidate model on labelled past decisions.",
+        "GET",
+        "/api/staff/advisory-evaluations/",
+        ["/oversight/ai-evaluation"],
+        constraints=["records_officer_authority"],
+    ),
+    _capability(
+        "advisory_agreement.list",
+        "Read how often the AI's responsiveness suggestion matched the human "
+        "review decision, by label and confidence band, district-wide or for "
+        "one case.",
+        "GET",
+        "/api/staff/advisory-agreement/",
+        ["/oversight/ai-agreement"],
+        constraints=["records_officer_authority"],
+    ),
 )
 
 
@@ -2394,6 +2915,7 @@ def capability_catalog():
             "human_only": "Agent must hand off; the accountable human executes this action in the staff UI.",
         },
         "constraint_definitions": deepcopy(AGENT_CONSTRAINT_DEFINITIONS),
+        "mcp_tool_policy": MCP_TOOL_FIELD_POLICY,
         "capabilities": deepcopy(list(CAPABILITIES)),
     }
 
@@ -2418,6 +2940,7 @@ class AgentCapabilityCatalogSerializer(serializers.Serializer):
     principles = serializers.DictField(child=serializers.CharField())
     policy = serializers.DictField(child=serializers.CharField())
     constraint_definitions = serializers.DictField(child=serializers.CharField())
+    mcp_tool_policy = serializers.CharField()
     capabilities = AgentCapabilitySerializer(many=True)
 
 

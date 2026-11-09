@@ -1,5 +1,7 @@
 # ABOUTME: Staff API tests for the collection-task resource — search
 # ABOUTME: assignments (manual or Vault-backed) attached to a PRA request.
+import hashlib
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
@@ -8,6 +10,7 @@ from apps.api.identity import StaffRole, apply_staff_roles
 from apps.records.models import (
     CollectionTask,
     PublicRecordsRequest,
+    RecordItem,
     RecordSystem,
     Requester,
     VaultIngestRun,
@@ -71,6 +74,53 @@ class CollectionTaskApiTests(TestCase):
         self.assertIsNone(without_system["system_name"])
         self.assertIsNone(without_system["system_slug"])
         self.assertIsNone(without_system["system_urgent_hold"])
+
+    def _record(self, task, index, state):
+        return RecordItem.objects.create(
+            request=self.request_obj,
+            collection_task=task,
+            original_filename=f"Message {index}.pdf",
+            storage_key=f"records/{self.request_obj.pk}/card-{index}.pdf",
+            content_length=10,
+            content_type="application/pdf",
+            sha256=hashlib.sha256(f"card-{index}".encode()).hexdigest(),
+            review_state=state,
+        )
+
+    def test_each_collection_names_its_source_and_counts_its_records(self):
+        # The Collect stage card (#45): a Vault task has no record system, so
+        # its source is named from its kind, never shown as a dash.
+        vault = CollectionTask.objects.create(
+            request=self.request_obj, kind=CollectionTask.Kind.VAULT_MAIL,
+        )
+        self._record(vault, 1, RecordItem.ReviewState.UNREVIEWED)
+        self._record(vault, 2, RecordItem.ReviewState.UNREVIEWED)
+        self._record(vault, 3, RecordItem.ReviewState.RESPONSIVE)
+        self._record(vault, 4, RecordItem.ReviewState.SUPERSEDED)
+        r = self.client.get(
+            f"/api/staff/collection-tasks/?request={self.request_obj.number}"
+        )
+        rows = r.json()["results"] if isinstance(r.json(), dict) else r.json()
+        by_id = {row["id"]: row for row in rows}
+        self.assertEqual(by_id[vault.pk]["source_label"], "Google Workspace (Gmail)")
+        self.assertEqual(by_id[vault.pk]["records_created"], 4)
+        self.assertEqual(by_id[vault.pk]["records_unreviewed"], 2)
+        self.assertEqual(by_id[self.task.pk]["source_label"], "Bus Video (DVR)")
+        self.assertEqual(by_id[self.task.pk]["records_created"], 0)
+        self.assertEqual(by_id[self.no_system_task.pk]["source_label"], "Manual / department")
+
+    def test_records_list_filters_to_one_collection(self):
+        vault = CollectionTask.objects.create(
+            request=self.request_obj, kind=CollectionTask.Kind.VAULT_MAIL,
+        )
+        mine = self._record(vault, 1, RecordItem.ReviewState.UNREVIEWED)
+        self._record(self.task, 2, RecordItem.ReviewState.UNREVIEWED)
+        r = self.client.get(f"/api/staff/record-items/?collection_task={vault.pk}")
+        self.assertEqual(r.status_code, 200, r.content)
+        rows = r.json()["results"] if isinstance(r.json(), dict) else r.json()
+        self.assertEqual([row["id"] for row in rows], [str(mine.pk)])
+        bad = self.client.get("/api/staff/record-items/?collection_task=abc")
+        self.assertEqual(bad.status_code, 400)
 
     def test_assigned_to_null_safe(self):
         r = self.client.get(f"/api/staff/collection-tasks/{self.task.id}/")
@@ -150,24 +200,35 @@ class CollectionTaskApiTests(TestCase):
         self.assertEqual(r.status_code, 400)
 
     def test_generic_create_cannot_bypass_reviewed_vault_collection_workflow(self):
-        response = self.client.post(
-            "/api/staff/collection-tasks/",
-            {
-                "request": str(self.request_obj.id),
-                "kind": CollectionTask.Kind.VAULT_MAIL,
-                "instructions": "Attempt to bypass the reviewed Vault count.",
-            },
-            content_type="application/json",
-        )
+        for kind in CollectionTask.VAULT_KINDS:
+            with self.subTest(kind=kind):
+                response = self.client.post(
+                    "/api/staff/collection-tasks/",
+                    {
+                        "request": str(self.request_obj.id),
+                        "kind": kind,
+                        "instructions": "Attempt to bypass the reviewed Vault count.",
+                    },
+                    content_type="application/json",
+                )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("kind", response.json())
-        self.assertFalse(
-            CollectionTask.objects.filter(
-                request=self.request_obj,
-                kind=CollectionTask.Kind.VAULT_MAIL,
-            ).exists()
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("kind", response.json())
+                self.assertFalse(
+                    CollectionTask.objects.filter(
+                        request=self.request_obj,
+                        kind=kind,
+                    ).exists()
+                )
+
+    def test_a_chat_collection_names_its_source(self):
+        task = CollectionTask.objects.create(
+            request=self.request_obj,
+            kind=CollectionTask.Kind.VAULT_CHAT,
+            instructions="Vault Chat task.",
         )
+        response = self.client.get(f"/api/staff/collection-tasks/{task.pk}/")
+        self.assertEqual(response.json()["source_label"], "Google Workspace (Chat)")
 
     def test_no_destroy(self):
         r = self.client.delete(f"/api/staff/collection-tasks/{self.task.id}/")
@@ -263,22 +324,24 @@ class CollectionTaskApiTests(TestCase):
         self.assertEqual(self.task.state, CollectionTask.State.PENDING)
 
     def test_patch_cannot_mark_vault_collection_complete_without_ingest_evidence(self):
-        vault_task = CollectionTask.objects.create(
-            request=self.request_obj,
-            kind=CollectionTask.Kind.VAULT_MAIL,
-            state=CollectionTask.State.RUNNING,
-            instructions="Vault task.",
-        )
+        for kind in CollectionTask.VAULT_KINDS:
+            with self.subTest(kind=kind):
+                vault_task = CollectionTask.objects.create(
+                    request=self.request_obj,
+                    kind=kind,
+                    state=CollectionTask.State.RUNNING,
+                    instructions="Vault task.",
+                )
 
-        response = self.client.patch(
-            f"/api/staff/collection-tasks/{vault_task.pk}/",
-            {"state": CollectionTask.State.COMPLETE},
-            content_type="application/json",
-        )
+                response = self.client.patch(
+                    f"/api/staff/collection-tasks/{vault_task.pk}/",
+                    {"state": CollectionTask.State.COMPLETE},
+                    content_type="application/json",
+                )
 
-        self.assertEqual(response.status_code, 400)
-        vault_task.refresh_from_db()
-        self.assertEqual(vault_task.state, CollectionTask.State.RUNNING)
+                self.assertEqual(response.status_code, 400)
+                vault_task.refresh_from_db()
+                self.assertEqual(vault_task.state, CollectionTask.State.RUNNING)
 
     def test_patch_assigned_to_by_id(self):
         officer2 = get_user_model().objects.create_user(

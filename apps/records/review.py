@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import math
+from dataclasses import dataclass
 
 import pymupdf as fitz
 from django.core.exceptions import ValidationError
@@ -13,7 +14,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.api.identity import StaffRole, has_staff_role
-from apps.audit.models import audit
+from apps.audit.models import AuditLog, audit
 from apps.configuration import runtime
 
 from .models import (
@@ -82,14 +83,223 @@ BULK_REVIEW_STATES = (
     RecordItem.ReviewState.NON_RESPONSIVE,
 )
 
+#: How many records one filter-mode decision may cover. The reviewer sees the
+#: exact count and confirms it; this ceiling only bounds one write.
+BULK_REVIEW_FILTER_MAX_ITEMS = 10_000
+
+#: States a bulk decision never overturns: each was a reviewer's own judgement
+#: (an exemption citation, a duplicate call) or an officer's re-scoping.
+_ONE_AT_A_TIME_STATES = {
+    RecordItem.ReviewState.WITHHELD: "withheld",
+    RecordItem.ReviewState.DUPLICATE: "duplicate",
+    RecordItem.ReviewState.SUPERSEDED: "superseded",
+}
+
+
+class BulkSelectionChanged(ValidationError):
+    """The filtered set is no longer the one the reviewer confirmed."""
+
+
+@dataclass(frozen=True)
+class BulkSelection:
+    matching: int
+    eligible_ids: tuple
+    excluded: dict
+    selection_sha256: str
+
+
+def _selection_sha256(ids) -> str:
+    return hashlib.sha256(
+        "\n".join(sorted(str(pk) for pk in ids)).encode()
+    ).hexdigest()
+
+
+def bulk_review_selection(record_item_ids, *, state) -> BulkSelection:
+    """Split a filtered set into the records one decision may change.
+
+    Records already in ``state`` and records whose state needs its own
+    judgement are counted, not changed. A non-responsive decision also skips a
+    record with an active redaction, which has to be voided deliberately.
+    """
+    if state not in BULK_REVIEW_STATES:
+        raise ValidationError(
+            "Bulk review records only responsive or non-responsive outcomes."
+        )
+    ids = list(dict.fromkeys(record_item_ids))
+    if len(ids) > BULK_REVIEW_FILTER_MAX_ITEMS:
+        raise ValidationError(
+            f"One filter decision covers at most {BULK_REVIEW_FILTER_MAX_ITEMS} "
+            "matching records. Narrow the filter."
+        )
+    excluded = {"withheld": 0, "duplicate": 0, "superseded": 0, "already": 0, "redacted": 0}
+    redacted = set()
+    if state != RecordItem.ReviewState.RESPONSIVE:
+        redacted = set(
+            Redaction.objects.filter(
+                record_item_id__in=ids, voided_at__isnull=True,
+            ).values_list("record_item_id", flat=True)
+        )
+    eligible = []
+    for pk, current in RecordItem.objects.filter(pk__in=ids).values_list(
+        "pk", "review_state",
+    ):
+        if current in _ONE_AT_A_TIME_STATES:
+            excluded[_ONE_AT_A_TIME_STATES[current]] += 1
+        elif current == state:
+            excluded["already"] += 1
+        elif pk in redacted:
+            excluded["redacted"] += 1
+        else:
+            eligible.append(pk)
+    eligible.sort(key=str)
+    return BulkSelection(
+        matching=len(ids),
+        eligible_ids=tuple(eligible),
+        excluded=excluded,
+        selection_sha256=_selection_sha256(eligible),
+    )
+
+
+@transaction.atomic
+def bulk_review_confirmed_selection(
+    record_item_ids,
+    *,
+    state,
+    actor,
+    expected_count,
+    selection_sha256,
+    filter_detail,
+):
+    """Apply one human decision to the exact set the reviewer confirmed.
+
+    ``record_item_ids`` is the filter's current match, resolved by the
+    caller just before this runs. Those rows are locked here and re-split, and
+    the decision is refused unless the result is still exactly the set the
+    reviewer confirmed (same count, same digest). Each record's write and
+    audit row match a single-record review.
+    """
+    _require_reviewer(actor)
+    ids = list(dict.fromkeys(record_item_ids))
+    if len(ids) > BULK_REVIEW_FILTER_MAX_ITEMS:
+        raise ValidationError(
+            f"One filter decision covers at most {BULK_REVIEW_FILTER_MAX_ITEMS} "
+            "matching records. Narrow the filter."
+        )
+    locked = list(
+        RecordItem.objects.select_for_update()
+        .filter(pk__in=ids)
+        .order_by("pk")
+        .values_list("pk", flat=True)
+    )
+    selection = bulk_review_selection(locked, state=state)
+    if (
+        len(selection.eligible_ids) != expected_count
+        or selection.selection_sha256 != selection_sha256
+    ):
+        raise BulkSelectionChanged(
+            "The records matching this filter changed after you reviewed the "
+            "count. Look at the count again and confirm."
+        )
+    if not selection.eligible_ids:
+        raise ValidationError("No record in this selection can take that outcome.")
+    items = list(
+        RecordItem.objects.select_related("request", "reviewed_by")
+        .filter(pk__in=selection.eligible_ids)
+        .order_by("created_at", "pk")
+    )
+    request_ids = {item.request.pk for item in items}
+    if len(request_ids) != 1:
+        raise ValidationError(
+            "Bulk review applies to the records of one request at a time."
+        )
+    request = items[0].request
+    now = timezone.now()
+    # The same fields review_record writes for a plain responsiveness
+    # outcome, including the prior citations it records before clearing them.
+    prior_exemptions = {}
+    for record_id, exemption_id in (
+        RecordItemWithholdingExemption.objects.filter(record_item__in=items)
+        .order_by("pk")
+        .values_list("record_item_id", "exemption_id")
+    ):
+        prior_exemptions.setdefault(record_id, []).append(exemption_id)
+    RecordItemWithholdingExemption.objects.filter(record_item__in=items).delete()
+    RecordItem.objects.filter(pk__in=[item.pk for item in items]).update(
+        review_state=state,
+        reviewed_by=actor,
+        reviewed_at=now,
+        withholding_exemption=None,
+        second_reviewed_by=None,
+        second_reviewed_at=None,
+        redacted_storage_key="",
+        redacted_sha256="",
+        redacted_content_length=None,
+        redacted_content_type="",
+        redacted_manifest_sha256="",
+    )
+    AuditLog.objects.bulk_create([
+        AuditLog(
+            action="record.reviewed",
+            target=str(item.pk),
+            actor=actor,
+            detail={
+                "request_number": request.number,
+                "before": {
+                    "state": item.review_state,
+                    "reviewed_by_id": (
+                        item.reviewed_by.pk if item.reviewed_by else None
+                    ),
+                    "withholding_exemption_ids": prior_exemptions.get(item.pk, []),
+                },
+                "review_state": state,
+                "withholding_exemption_ids": [],
+            },
+        )
+        for item in items
+    ])
+    decisions = _store_decisions(items, state=state, actor=actor)
+    audit(
+        "record.bulk_reviewed",
+        target=request.number,
+        actor=actor,
+        request_number=request.number,
+        review_state=state,
+        selection="filter",
+        filter=filter_detail,
+        record_item_ids=[str(item.pk) for item in items],
+        record_item_count=len(items),
+        excluded=selection.excluded,
+        # The suggestions standing at decision time, for agreement only.
+        advisory_run_ids=[
+            str(decision.advisory_run_id)
+            for decision in decisions
+            if decision.advisory_run_id
+        ],
+    )
+    from apps.work_queue.integration import schedule_source_work_item_reconciliation
+
+    for item in items:
+        if state == RecordItem.ReviewState.RESPONSIVE:
+            from .advisory_ai import defer_automatic_record_advisory
+            from .models import AdvisoryRun
+
+            defer_automatic_record_advisory(
+                item.pk,
+                kind=AdvisoryRun.Kind.RECORD_REDACTIONS,
+                actor=actor,
+            )
+        schedule_source_work_item_reconciliation("records", item.pk)
+    return len(items)
+
 
 @transaction.atomic
 def bulk_review_records(record_item_ids, *, state, actor):
     """Apply one human responsiveness decision to a visible set of records.
 
     This is a human decision about a set the reviewer chose and could see — it
-    is *not* an accept-all of AI output. No advisory proposal is read here, and
-    nothing about the model's recommendation changes what this writes. Each
+    is *not* an accept-all of AI output. Nothing about the model's
+    recommendation changes what this writes; the suggestion each record showed
+    is only stored beside the decision so agreement can be measured. Each
     record goes through the same :func:`review_record` service the single-record
     control uses, so each gets its own append-only audit row, its own
     validation, and its own advisory follow-up; one additional row records the
@@ -153,6 +363,18 @@ def bulk_review_records(record_item_ids, *, state, actor):
             "a time so that judgement is reconsidered deliberately: "
             + ", ".join(sorted(duplicates))
         )
+    # A superseded record left review when a Records Officer re-scoped its
+    # collection. Bringing it back is a deliberate, single-record decision.
+    superseded = [
+        str(item.pk)
+        for item in items
+        if item.review_state == RecordItem.ReviewState.SUPERSEDED
+    ]
+    if superseded:
+        raise ValidationError(
+            "These records were superseded with their collection and must be "
+            "reviewed one at a time: " + ", ".join(sorted(superseded))
+        )
     if state != RecordItem.ReviewState.RESPONSIVE:
         # One query rather than one per selected record, asked of the
         # redactions themselves. Asking RecordItem for
@@ -171,10 +393,11 @@ def bulk_review_records(record_item_ids, *, state, actor):
                 "them non-responsive: "
                 + ", ".join(sorted(str(pk) for pk in blocked))
             )
-    reviewed = [
-        review_record(item.pk, state=state, actor=actor)
+    results = [
+        _review_record(item.pk, state=state, actor=actor, bulk=True)
         for item in items
     ]
+    reviewed = [item for item, _decision in results]
     request = items[0].request
     audit(
         "record.bulk_reviewed",
@@ -184,6 +407,12 @@ def bulk_review_records(record_item_ids, *, state, actor):
         review_state=state,
         record_item_ids=[str(item.pk) for item in reviewed],
         record_item_count=len(reviewed),
+        # The suggestions standing at decision time, for agreement only.
+        advisory_run_ids=[
+            str(decision.advisory_run_id)
+            for _item, decision in results
+            if decision.advisory_run_id
+        ],
     )
     return reviewed
 
@@ -196,6 +425,24 @@ def review_record(
     actor,
     withholding_exemption_ids=(),
 ):
+    item, _decision = _review_record(
+        record_item_id,
+        state=state,
+        actor=actor,
+        withholding_exemption_ids=withholding_exemption_ids,
+    )
+    return item
+
+
+def _review_record(
+    record_item_id,
+    *,
+    state,
+    actor,
+    withholding_exemption_ids=(),
+    bulk=False,
+):
+    """The review itself; also returns the stored decision (#38)."""
     _require_reviewer(actor)
     if state not in _HUMAN_REVIEW_STATES:
         raise ValidationError("A valid human review outcome is required.")
@@ -255,6 +502,7 @@ def review_record(
         RecordItemWithholdingExemption(record_item=item, exemption=exemption)
         for exemption in exemptions
     ])
+    decision = _store_decision(item, state=state, actor=actor, bulk=bulk)
     audit(
         "record.reviewed",
         target=str(item.pk),
@@ -276,7 +524,149 @@ def review_record(
     from apps.work_queue.integration import schedule_source_work_item_reconciliation
 
     schedule_source_work_item_reconciliation("records", item.pk)
+    return item, decision
+
+
+_UNDO_RESTORABLE_STATES = {
+    RecordItem.ReviewState.RESPONSIVE,
+    RecordItem.ReviewState.NON_RESPONSIVE,
+    RecordItem.ReviewState.DUPLICATE,
+}
+
+
+@transaction.atomic
+def undo_review(record_item_id, *, actor):
+    """Undo the actor's own latest review decision on one record (#46).
+
+    The record goes back to the state recorded as ``before`` in that
+    decision's audit row: unreviewed, or the actor's own earlier responsive,
+    non-responsive, or duplicate decision (re-recorded in their name). An
+    earlier decision by someone else is never re-attributed; undo refuses.
+    Only the reviewer who made the latest decision may undo it. A withheld
+    decision on either side, and a record with active redactions, are never
+    undone this way: each carries a judgement that has to be revisited
+    deliberately.
+    """
+    _require_reviewer(actor)
+    item = (
+        RecordItem.objects.select_for_update()
+        .select_related("request")
+        .get(pk=record_item_id)
+    )
+    last = (
+        AuditLog.objects.filter(action="record.reviewed", target=str(item.pk))
+        .order_by("-at", "-pk")
+        .first()
+    )
+    if last is None or item.review_state == RecordItem.ReviewState.UNREVIEWED:
+        raise ValidationError("There is no review decision on this record to undo.")
+    reviewer_pk = item.reviewed_by.pk if item.reviewed_by else None
+    if last.actor_id != actor.pk or reviewer_pk != actor.pk:
+        raise ValidationError("Only the reviewer who made the latest decision may undo it.")
+    undone = item.review_state
+    before = last.detail.get("before") or {}
+    previous = str(before.get("state") or "")
+    if RecordItem.ReviewState.WITHHELD in (undone, previous):
+        raise ValidationError(
+            "A decision to withhold, or one that replaced it, is revisited one at "
+            "a time, not undone."
+        )
+    if Redaction.objects.filter(record_item=item, voided_at__isnull=True).exists():
+        raise ValidationError("Void the active redactions before undoing this decision.")
+    if previous in _UNDO_RESTORABLE_STATES:
+        # Restoring a decision re-records it in the caller's name, so only
+        # the caller's own earlier decision may come back this way; another
+        # reviewer's is never re-attributed. Review the record again instead.
+        if before.get("reviewed_by_id") != actor.pk:
+            raise ValidationError(
+                "The earlier decision was another reviewer's; review the record "
+                "again instead of undoing."
+            )
+        item, _decision = _review_record(item.pk, state=previous, actor=actor)
+    elif previous == RecordItem.ReviewState.UNREVIEWED:
+        item.review_state = RecordItem.ReviewState.UNREVIEWED
+        item.reviewed_by = None
+        item.reviewed_at = None
+        RecordItemWithholdingExemption.objects.filter(record_item=item).delete()
+        item.withholding_exemption = None
+        _clear_second_review(item)
+        _clear_derived_artifact(item)
+        item.save(update_fields=[
+            "review_state", "reviewed_by", "reviewed_at", "withholding_exemption",
+            "second_reviewed_by", "second_reviewed_at", "redacted_storage_key",
+            "redacted_sha256", "redacted_content_length", "redacted_content_type",
+            "redacted_manifest_sha256",
+        ])
+        # The latest decision on the record is now "none", so agreement
+        # stops counting the one that was undone.
+        _store_decision(item, state=RecordItem.ReviewState.UNREVIEWED, actor=actor, bulk=False)
+        from apps.work_queue.integration import schedule_source_work_item_reconciliation
+
+        schedule_source_work_item_reconciliation("records", item.pk)
+    else:
+        raise ValidationError("This decision cannot be undone; review the record again.")
+    audit(
+        "record.review_undone",
+        target=str(item.pk),
+        actor=actor,
+        request_number=item.request.number,
+        undone_state=undone,
+        restored_state=item.review_state,
+    )
     return item
+
+
+def _store_decision(item, *, state, actor, bulk):
+    """Store the decision and the suggestion standing at decision time (#38)."""
+    from .agreement import latest_suggestion_runs
+    from .models import ReviewDecision
+
+    standing = latest_suggestion_runs(item).first()
+    proposal = standing.proposal if standing else {}
+    confidence = proposal.get("confidence")
+    return ReviewDecision.objects.create(
+        record_item=item,
+        request=item.request,
+        review_state=state,
+        advisory_run=standing,
+        advisory_label=proposal.get("suggested_state") or "",
+        advisory_confidence=float(confidence) if confidence is not None else None,
+        bulk=bulk,
+        actor=actor,
+    )
+
+
+def _store_decisions(items, *, state, actor):
+    """``_store_decision`` for a filter decision over up to 10,000 records:
+    each record's standing suggestion, read in one query."""
+    from django.db.models import OuterRef, Subquery
+
+    from .agreement import annotate_latest_suggestion, latest_suggestion_runs
+    from .models import ReviewDecision
+
+    standing = {
+        row["pk"]: row
+        for row in annotate_latest_suggestion(
+            RecordItem.objects.filter(pk__in=[item.pk for item in items]).annotate(
+                advisory_run_id=Subquery(
+                    latest_suggestion_runs(OuterRef("pk")).values("pk")[:1],
+                ),
+            )
+        ).values("pk", "advisory_run_id", "advisory_suggested_state", "advisory_confidence")
+    }
+    return ReviewDecision.objects.bulk_create([
+        ReviewDecision(
+            record_item=item,
+            request=item.request,
+            review_state=state,
+            advisory_run_id=standing[item.pk]["advisory_run_id"],
+            advisory_label=standing[item.pk]["advisory_suggested_state"] or "",
+            advisory_confidence=standing[item.pk]["advisory_confidence"],
+            bulk=True,
+            actor=actor,
+        )
+        for item in items
+    ])
 
 
 @transaction.atomic
