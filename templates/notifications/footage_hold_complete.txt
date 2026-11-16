@@ -1,5 +1,5 @@
-Camera preservation for request {{ request_number }} completed with {{ held_count }} camera(s) held and {{ failed_count }} failed.
+Camera preservation for request {{ request_number }}{% if sites %} at {{ sites }}{% else %} (every camera district-wide){% endif %} finished: {{ held_count }} camera(s) fully held, {{ gap_count }} bookmarked with a footage gap, {{ failed_count }} failed, {{ not_retained_count }} with no retained footage for the window.
 
-Review the hold and have an accountable human exclude irrelevant cameras with a substantive reason. Investigate every failed camera immediately.
+Review the hold and have an accountable human exclude irrelevant cameras with a substantive reason.{% if failed_count %} Investigate every failed camera immediately.{% endif %}{% if gap_count %} Check each footage gap in Aware.{% endif %}
 
 Open the staff workspace: {{ status_url }}

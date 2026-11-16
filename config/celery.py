@@ -37,6 +37,12 @@ app.conf.beat_schedule = {
         "schedule": crontab(minute="*/10"),
         "kwargs": {"limit": 25},
     },
+    "release-due-footage-preservations": {
+        "task": "apps.records.tasks.release_due_footage_preservations",
+        # hourly at :20, offset from the :00/:15/:30/:45 jobs; Aware deletes
+        # that failed are retried on every run
+        "schedule": crontab(minute=20),
+    },
     "auto-acknowledge-safety-net": {
         "task": "apps.records.tasks.auto_acknowledge_safety_net",
         "schedule": crontab(minute=30),  # hourly at :30, offset from watchdog
@@ -103,5 +109,10 @@ app.conf.beat_schedule = {
     "stall-detector-weekly": {
         "task": "apps.records.tasks.stall_detector",
         "schedule": crontab(day_of_week="mon", hour=7, minute=30),
+    },
+    "footage-hold-stall-sweeper": {
+        # A PENDING hold past 15 minutes goes URGENT manual (rule 7).
+        "task": "apps.records.tasks.sweep_stalled_footage_holds",
+        "schedule": crontab(minute="*/5"),
     },
 }

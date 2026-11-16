@@ -90,6 +90,13 @@ services:
   # persisted database volume.
   clamav:
     image: clamav/clamav:1.5-debian
+    # Sized to the largest staff upload (500 MiB per file, 2 GiB per upload).
+    # clamd skips a file over MaxFileSize yet answers OK, so MaxFileSize never
+    # falls below StreamMaxLength, which refuses a larger stream outright.
+    environment:
+      CLAMD_CONF_StreamMaxLength: "500M"
+      CLAMD_CONF_MaxFileSize: "500M"
+      CLAMD_CONF_MaxScanSize: "2048M"
     volumes: [clamavdata:/var/lib/clamav]
     healthcheck:
       test: ["CMD", "clamdcheck.sh"]

@@ -66,7 +66,7 @@ below.
 | # | Item | Status | Notes |
 |---|---|---|---|
 | C1 | New retention schedule (2-year email idea) | Not started | Mostly district/counsel policy work off the LGS schedules. The system stores retention per-system as data. Deliberately no auto-purge code: disposition automation must check for open requests first or it recreates the spoliation risk the footage-hold design exists to prevent. |
-| C2 | S3-based legal holds | Not started (code) | Google Vault and Avigilon holds work today (source-system holds). S3 side is connection config only: no client module, no Object Lock, no hold model. |
+| C2 | S3-based legal holds | Not started (code) | Google Vault holds work today (source-system holds). Avigilon Alta Aware bookmark holds are in code but not yet verified against the district tenant (`manage.py verify_alta`); until they are, a footage request whose API hold fails degrades to the urgent manual-hold email to facilities. S3 side is connection config only: no client module, no Object Lock, no hold model. |
 
 ## D. Proof of concept and metrics
 

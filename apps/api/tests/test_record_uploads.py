@@ -583,3 +583,58 @@ class DisplayNameTests(TestCase):
                 self.assertEqual(
                     _display_name(SimpleNamespace(name=raw)), expected
                 )
+
+
+class ScannerLimitTests(TestCase):
+    """The upload ceilings and the scanner's own limits move together.
+
+    clamd skips a file larger than ``MaxFileSize`` and still answers OK, so the
+    scanner must reject an oversized stream (``StreamMaxLength``) before that
+    can happen, and must accept the largest file staff may upload.
+    """
+
+    COMPOSE_FILES = ("docker-compose.yml", "docker-compose.deploy.yml")
+
+    @staticmethod
+    def _clamd_limits(filename):
+        from pathlib import Path
+
+        from django.conf import settings
+
+        lines = (Path(settings.BASE_DIR) / filename).read_text().splitlines()
+        start = lines.index("  clamav:") + 1
+        limits = {}
+        for line in lines[start:]:
+            if line.strip() and line.startswith("  ") and not line.startswith("    "):
+                break
+            key, sep, value = line.strip().partition(":")
+            if sep and key.startswith("CLAMD_CONF_"):
+                number = value.strip().strip("\"'")
+                assert number.endswith("M"), f"{key} must be in M: {number}"
+                limits[key.removeprefix("CLAMD_CONF_")] = int(number[:-1]) * 1024 * 1024
+        return limits
+
+    def test_defaults_are_500_mib_per_file_and_2_gib_per_upload(self):
+        from apps.configuration.registry import spec_for
+
+        self.assertEqual(
+            spec_for("PRR_RECORD_UPLOAD_MAX_BYTES").default, 500 * 1024 * 1024
+        )
+        self.assertEqual(
+            spec_for("PRR_RECORD_UPLOAD_TOTAL_MAX_BYTES").default, 2 * 1024**3
+        )
+
+    def test_every_stack_scans_the_largest_permitted_file_whole(self):
+        from apps.configuration.registry import spec_for
+
+        largest_file = spec_for("PRR_RECORD_UPLOAD_MAX_BYTES").maximum
+        largest_upload = spec_for("PRR_RECORD_UPLOAD_TOTAL_MAX_BYTES").maximum
+        for filename in self.COMPOSE_FILES:
+            limits = self._clamd_limits(filename)
+            with self.subTest(filename=filename):
+                self.assertGreaterEqual(limits.get("StreamMaxLength", 0), largest_file)
+                # A stream clamd accepts is never larger than what it scans.
+                self.assertGreaterEqual(
+                    limits.get("MaxFileSize", 0), limits["StreamMaxLength"]
+                )
+                self.assertGreaterEqual(limits.get("MaxScanSize", 0), largest_upload)

@@ -1,5 +1,8 @@
-URGENT: Request {{ request_number }} covers camera footage from {{ window_start|date:"Y-m-d H:i" }} to {{ window_end|date:"Y-m-d H:i" }}.
+URGENT: Request {{ request_number }} covers camera footage from {{ window_start|date:"Y-m-d H:i" }} to {{ window_end|date:"Y-m-d H:i" }} Pacific time.
 
-The Alta API is unavailable ({{ failure }}). In Alta Aware, create saved clips for that window on ALL cameras immediately. Saved clips persist beyond the {{ camera_retention_days }}-day rolling retention period. Reply through the district's operational process when the manual hold is complete.
+{% if held_count %}The automatic hold bookmarked {{ held_count }} camera(s), but part of the request still needs a manual hold ({{ failure }}).{% else %}The automatic hold through the Aware API did not preserve any footage ({{ failure }}).{% endif %} {% if cameras %}These cameras are not confirmed held:
+{% for line in cameras %}- {{ line }}
+{% endfor %}
+In Alta Aware, check each of them now: confirm a bookmark covers that window with "Available until" set to "Manually deleted", and create one if not.{% else %}In Alta Aware, create a bookmark for that window on {% if sites %}every camera at {{ sites }}{% else %}ALL cameras district-wide{% endif %} immediately, with "Available until" set to "Manually deleted".{% endif %} A bookmark set to be manually deleted persists beyond the {{ camera_retention_days }}-day rolling retention period. Reply through the district's operational process when the manual hold is complete.
 
 Open the staff workspace: {{ status_url }}

@@ -63,7 +63,7 @@ Enforced by the schema and the test suite, not by policy:
 | Append-only audit | `apps/audit` has no update or delete code path. |
 | Human-only statutory actions | Estimate revisions and camera-hold exclusions require a human actor and a documented substantive reason; tests parse the background-task module's AST to prove no automated caller exists (`test_compliance.py`, `test_footage.py`). Denials have no automated send path: expired-footage triage queues only a human-review and adequate-search checklist, and an interactive Records Officer must separately draft any legally supported response. |
 | Delivery evidence drives legal state | Queueing never marks correspondence sent or advances a communication-dependent request state. Only the first valid Gmail success/reconciliation callback applies the approved legal effect; duplicate callbacks are idempotent. |
-| Footage: auto-hold always, auto-deny never | Intake triage detects camera requests and holds every camera inside the retention window immediately; outside it, only an adequate-search review prompt is queued. No response is drafted, queued, or sent until a human completes that review. |
+| Footage: auto-hold always, auto-deny never | Intake triage detects camera requests and immediately bookmarks every camera at each site the request names, or every camera district-wide when it names none, using each camera's own retention in Aware. A named site with no cameras, or a window no camera retains, queues only an adequate-search review. No response is drafted, queued, or sent until a human completes that review, and releasing a hold is human-only. |
 | Requester PII minimized | The PRA forbids requiring purpose or identity beyond what is needed to respond. Intake collects name, contact, and description. |
 | The request text is immutable | `request.description` is never edited after intake; it is the legal record of what was asked. Clarifications are new timeline events. |
 
@@ -99,7 +99,7 @@ Enforced by the schema and the test suite, not by policy:
 - Records-system registry mapping district systems to custodians, retention
   profiles, triage keywords, and adequate-search checklists;
   intake auto-routes matching requests into per-system collection tasks
-- Camera-footage triage with Avigilon Alta saved-clip holds, urgent
+- Camera-footage triage with site-scoped Avigilon Alta Aware bookmark holds, urgent
   preservation emails, and a human-only adequate-search/response path
 - Hourly escalating deadline watchdog, estimate watchdog, stall detector
 

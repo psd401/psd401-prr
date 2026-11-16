@@ -9,11 +9,13 @@ from django.utils import timezone
 
 from apps.api.identity import apply_staff_roles
 from apps.api.models import StaffRole
+from apps.records import triage
 from apps.records.models import (
     CameraHold,
     FootagePreservation,
     PublicRecordsRequest,
     Requester,
+    RequestStatus,
 )
 
 EXCLUDE_GATE_MESSAGE = (
@@ -85,6 +87,34 @@ class PreservationApiTests(TestCase):
         self.assertEqual(hold["state"], CameraHold.State.HELD)
         self.assertIsNone(hold["excluded_by"])
         self.assertEqual(hold["exclusion_reason"], "")
+        self.assertIn("coverage_fraction", hold)
+        self.assertEqual(hold["coverage_note"], "")
+        self.assertEqual(row["site_codes"], [])
+        self.assertEqual(row["site_resolution"], "")
+        self.assertFalse(row["request_closed"])
+        self.assertIsNone(row["released_at"])
+        self.assertIsNone(row["released_by"])
+        self.assertEqual(row["release_reason"], "")
+        self.assertTrue(
+            row["confirmation_text"].startswith(
+                "2 cameras across the district held from "
+            ),
+            row["confirmation_text"],
+        )
+
+    def test_confirmation_text_is_null_when_nothing_is_held(self):
+        FootagePreservation.objects.filter(pk=self.fp.pk).update(
+            state=FootagePreservation.State.MANUAL,
+        )
+        body = self.client.get(f"/api/staff/preservations/{self.fp.id}/").json()
+        self.assertIsNone(body["confirmation_text"])
+
+    def test_request_closed_reflects_the_request_status(self):
+        PublicRecordsRequest.objects.filter(pk=self.prr.pk).update(
+            status=RequestStatus.FULFILLED,
+        )
+        body = self.client.get(f"/api/staff/preservations/{self.fp.id}/").json()
+        self.assertTrue(body["request_closed"])
 
     def test_retrieve_shape(self):
         r = self.client.get(f"/api/staff/preservations/{self.fp.id}/")
@@ -132,14 +162,16 @@ class PreservationApiTests(TestCase):
 
     # -- exclude-camera action --------------------------------------------
 
-    def test_exclude_camera_happy_path(self):
-        r = self.client.post(
-            f"/api/staff/preservations/{self.fp.id}/exclude-camera/",
-            {"camera_hold_id": self.other.id,
-             "reason": "Camera faces staff parking; request concerns the "
-                       "gym entrance only."},
-            content_type="application/json",
-        )
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_exclude_camera_happy_path(self, delete_bookmark):
+        with self.captureOnCommitCallbacks(execute=True):
+            r = self.client.post(
+                f"/api/staff/preservations/{self.fp.id}/exclude-camera/",
+                {"camera_hold_id": self.other.id,
+                 "reason": "Camera faces staff parking; request concerns the "
+                           "gym entrance only."},
+                content_type="application/json",
+            )
         self.assertEqual(r.status_code, 200)
         self.other.refresh_from_db()
         self.assertEqual(self.other.state, CameraHold.State.RELEASED)
@@ -151,8 +183,8 @@ class PreservationApiTests(TestCase):
         self.assertEqual(self.held.state, CameraHold.State.HELD)
 
     @override_settings(PRR_LOCAL_IMPLICIT_STAFF_ROLES=())
-    @mock.patch("apps.integrations.avigilon.client.delete_clip")
-    def test_exclude_camera_rechecks_current_role_after_dispatch(self, delete_clip):
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_exclude_camera_rechecks_current_role_after_dispatch(self, delete_bookmark):
         apply_staff_roles(self.officer, {StaffRole.RECORDS_OFFICER})
 
         def revoke_role_after_permission_check(*_args, **_kwargs):
@@ -175,7 +207,7 @@ class PreservationApiTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 403)
-        delete_clip.assert_not_called()
+        delete_bookmark.assert_not_called()
         self.other.refresh_from_db()
         self.assertEqual(self.other.state, CameraHold.State.HELD)
         self.assertIsNone(self.other.excluded_at)
@@ -204,10 +236,10 @@ class PreservationApiTests(TestCase):
         self.held.refresh_from_db()
         self.assertEqual(self.held.state, CameraHold.State.HELD)
 
-    @mock.patch("apps.integrations.avigilon.client.delete_clip")
-    def test_exclude_camera_oversized_reason_rejected_before_clip_delete(
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_exclude_camera_oversized_reason_rejected_before_bookmark_delete(
         self,
-        delete_clip,
+        delete_bookmark,
     ):
         response = self.client.post(
             f"/api/staff/preservations/{self.fp.id}/exclude-camera/",
@@ -223,7 +255,7 @@ class PreservationApiTests(TestCase):
             response.json()["detail"],
             "A camera-exclusion reason must contain at most 500 characters.",
         )
-        delete_clip.assert_not_called()
+        delete_bookmark.assert_not_called()
         self.held.refresh_from_db()
         self.assertEqual(self.held.state, CameraHold.State.HELD)
         self.assertIsNone(self.held.excluded_at)
@@ -239,6 +271,167 @@ class PreservationApiTests(TestCase):
         )
         self.assertEqual(r.status_code, 404)
 
+    # -- automatic release ------------------------------------------------
+
+    def _close_request(self, status=RequestStatus.FULFILLED, closed_at=None):
+        PublicRecordsRequest.objects.filter(pk=self.prr.pk).update(
+            status=status, closed_at=closed_at or timezone.now(),
+        )
+
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_there_is_no_release_action(self, delete_bookmark):
+        # Release is automatic (rule 7): no staff click, token, or agent path.
+        self._close_request()
+        response = self.client.post(
+            f"/api/staff/preservations/{self.fp.id}/release/",
+            {
+                "reason": "Request fulfilled; the requester confirmed receipt.",
+                "attest_no_litigation_hold": True,
+            },
+            content_type="application/json",
+        )
+        self.assertIn(response.status_code, (404, 405))
+        delete_bookmark.assert_not_called()
+        self.fp.refresh_from_db()
+        self.assertEqual(self.fp.state, FootagePreservation.State.HELD)
+
+    def test_release_eligible_at_is_computed_by_the_server(self):
+        url = f"/api/staff/preservations/{self.fp.id}/"
+        body = self.client.get(url).json()
+        self.assertNotIn("releasable", body)
+        self.assertIsNone(body["release_eligible_at"])   # open
+
+        closed = timezone.now().replace(microsecond=0) - dt.timedelta(days=1)
+        self._close_request(closed_at=closed)
+        self.assertEqual(
+            dt.datetime.fromisoformat(
+                self.client.get(url).json()["release_eligible_at"],
+            ),
+            closed,
+        )
+
+        self._close_request(RequestStatus.DENIED, closed_at=closed)
+        self.assertEqual(
+            dt.datetime.fromisoformat(
+                self.client.get(url).json()["release_eligible_at"],
+            ),
+            closed + triage.PRA_SUIT_WINDOW,
+        )
+        self._close_request(closed_at=closed)
+
+        other = PublicRecordsRequest.objects.create(
+            requester=self.prr.requester, description="case of record")
+        PublicRecordsRequest.objects.filter(pk=self.prr.pk).update(merged_into=other)
+        self.assertIsNone(self.client.get(url).json()["release_eligible_at"])
+        PublicRecordsRequest.objects.filter(pk=self.prr.pk).update(merged_into=None)
+
+        FootagePreservation.objects.filter(pk=self.fp.pk).update(
+            state=FootagePreservation.State.RELEASED,
+        )
+        CameraHold.objects.filter(preservation=self.fp).update(
+            state=CameraHold.State.RELEASED,
+        )
+        self.assertIsNone(self.client.get(url).json()["release_eligible_at"])
+        CameraHold.objects.filter(pk=self.held.pk).update(
+            state=CameraHold.State.RELEASE_FAILED,
+        )
+        self.assertIsNotNone(
+            self.client.get(url).json()["release_eligible_at"],
+        )   # retry
+
+    @mock.patch("apps.integrations.avigilon.client.delete_bookmark")
+    def test_non_text_exclusion_reasons_are_400_not_500(self, delete_bookmark):
+        self._close_request()
+        for reason in (["a list is not a reason"], {"a": "b"}, 1234567890123):
+            with self.subTest(reason=reason):
+                response = self.client.post(
+                    f"/api/staff/preservations/{self.fp.id}/exclude-camera/",
+                    {"camera_hold_id": self.other.id, "reason": reason},
+                    content_type="application/json",
+                )
+                self.assertEqual(response.status_code, 400)
+        delete_bookmark.assert_not_called()
+
+    # -- widen action --------------------------------------------------------
+
+    WIDEN_REASON = "Request also names the bus loop beside the gym."
+
+    def _narrow_to_phs(self):
+        FootagePreservation.objects.filter(pk=self.fp.pk).update(site_codes=["PHS"])
+
+    def _widen(self, reason: object = WIDEN_REASON):
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.client.post(
+                f"/api/staff/preservations/{self.fp.id}/widen/",
+                {"reason": reason},
+                content_type="application/json",
+            )
+
+    @mock.patch("apps.records.tasks.execute_footage_hold.delay")
+    def test_widen_happy_path_returns_the_updated_preservation(self, delay):
+        self._narrow_to_phs()
+
+        response = self._widen()
+
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertEqual(body["id"], self.fp.id)
+        self.assertEqual(body["site_codes"], [])
+        self.assertFalse(body["widenable"])
+        delay.assert_called_once_with(self.fp.id, only_new=True, widened_from=["PHS"])
+
+    @mock.patch("apps.records.tasks.execute_footage_hold.delay")
+    def test_widen_rejects_a_thin_or_non_string_reason(self, delay):
+        self._narrow_to_phs()
+        for reason in ("short", ["a list is not a reason"], {"a": "b"}, 1234567890123):
+            with self.subTest(reason=reason):
+                response = self._widen(reason=reason)
+                self.assertEqual(response.status_code, 400)
+        delay.assert_not_called()
+        self.fp.refresh_from_db()
+        self.assertEqual(self.fp.site_codes, ["PHS"])
+
+    @mock.patch("apps.records.tasks.execute_footage_hold.delay")
+    def test_widen_refuses_an_already_district_wide_hold(self, delay):
+        response = self._widen()
+        self.assertEqual(response.status_code, 400)
+        delay.assert_not_called()
+
+    @override_settings(PRR_LOCAL_IMPLICIT_STAFF_ROLES=())
+    @mock.patch("apps.records.tasks.execute_footage_hold.delay")
+    def test_widen_is_records_officer_only(self, delay):
+        self._narrow_to_phs()
+        apply_staff_roles(self.officer, {StaffRole.ADMIN})
+
+        response = self._widen()
+
+        self.assertEqual(response.status_code, 403)
+        delay.assert_not_called()
+
+    def test_widenable_reflects_scope_and_release(self):
+        url = f"/api/staff/preservations/{self.fp.id}/"
+        self.assertFalse(self.client.get(url).json()["widenable"])
+        self._narrow_to_phs()
+        self.assertTrue(self.client.get(url).json()["widenable"])
+        FootagePreservation.objects.filter(pk=self.fp.pk).update(
+            state=FootagePreservation.State.RELEASED,
+        )
+        self.assertFalse(self.client.get(url).json()["widenable"])
+
+    @mock.patch("apps.records.tasks.execute_footage_hold.delay")
+    def test_widen_is_refused_while_the_hold_is_still_running(self, delay):
+        self._narrow_to_phs()
+        FootagePreservation.objects.filter(pk=self.fp.pk).update(
+            state=FootagePreservation.State.PENDING,
+        )
+        url = f"/api/staff/preservations/{self.fp.id}/"
+        self.assertFalse(self.client.get(url).json()["widenable"])
+
+        response = self._widen()
+
+        self.assertEqual(response.status_code, 400)
+        delay.assert_not_called()
+
     # -- read-only enforcement --------------------------------------------
 
     def test_create_not_allowed(self):
@@ -252,3 +445,44 @@ class PreservationApiTests(TestCase):
         self.assertEqual(
             self.client.patch(url, {"state": "released"}, content_type="application/json").status_code, 405)
         self.assertEqual(self.client.delete(url).status_code, 405)
+
+    # -- error text --------------------------------------------------------
+
+    INTERNAL_TEXT = "internal detail at /srv/app/apps/records/triage.py"
+
+    def _post_each_action(self):
+        self._close_request()
+        self._narrow_to_phs()
+        base = f"/api/staff/preservations/{self.fp.id}"
+        bodies = {
+            "exclude_camera": ("exclude-camera", {
+                "camera_hold_id": self.other.id,
+                "reason": "Camera faces staff parking; request concerns the gym entrance only.",
+            }),
+            "widen_preservation": ("widen", {"reason": self.WIDEN_REASON}),
+        }
+        for function, (path, body) in bodies.items():
+            yield function, lambda path=path, body=body: self.client.post(
+                f"{base}/{path}/", body, content_type="application/json"
+            )
+
+    def test_a_refusal_shows_staff_its_message(self):
+        for function, post in self._post_each_action():
+            with self.subTest(action=function), mock.patch(
+                f"apps.records.triage.{function}",
+                side_effect=triage.PreservationRefused("Choose a closed request."),
+            ):
+                response = post()
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json(), {"detail": "Choose a closed request."})
+
+    def test_an_unexpected_error_is_never_echoed_to_staff(self):
+        self.client.raise_request_exception = False
+        for function, post in self._post_each_action():
+            with self.subTest(action=function), mock.patch(
+                f"apps.records.triage.{function}",
+                side_effect=ValueError(self.INTERNAL_TEXT),
+            ):
+                response = post()
+                self.assertEqual(response.status_code, 500)
+                self.assertNotIn("srv/app", response.content.decode())

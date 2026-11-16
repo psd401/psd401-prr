@@ -858,17 +858,17 @@ class VerificationTests(TestCase):
 
 
 class RegistryContractTests(TestCase):
-    def test_the_secrets_are_the_sign_in_secret_and_the_alta_token(self):
+    def test_the_secrets_are_the_sign_in_secret_and_the_alta_password(self):
         """A key file path is not a secret, and neither is an identity.
 
         Deployed Google access is keyless, so the values this system holds
         that would be dangerous to read back are the OAuth client secret and
-        the Alta bearer token. Anything else added to this tuple needs the
-        same write-only treatment, which is why the tuple is asserted rather
-        than assumed.
+        the Alta service account's password. Anything else added to this
+        tuple needs the same write-only treatment, which is why the tuple is
+        asserted rather than assumed.
         """
         self.assertEqual(
-            set(SECRET_KEYS), {"PRR_GOOGLE_OIDC_CLIENT_SECRET", "ALTA_API_TOKEN"}
+            set(SECRET_KEYS), {"PRR_GOOGLE_OIDC_CLIENT_SECRET", "ALTA_API_PASSWORD"}
         )
 
     def test_no_secret_carries_a_default(self):

@@ -137,7 +137,8 @@ from .models import CameraHold, FootagePreservation  # noqa: E402
 class CameraHoldInline(admin.TabularInline):
     model = CameraHold
     extra = 0
-    readonly_fields = ("camera_id", "camera_name", "site", "clip_id", "state",
+    readonly_fields = ("camera_id", "camera_name", "site", "device_group_id",
+                       "clip_id", "state", "coverage_fraction", "coverage_note",
                        "error", "excluded_at", "excluded_by", "exclusion_reason")
     can_delete = False
 
@@ -156,6 +157,11 @@ class FootagePreservationAdmin(admin.ModelAdmin):
         "window_start",
         "window_end",
         "detected_dates_note",
+        "site_codes",
+        "site_resolution",
+        "released_at",
+        "released_by",
+        "release_reason",
     )
 
     def has_add_permission(self, request):

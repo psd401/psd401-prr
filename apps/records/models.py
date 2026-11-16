@@ -10,6 +10,7 @@ Design principles:
 """
 import uuid
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -19,6 +20,9 @@ from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.append_only import AppendOnlyManager, AppendOnlyModelMixin
+
+if TYPE_CHECKING:  # pragma: no cover - Django builds these at runtime
+    from django.db.models.fields.related_descriptors import RelatedManager
 
 
 class Requester(models.Model):
@@ -2783,15 +2787,25 @@ class EstimateRevision(models.Model):
 
 class FootagePreservation(models.Model):
     """Preservation hold for a camera-footage request. Philosophy:
-    HOLD BROAD IMMEDIATELY (every camera, full window) the moment intake
-    detects a footage request inside the retention window — destruction of
-    responsive records after receipt violates RCW 42.56.100. Humans then
-    NARROW by excluding irrelevant cameras (reason required)."""
+    HOLD BROAD IMMEDIATELY the moment intake detects a footage request:
+    every camera at each site the request names, or every camera
+    district-wide when no site is identified, for the whole requested
+    window. Destruction of responsive records after receipt violates
+    RCW 42.56.100. Humans then NARROW by excluding irrelevant cameras
+    (reason required) and RELEASE only after the request closes.
+
+    ``window_start``/``window_end`` are the REQUESTED window. Each camera's
+    hold starts at the later of the window start and that camera's oldest
+    retained footage, recorded on its CameraHold."""
     class State(models.TextChoices):
         PENDING = "pending", "Pending — hold executing"
         HELD = "held", "Held"
-        PARTIAL = "partial", "Held (some cameras failed)"
-        MANUAL = "manual", "Manual hold required (API unavailable)"
+        PARTIAL = "partial", "Partly held — gaps or failures need review"
+        MANUAL = "manual", "Manual hold required"
+        # Not HELD and not EXPIRED: Aware has no camera at the named site, so
+        # there is nothing to bookmark, but footage may still exist on another
+        # recorder there. A human runs the adequate-search review.
+        NO_CAMERAS = "no_cameras", "No cameras in Aware at the requested site"
         EXPIRED = (
             "expired",
             "Window outside retention — adequate-search review required",
@@ -2803,32 +2817,98 @@ class FootagePreservation(models.Model):
     window_end = models.DateTimeField()
     state = models.CharField(max_length=20, choices=State.choices, default=State.PENDING)
     detected_dates_note = models.CharField(max_length=500, blank=True)
+    site_codes = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "Aware site codes resolved from the request description. Empty "
+            "means the hold covers every camera district-wide."
+        ),
+    )
+    site_resolution = models.CharField(max_length=500, blank=True)
+    released_at = models.DateTimeField(null=True, blank=True)
+    released_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    release_reason = models.CharField(max_length=500, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    # A hold run (the first one or a widen) is in progress while this is set;
+    # the run clears it when it finishes. It also names the run, so a run the
+    # sweeper took over cannot write its result.
+    hold_run_started_at = models.DateTimeField(null=True, blank=True)
+    # Refreshed per camera. The sweeper acts when it goes stale.
+    hold_heartbeat_at = models.DateTimeField(default=timezone.now)
+
+    if TYPE_CHECKING:  # pragma: no cover - declared for the type checker only
+        id: int
+        camera_holds: RelatedManager["CameraHold"]
 
     @property
     def held_count(self):
-        return self.camera_holds.filter(state=CameraHold.State.HELD, excluded_at__isnull=True).count()
+        """Cameras with a live Aware bookmark (full or partial coverage)."""
+        return self.camera_holds.filter(
+            state__in=CameraHold.BOOKMARKED_STATES, excluded_at__isnull=True,
+        ).count()
 
 
 class CameraHold(models.Model):
-    """One camera's clip within a preservation hold. Exclusion requires a
-    human + reason (mirrors the estimate-revision gate)."""
+    """One camera's Aware bookmark within a preservation hold. Exclusion
+    requires a human + reason (mirrors the estimate-revision gate)."""
     class State(models.TextChoices):
         PENDING = "pending", "Pending"
-        HELD = "held", "Held (clip saved)"
+        HELD = "held", "Held (Aware bookmark)"
+        GAP = "gap", "Bookmarked with a footage gap"
+        NOT_RETAINED = "not_retained", "No retained footage for the window"
         FAILED = "failed", "Failed"
         RELEASED = "released", "Released"
+        # Release asked Aware to delete the bookmark and Aware has not yet
+        # confirmed it (still running, crashed, or the delete failed): the
+        # bookmark may still exist. Re-posting release retries it.
+        RELEASE_FAILED = (
+            "release_failed",
+            "Not yet confirmed deleted — bookmark may still exist",
+        )
+
+    BOOKMARKED_STATES = (State.HELD, State.GAP)
 
     preservation = models.ForeignKey(FootagePreservation, on_delete=models.CASCADE, related_name="camera_holds")
     camera_id = models.CharField(max_length=100)
     camera_name = models.CharField(max_length=255, blank=True)
     site = models.CharField(max_length=255, blank=True)
-    clip_id = models.CharField(max_length=100, blank=True)
+    device_group_id = models.CharField(max_length=100, blank=True)
+    clip_id = models.CharField(
+        "Aware bookmark id",
+        max_length=100,
+        blank=True,
+        help_text="Aware bookmark id. Bookmarks are created with no expiry.",
+    )
     state = models.CharField(max_length=20, choices=State.choices, default=State.PENDING)
+    coverage_fraction = models.FloatField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Lowest share of the requested window covered by footage across "
+            "the camera's heads, 0 to 1."
+        ),
+    )
+    coverage_note = models.CharField(max_length=500, blank=True)
     error = models.CharField(max_length=500, blank=True)
     excluded_at = models.DateTimeField(null=True, blank=True)
     excluded_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     exclusion_reason = models.CharField(max_length=500, blank=True)
+    # Set by a conditional update before any Aware call, so two runs never
+    # bookmark the same camera. Cleared only when Aware definitely made no
+    # bookmark; an uncertain create or a run that died mid-call keeps it.
+    hold_claimed_at = models.DateTimeField(null=True, blank=True)
+
+    if TYPE_CHECKING:  # pragma: no cover - declared for the type checker only
+        id: int
+        preservation_id: int
+        excluded_by_id: int | None
 
     class Meta:
         unique_together = [("preservation", "camera_id")]

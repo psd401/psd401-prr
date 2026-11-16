@@ -38,7 +38,7 @@ What this path guarantees:
 
 Why the lock does not span storage: the case row lock is the one every
 lifecycle write on the case takes, and holding it across a scan and a
-100 MiB object write would stall those writes for the length of an upload.
+500 MiB object write would stall those writes for the length of an upload.
 So the bytes are retained first and the row decision is made under the lock.
 The cost is a narrow race: a copy retained under ``records/`` whose row then
 loses (to a concurrent duplicate, a closure, or a revoked role). The runtime

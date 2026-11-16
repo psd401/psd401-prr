@@ -30,11 +30,11 @@ SYSTEMS = [
         "category": "Video surveillance", "vendor": "Motorola Solutions / Avigilon",
         "integration": RecordSystem.Integration.AVIGILON,
         "custodian_title": "Director of Safety and Security",
-        "retention_days": 10, "retention_note": "Rolling 10-day retention; saved clips persist.",
+        "retention_days": 10, "retention_note": "Retention varies per camera (Aware reports it); no-expiry bookmarks persist.",
         "urgent_hold": True,
         "triage_keywords": [],   # handled by the dedicated footage triage engine
         "search_checklist": (
-            "1. Automated hold fires at intake (all cameras, window clamped to retention).\n"
+            "1. Automated hold fires at intake (every camera at the named sites, or district-wide).\n"
             "2. Review held cameras; exclude irrelevant ones WITH reasons.\n"
             "3. Check incident-hold clips and previously exported clips.\n"
             "4. Search email/Drive for shared copies of footage."),

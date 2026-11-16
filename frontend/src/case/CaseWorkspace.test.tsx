@@ -445,6 +445,97 @@ describe('CaseWorkspace', () => {
     )).toBe(false)
   })
 
+  it('warns that footage may be overwritten when a named site has no Aware cameras', async () => {
+    // Nothing was bookmarked, but a standalone recorder at the site may still
+    // be overwriting footage, so the adequate-search review is urgent.
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/workspace-summary/')) {
+        return fakeResponse({ ...SUMMARY, requester: null })
+      }
+      if (url === '/api/staff/requests/PRR-2026-0001/') {
+        return fakeResponse({
+          ...DETAIL,
+          requester: null,
+          footage_preservations: [
+            { id: 9, state: 'no_cameras', confirmation_text: null },
+          ],
+        })
+      }
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    })
+    renderCase('/requests/PRR-2026-0001/collection', ['liaison'], fetchMock)
+
+    expect(await screen.findByText(
+      /Footage may be overwritten — No cameras in Aware at the requested site/,
+    )).toBeInTheDocument()
+  })
+
+  it.each([
+    {
+      name: 'an expired window needs an adequate-search review',
+      preservation: { id: 9, state: 'expired', confirmation_text: null },
+      label: 'Window outside retention — adequate-search review required',
+      tone: 'nx-badge--danger',
+    },
+    {
+      name: 'a release whose bookmark deletes failed is not plainly "Released"',
+      preservation: {
+        id: 9, state: 'released', confirmation_text: null, has_release_failures: true,
+      },
+      label: 'Not yet confirmed deleted — bookmark may still exist; the release retries automatically',
+      tone: 'nx-badge--danger',
+    },
+    {
+      name: 'a clean release reads Released',
+      preservation: {
+        id: 9, state: 'released', confirmation_text: null, has_release_failures: false,
+      },
+      label: 'Released',
+      tone: 'nx-badge--plain',
+    },
+  ])('labels the case footage card like Preservations: $name', async ({ preservation, label, tone }) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/workspace-summary/')) {
+        return fakeResponse({ ...SUMMARY, requester: null })
+      }
+      if (url === '/api/staff/requests/PRR-2026-0001/') {
+        return fakeResponse({ ...DETAIL, requester: null, footage_preservations: [preservation] })
+      }
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    })
+    renderCase('/requests/PRR-2026-0001/collection', ['liaison'], fetchMock)
+
+    const badge = await screen.findByText(label)
+    expect(badge).toHaveClass('nx-badge', tone)
+  })
+
+  it('shows what Aware confirmed held on the case summary', async () => {
+    const confirmation =
+      '3 cameras across the district held from 2026-09-22 00:00 to 2026-09-23 00:00 '
+      + 'Pacific time (Aware bookmarks, no expiry); 0 cameras have footage gaps; 0 failed.'
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/workspace-summary/')) {
+        return fakeResponse({ ...SUMMARY, requester: null })
+      }
+      if (url === '/api/staff/requests/PRR-2026-0001/') {
+        return fakeResponse({
+          ...DETAIL,
+          requester: null,
+          footage_preservations: [
+            { id: 9, state: 'held', confirmation_text: confirmation },
+          ],
+        })
+      }
+      return fakeResponse({ count: 0, next: null, previous: null, results: [] })
+    })
+    renderCase('/requests/PRR-2026-0001/collection', ['liaison'], fetchMock)
+
+    expect(await screen.findByText(confirmation)).toBeInTheDocument()
+  })
+
   it('starts every case with its own Vault end date after a client-side hop', async () => {
     // The route element is reused when only :number changes, so any form
     // state the Collection tab keeps for one case would otherwise bleed into

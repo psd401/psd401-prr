@@ -9,16 +9,24 @@ from unittest import mock
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.utils.formats import date_format
 
+from apps.api.identity import apply_staff_roles
+from apps.api.models import StaffRole
 from apps.audit.models import AuditLog
 from apps.configuration import runtime
 from apps.configuration.models import AppSetting
 from apps.correspondence.models import Correspondence
-from apps.integrations.avigilon.client import AltaNotConfigured
+from apps.integrations.avigilon.client import (
+    AltaNotConfigured,
+    BookmarkHold,
+    Camera,
+    HeadCoverage,
+)
 from apps.integrations.gmail.client import GmailUnavailable, SentMessage
 from apps.records import notifications, tasks, triage
 from apps.records.models import (
@@ -229,8 +237,78 @@ class StaffNotificationServiceTests(TestCase):
             {str(address) for address in message["To"].addresses},
             {"facilities@psd401.net", "records.supervisor@psd401.net"},
         )
-        self.assertIn("saved clips", message.get_body().get_content())
+        body = message.get_body().get_content()
+        self.assertIn('"Manually deleted"', body)
+        self.assertIn("ALL cameras district-wide", body)
+        self.assertNotIn("saved clips", body)
         self.assertFalse(Correspondence.objects.exists())
+
+    @mock.patch("apps.records.notifications.gmail_client.send_raw")
+    def test_a_camera_scoped_manual_hold_names_each_camera_and_is_its_own_alert(
+        self, send_raw,
+    ):
+        send_raw.return_value = SentMessage("gmail-urgent", "thread-urgent")
+        request = make_request(description="Camera footage from yesterday")
+        preservation = FootagePreservation.objects.create(
+            request=request,
+            window_start=timezone.now() - dt.timedelta(days=1),
+            window_end=timezone.now(),
+        )
+
+        first = notifications.notify_footage_manual_hold(preservation, error="Aware down")
+        scoped = notifications.notify_footage_manual_hold(
+            preservation,
+            error="2 camera(s) are not confirmed held",
+            cameras=["Gym Entrance (PHS): failed", "Staff Parking (PHS): footage gap"],
+            condition="partial",
+        )
+
+        self.assertEqual((first, scoped), (True, True))
+        body = BytesParser(policy=policy.default).parsebytes(
+            send_raw.call_args.args[0]
+        ).get_body().get_content()
+        self.assertIn("Gym Entrance (PHS): failed", body)
+        self.assertIn("Staff Parking (PHS): footage gap", body)
+        self.assertNotIn("ALL cameras district-wide", body)
+
+    @mock.patch("apps.records.notifications.gmail_client.send_raw")
+    @mock.patch(
+        "apps.integrations.avigilon.client.list_device_cameras",
+        side_effect=AltaNotConfigured("not configured"),
+    )
+    def test_a_widen_while_aware_is_down_sends_new_manual_instructions(
+        self, _list_device_cameras, send_raw,
+    ):
+        send_raw.return_value = SentMessage("gmail-urgent", "thread-urgent")
+        officer = User.objects.create_user(
+            "widen-notice-officer", password="pw", is_staff=True,
+        )
+        apply_staff_roles(officer, {StaffRole.RECORDS_OFFICER})
+        request = make_request(description="Camera footage from yesterday")
+        preservation = FootagePreservation.objects.create(
+            request=request,
+            window_start=timezone.now() - dt.timedelta(days=1),
+            window_end=timezone.now(),
+            site_codes=["PHS"],
+        )
+        tasks.execute_footage_hold(preservation.id)
+        preservation.refresh_from_db()
+        self.assertEqual(preservation.state, FootagePreservation.State.MANUAL)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            triage.widen_preservation(
+                preservation, actor=officer,
+                reason="The request also names the district office parking lot.",
+            )
+
+        self.assertEqual(send_raw.call_count, 2)
+        part = BytesParser(policy=policy.default).parsebytes(
+            send_raw.call_args.args[0]
+        ).get_body()
+        assert part is not None
+        self.assertIn("ALL cameras district-wide", part.get_content())
+        latest = request.events.order_by("-occurred_at", "-pk").first().note
+        self.assertNotIn("duplicate alert suppressed", latest)
 
     @mock.patch("apps.records.notifications.gmail_client.send_raw")
     def test_unapplied_delivery_effect_is_one_immediate_urgent_staff_alert(
@@ -343,12 +421,12 @@ class StaffNotificationServiceTests(TestCase):
 
     @mock.patch("apps.records.notifications.gmail_client.send_raw")
     @mock.patch(
-        "apps.integrations.avigilon.client.list_cameras",
+        "apps.integrations.avigilon.client.list_device_cameras",
         side_effect=AltaNotConfigured("not configured"),
     )
     def test_repeated_manual_hold_records_suppression_not_delivery_failure(
         self,
-        _list_cameras,
+        _list_device_cameras,
         send_raw,
     ):
         send_raw.return_value = SentMessage("gmail-urgent", "thread-urgent")
@@ -506,10 +584,15 @@ class StaffNotificationSignalTests(TestCase):
         )
 
     @mock.patch("apps.records.notifications.enqueue_staff_notification")
-    @mock.patch("apps.integrations.avigilon.client.list_cameras")
+    @mock.patch(
+        "apps.integrations.avigilon.client.create_bookmark_hold",
+        return_value=BookmarkHold(id="bm-1", coverage=(HeadCoverage("0", 86_400.0, 86_400.0),)),
+    )
+    @mock.patch("apps.integrations.avigilon.client.list_device_cameras")
     def test_manual_hold_and_completed_hold_each_emit_one_signal(
         self,
         list_cameras,
+        _create_bookmark_hold,
         enqueue,
     ):
         list_cameras.side_effect = AltaNotConfigured("not configured")
@@ -532,7 +615,14 @@ class StaffNotificationSignalTests(TestCase):
 
         enqueue.reset_mock()
         list_cameras.side_effect = None
-        list_cameras.return_value = []
+        # Zero cameras is a manual hold, never a completed one (rule 7).
+        list_cameras.return_value = [
+            Camera(
+                id="cam-1", name="Gym", site="PHS", device_group_id="group-PHS",
+                server_group_id="server-1", status="CONNECTED",
+                pruned_to=timezone.now() - dt.timedelta(days=20), sources=("0",),
+            )
+        ]
         second_request = make_request(description="second camera request")
         second = FootagePreservation.objects.create(
             request=second_request,
@@ -549,11 +639,20 @@ class StaffNotificationSignalTests(TestCase):
         )
 
     @mock.patch("apps.records.notifications.enqueue_staff_notification")
-    def test_expired_footage_emits_adequate_search_review_signal(self, enqueue):
+    @mock.patch("apps.integrations.avigilon.client.list_device_cameras")
+    def test_expired_footage_emits_adequate_search_review_signal(self, list_cameras, enqueue):
+        list_cameras.return_value = [
+            Camera(
+                id="cam-1", name="Gym", site="PHS", device_group_id="group-PHS",
+                server_group_id="server-1", status="CONNECTED",
+                pruned_to=timezone.now() - dt.timedelta(days=5), sources=("0",),
+            )
+        ]
         old = (timezone.localdate() - dt.timedelta(days=30)).isoformat()
         request = make_request(description=f"camera footage on {old}")
 
-        triage.triage_footage(request)
+        with self.captureOnCommitCallbacks(execute=True):
+            triage.triage_footage(request)
 
         enqueue.assert_called_once()
         self.assertEqual(
