@@ -839,3 +839,34 @@ it('picks an AI model from the approved list instead of typing it', async () => 
     .toEqual(['Not set', 'us.amazon.nova-2-lite-v1:0', 'us.openai.gpt-6.1-terra'])
   expect(within(dialog).getByText('Pick one of the AI models the district has approved.')).toBeInTheDocument()
 })
+
+it('says a passed check was verified without naming a system it did not use', async () => {
+  const payload = settingsPayload()
+  payload.categories.push('Integrations')
+  payload.results.push({
+    key: 'ALTA_API_USERNAME',
+    label: 'Aware sign-in account',
+    type: 'email',
+    category: 'Integrations',
+    consequence: 'The account the application signs in to Aware as.',
+    value: 'holds@example.org',
+    default: '',
+    ...SHAPE,
+    max_length: 255,
+    allow_blank: true,
+    verification: {
+      ok: true,
+      detail: '',
+      checked_at: '2026-11-16T19:53:00Z',
+    },
+    requires: [],
+    required_by: [],
+    last_change: null,
+  })
+  stubFetch(async () => ok(payload))
+
+  renderPage()
+
+  expect(await screen.findByText(/^Verified on /)).toBeInTheDocument()
+  expect(screen.queryByText(/Verified against Google/)).not.toBeInTheDocument()
+})
