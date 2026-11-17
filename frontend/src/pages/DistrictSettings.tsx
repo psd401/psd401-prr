@@ -348,7 +348,7 @@ function VerificationNote({ setting }: { setting: DistrictSetting }) {
   if (check.ok) {
     return (
       <p className="mt-2 text-xs text-ink-muted">
-        {`Verified against Google on ${formatWhen(check.checked_at)}.`}
+        {`Verified on ${formatWhen(check.checked_at)}.`}
       </p>
     )
   }
