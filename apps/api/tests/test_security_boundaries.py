@@ -722,21 +722,30 @@ class DependencySecurityAutomationTests(SimpleTestCase):
         self.assertEqual(ignored["redis"], [">=6.5"])
 
     def test_only_patch_level_dev_dependency_updates_auto_merge(self):
-        """standards/04 Tier 1 rule 4: nothing else auto-merges."""
-        workflow = yaml.load(
-            (
-                settings.BASE_DIR / ".github/workflows/dependabot-auto-merge.yml"
-            ).read_text(),
-            Loader=yaml.BaseLoader,
-        )
+        """standards/04 Tier 1 rule 4: nothing else auto-merges.
+
+        The org reusable (PSD401/.github
+        `reusable-dependabot-auto-merge.yml`) owns the rule: the
+        required-status-check gate, the per-commit Dependabot provenance
+        check and the patch-only development-dependency match. This repo owns
+        only the caller, so this test pins what the caller decides.
+        """
+        text = (
+            settings.BASE_DIR / ".github/workflows/dependabot-auto-merge.yml"
+        ).read_text()
+        workflow = yaml.load(text, Loader=yaml.BaseLoader)
 
         # A Dependabot run starts from a read-only `GITHUB_TOKEN`, but
         # Dependabot `pull_request` runs respect the `permissions` key (GitHub,
-        # 2021-10-11), so these two writes are what let the merge step work.
+        # 2021-10-11), so the job's two writes are what let the merge work.
         # `pull_request_target` is documented as read-only with no secrets when
         # the base ref was created by Dependabot, so switching the trigger
         # would break the merge rather than fix it.
         self.assertEqual(workflow["on"], "pull_request")
+        # Deny by default; the job grants only what it needs (psd-dev-standards
+        # standards/06 section 4).
+        self.assertEqual(workflow["permissions"], {})
+        self.assertEqual(list(workflow["jobs"]), ["auto-merge"])
         job = workflow["jobs"]["auto-merge"]
         self.assertEqual(
             job["permissions"],
@@ -748,56 +757,24 @@ class DependencySecurityAutomationTests(SimpleTestCase):
             "github.event.pull_request.user.login == 'dependabot[bot]'",
             job["if"],
         )
-        merge_step = next(
-            (
-                step
-                for step in job["steps"]
-                if "gh pr merge" in step.get("run", "")
-            ),
-            None,
-        )
-        self.assertIsNotNone(merge_step, "no step merges the pull request")
-        # Both conditions are positive matches, so an empty or unexpected
-        # metadata value leaves the pull request for a human.
-        self.assertIn(
-            "update-type == 'version-update:semver-patch'", merge_step["if"]
-        )
-        self.assertIn("dependency-type == 'direct:development'", merge_step["if"])
-        # `--auto` waits only for the checks the base branch requires, and the
-        # org ruleset that requires psd-ci, claude-review and license-check was
-        # still in `evaluate` mode on 2026-10-13. Without this gate the
-        # standard's "when CI is green" would not hold.
-        self.assertIn("steps.gate.outputs.enforced == 'true'", merge_step["if"])
-        gate_step = next(
-            (step for step in job["steps"] if step.get("id") == "gate"), None
-        )
-        self.assertIsNotNone(gate_step, "no step checks the base branch's rules")
-        self.assertIn("required_status_checks", gate_step["run"])
-        self.assertIn("--auto", merge_step["run"])
-        # The job's author check is the pull request's author, which survives a
-        # further commit pushed to the branch by someone else.
-        self.assertIn(
-            "steps.provenance.outputs.dependabot == 'true'", merge_step["if"]
-        )
-        provenance_step = next(
-            (step for step in job["steps"] if step.get("id") == "provenance"), None
+        # The org reusable at a release commit, with the release tag beside
+        # the SHA so a reviewer and Dependabot can read which release it is.
+        # Matched on the raw line because YAML drops the comment, then tied to
+        # the parsed job so a commented-out line cannot satisfy it.
+        pinned = re.search(
+            r"^\s+uses:\s*(PSD401/\.github/\.github/workflows/"
+            r"reusable-dependabot-auto-merge\.yml@[0-9a-f]{40})"
+            r"\s+#\s*v\d+\.\d+\.\d+\s*$",
+            text,
+            re.MULTILINE,
         )
         self.assertIsNotNone(
-            provenance_step, "no step checks who wrote the commits"
+            pinned, "auto-merge does not call the org reusable at a tagged SHA"
         )
-        self.assertIn('author.login != "dependabot[bot]"', provenance_step["run"])
-        self.assertIn("verification.verified", provenance_step["run"])
-        # The gate must fail closed when the commits API call fails. Actions
-        # runs `bash -e {0}` without `pipefail`, so a `gh api | wc -l` pipeline
-        # reports `wc`'s success even when `gh` failed -- which would read as
-        # "no offending commits" and wave the pull request through. Two things
-        # keep that shut: `pipefail`, and taking the decision from a bare
-        # command substitution rather than the tail of a pipeline.
-        self.assertIn("set -o pipefail", provenance_step["run"])
-        # `-z` on the captured output, not a numeric compare of a piped count:
-        # an empty capture can only come from a successful call that matched
-        # nothing, because a failed `gh api` exits the step before this branch.
-        self.assertIn('if [ -z "$offenders" ]', provenance_step["run"])
+        self.assertEqual(job["uses"], pinned.group(1))
+        # The reusable defaults to squash; this repo merges Dependabot pull
+        # requests with a merge commit.
+        self.assertEqual(job["with"], {"merge_method": "merge"})
 
     def test_the_wiki_cannot_restate_host_and_account_runbooks(self):
         """standards/06 section 3: `.openwikiignore` is the read boundary.

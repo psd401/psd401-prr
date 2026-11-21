@@ -6,14 +6,15 @@
 #     is scheduled as migration work rather than batched into a green PR;
 #   * security updates are unaffected -- cooldown and `ignore` never suppress
 #     Dependabot alerts or security bumps;
-#   * patch-level development-dependency pull requests auto-merge when CI is
-#     green (.github/workflows/dependabot-auto-merge.yml). Nothing else does.
+#   * a pull request whose every update is a patch to a development
+#     dependency auto-merges once the required checks pass
+#     (.github/workflows/dependabot-auto-merge.yml, a caller of the org
+#     reusable-dependabot-auto-merge.yml). Nothing else does.
 #
 # Groups are split by `dependency-type` wherever a manifest has both kinds,
-# because `dependabot/fetch-metadata` reports the highest-priority type in a
-# group: batched together, every pull request would look like
-# `direct:production` and the development-scoped auto-merge rule could never
-# fire.
+# because the auto-merge rule requires every update in a pull request to be a
+# development dependency: batched together, one production update would leave
+# every development update in the group for a person.
 #
 version: 2
 updates:
