@@ -1,6 +1,6 @@
 {
   "pyright": "1.1.414",
-  "total": 1762,
+  "total": 1753,
   "files": {
     "apps/api/access_tokens.py": 2,
     "apps/api/advisory.py": 1,
@@ -73,7 +73,7 @@
     "apps/api/tests/test_requester_correction_api.py": 3,
     "apps/api/tests/test_requests.py": 15,
     "apps/api/tests/test_review_throughput_api.py": 7,
-    "apps/api/tests/test_security_boundaries.py": 15,
+    "apps/api/tests/test_security_boundaries.py": 6,
     "apps/api/tests/test_security_remediations.py": 9,
     "apps/api/tests/test_staff_identity.py": 25,
     "apps/api/tests/test_staff_intake.py": 1,
