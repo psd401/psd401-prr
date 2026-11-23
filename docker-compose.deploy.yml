@@ -39,7 +39,7 @@ services:
   # over the compose network; only web:8000 is exposed. For one-off access
   # use `docker compose -f docker-compose.deploy.yml exec db psql -U prr`.
   db:
-    image: postgres:16
+    image: postgres:19
     environment:
       POSTGRES_DB: prr
       # Keep the original owner name so existing volumes remain upgradeable.
@@ -67,7 +67,7 @@ services:
   # Re-runs the idempotent role/grant bootstrap for existing as well as new
   # database volumes. Owner and app passwords exist only in this one-shot.
   db-role-init:
-    image: postgres:16
+    image: postgres:19
     entrypoint:
       - /bin/bash
       - /bootstrap/001-create-app-user.sh
