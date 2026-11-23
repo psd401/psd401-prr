@@ -15,7 +15,7 @@ test('officer-rescope', async ({ page }) => {
   await login(page)
   await page.goto(`/requests/${caseNumber}/scope`)
 
-  await expect(page.getByText(/current collection has 2,340 messages; the proposed scope has 412 messages/)).toBeVisible()
+  await expect(page.getByText(/current collection has 2,340 items; the proposed scope has 412 items/)).toBeVisible()
   const approve = page.getByRole('button', { name: 'Approve re-scope' })
   await expect(approve).toBeDisabled()
   await page.getByLabel(/Why change the scope/).fill('The broad search was mostly the district newsletter.')

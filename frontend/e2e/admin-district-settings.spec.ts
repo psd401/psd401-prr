@@ -92,7 +92,7 @@ test('admin-district-settings', async ({ page }) => {
   await expect(retention.getByText('10 days', { exact: true })).toBeVisible()
   await retention.getByRole('button', { name: 'Change' }).click()
   const limitDialog = page.getByRole('dialog')
-  await expect(limitDialog.getByText(/never held and can be overwritten/))
+  await expect(limitDialog.getByText(/can skip a manual hold on footage that still exists/))
     .toBeVisible()
   await expect(limitDialog.getByText('Between 1 and 3,650 days.')).toBeVisible()
   const value = limitDialog.getByRole('spinbutton')

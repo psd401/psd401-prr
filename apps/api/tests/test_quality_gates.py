@@ -28,6 +28,18 @@ def _step(job, name):
     return next(step for step in job["steps"] if step.get("name") == name)
 
 
+def _assert_gh_steps_name_their_repository(test, job):
+    """A job with no checkout has no git remote for `gh` to read.
+
+    Without GH_REPO every `gh issue` call fails with "not a git repository",
+    which is how the nightly report job filed nothing from 2026-11-09 on.
+    """
+    steps = [s for s in job["steps"] if "gh issue" in str(s.get("run", ""))]
+    test.assertTrue(steps)
+    for step in steps:
+        test.assertEqual(step["env"]["GH_REPO"], "${{ github.repository }}")
+
+
 class CiShapeTests(SimpleTestCase):
     def setUp(self):
         self.root = Path(settings.BASE_DIR)
@@ -327,6 +339,7 @@ class NightlyFullSuiteTests(SimpleTestCase):
         self.assertIn("failure()", report["if"])
         self.assertEqual(report["permissions"]["issues"], "write")
         self.assertIn("gh issue", str(report["steps"]))
+        _assert_gh_steps_name_their_repository(self, report)
 
     def test_the_property_tests_are_reproducible_on_one_commit(self):
         """A random search that only sometimes finds a bad date reads as flake.
@@ -396,6 +409,7 @@ class MutationTestingTests(SimpleTestCase):
         self.assertIn("failure()", report["if"])
         self.assertEqual(report["permissions"]["issues"], "write")
         self.assertIn("gh issue", str(report["steps"]))
+        _assert_gh_steps_name_their_repository(self, report)
 
 
 class PropertyTestTests(SimpleTestCase):

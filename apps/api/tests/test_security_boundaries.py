@@ -939,17 +939,15 @@ class DependencySecurityAutomationTests(SimpleTestCase):
         self.assertNotIn("concurrency", openwiki)
 
     def test_org_ruleset_required_checks_are_reported(self):
-        """The org rulesets require `psd-ci / psd-ci` and `license-check`."""
+        """The org rulesets require `psd-ci / psd-ci`; security-scan checks LICENSE."""
         workflow_dir = settings.BASE_DIR / ".github/workflows"
         ci = yaml.load((workflow_dir / "ci.yml").read_text(), Loader=yaml.BaseLoader)
         jobs = yaml.load(
             (workflow_dir / "psd-ci-jobs.yml").read_text(),
             Loader=yaml.BaseLoader,
         )
-        license_check = yaml.load(
-            (workflow_dir / "license-check.yml").read_text(),
-            Loader=yaml.BaseLoader,
-        )
+        security_scan_text = (workflow_dir / "security-scan.yml").read_text()
+        security_scan = yaml.load(security_scan_text, Loader=yaml.BaseLoader)
 
         # The caller job's id `psd-ci` plus the inner job's name `psd-ci`
         # report as `psd-ci / psd-ci`; every CI job runs under that caller.
@@ -966,11 +964,22 @@ class DependencySecurityAutomationTests(SimpleTestCase):
             sorted(name for name in jobs["jobs"] if name != "psd-ci"),
         )
         self.assertIn('"success"', gate["steps"][-1]["run"])
+        # From PSD401/.github v1.8.0 the security-scan reusable runs the LICENSE
+        # check as a step, so the standalone license-check caller (one more
+        # billed job per run) is gone (psd-dev-standards standards/06 §4).
+        scan_job = security_scan["jobs"]["security-scan"]
         self.assertTrue(
-            license_check["jobs"]["license-check"]["uses"].startswith(
-                "PSD401/.github/.github/workflows/reusable-license-check.yml@"
+            scan_job["uses"].startswith(
+                "PSD401/.github/.github/workflows/reusable-security-scan.yml@"
             )
         )
+        version = re.search(r"# v(\d+)\.(\d+)\.(\d+)", security_scan_text)
+        assert version is not None, "security-scan pin has no # vX.Y.Z comment"
+        self.assertGreaterEqual(tuple(int(n) for n in version.groups()), (1, 8, 0))
+        self.assertNotIn("check_license", scan_job.get("with", {}))
+        self.assertFalse((workflow_dir / "license-check.yml").exists())
+        # A merged PR already passed CI; only security-scan reruns on main.
+        self.assertNotIn("push", ci["on"])
         self.assertTrue((settings.BASE_DIR / ".github/CODEOWNERS").is_file())
 
     def test_claude_comment_trigger_is_limited_to_trusted_authors(self):
