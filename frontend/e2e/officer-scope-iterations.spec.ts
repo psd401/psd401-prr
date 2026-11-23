@@ -16,9 +16,9 @@ test('officer-scope-iterations', async ({ page }) => {
 
   const trail = page.getByRole('list', { name: 'Scope iterations' })
   await expect(trail.getByRole('listitem')).toHaveCount(2)
-  await expect(trail.getByText('2,340 messages')).toBeVisible()
+  await expect(trail.getByText('2,340 items')).toBeVisible()
   await expect(trail.getByText(/Most matches were the district newsletter/)).toBeVisible()
-  await expect(page.getByText(/Proposed scope: count 2, 412 messages in 1 named mailbox/)).toBeVisible()
+  await expect(page.getByText(/Proposed scope: count 2, 412 items in 1 named account/)).toBeVisible()
   await page.getByText('Proposed scope:').scrollIntoViewIfNeeded()
   await page.screenshot({
     path: path.resolve('../.verification/officer-scope-iterations.png'),

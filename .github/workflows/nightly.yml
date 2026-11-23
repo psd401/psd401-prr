@@ -97,6 +97,9 @@ jobs:
       - name: Open or update the tracking issue
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job has no checkout, so `gh` cannot infer the repository from
+          # a git remote and fails with "not a git repository" without it.
+          GH_REPO: ${{ github.repository }}
           RUN_URL: >-
             ${{ github.server_url }}/${{ github.repository
             }}/actions/runs/${{ github.run_id }}

@@ -18,7 +18,7 @@ test('officer-scope-conversation', async ({ page }) => {
   await page.getByText('Scope: request intent and Vault count').click()
   // The count and the proposed window are already there. Nobody asked for
   // either; the case answered "how big is this?" on arrival.
-  await expect(page.getByText('29,380 possible Gmail messages')).toBeVisible()
+  await expect(page.getByText('29,380 possible Gmail messages', { exact: true })).toBeVisible()
   await expect(
     page.getByText('run automatically when the request arrived', { exact: false }),
   ).toBeVisible()
@@ -28,7 +28,7 @@ test('officer-scope-conversation', async ({ page }) => {
   ).toBeVisible()
 
   await page
-    .getByText('29,380 possible Gmail messages')
+    .getByText('29,380 possible Gmail messages', { exact: true })
     .scrollIntoViewIfNeeded()
   await page.screenshot({
     path: path.resolve('../.verification/officer-scope-count-and-options.png'),
