@@ -174,7 +174,11 @@ def _addresses(message, name) -> tuple[str, ...]:
 def _as_plain_text(raw: bytes) -> tuple[ParsedInboundMessage, int]:
     """The text the officer read, shaped as a parsed message with no files."""
     message, _shown, texts, attachments = _lenient_read(raw)
-    body, _raw_source = _body(raw, texts)
+    # Only real text parts are released. The raw-source fallback is for
+    # reading; filed, it would make MIME source the record of what was asked
+    # (rule 9). An email with no text part releases with an empty body: it can
+    # be added to a case, but cannot open a request.
+    body = _clean("\n\n".join(texts))
     headers: dict[str, str] = {}
     sender = subject = ""
     to: tuple[str, ...] = ()

@@ -125,6 +125,29 @@ class HeldMessageReleaseTests(ReparseFixture):
         self.assertEqual(event.detail["read_as"], "text")
         self.assertEqual(event.detail["attachments_left_held"], 2)
 
+    def test_text_release_never_files_the_raw_source(self):
+        raw = (
+            b"From: Jane <jane@example.org>\r\n"
+            b"To: publicrecords@psd401.net\r\n"
+            b"Subject: Scan\r\n"
+            b"MIME-Version: 1.0\r\n"
+            b'Content-Type: application/pdf; name="scan.pdf"\r\n'
+            b'Content-Disposition: attachment; filename="scan.pdf"\r\n'
+            b"Content-Transfer-Encoding: base64\r\n\r\n"
+            b"JVBERi0xLjQK\r\n"
+        )
+        receipt = self._quarantined_receipt(raw=raw, message_id="m-scan")
+
+        with STRICT_REFUSES:
+            released = self.release(receipt)
+
+        correspondence = released.matched_correspondence
+        self.assertEqual(correspondence.received_body, "")
+        self.assertEqual(correspondence.received_subject, "Scan")
+        with self.assertRaisesMessage(ValidationError, "no text"):
+            self.open_request(released)
+        self.assertFalse(PublicRecordsRequest.objects.exists())
+
     def test_only_a_records_officer_may_release(self):
         receipt = self._quarantined_receipt()
         reviewer = User.objects.create_user(
