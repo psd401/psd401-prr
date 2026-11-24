@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
+from django.test import TransactionTestCase
 
 from apps.api.identity import StaffRole, apply_staff_roles
 from apps.audit.models import AuditLog
@@ -93,3 +95,26 @@ class HeldMessageReaderTests(ReparseFixture):
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertIn("Please see the forwarded request.", response.json()["body"])
+
+
+class HeldMessageReaderTransactionTests(TransactionTestCase):
+    """Postgres refuses select_for_update outside a transaction; SQLite and
+    the ordinary TestCase (one big transaction) hide that, so check it."""
+
+    def test_the_officer_check_runs_inside_a_transaction(self):
+        officer = get_user_model().objects.create_user(
+            "held-tx", "held-tx@psd401.net", "pw", is_staff=True
+        )
+        apply_staff_roles(officer, {StaffRole.RECORDS_OFFICER})
+        seen = []
+
+        def spy(actor, **kwargs):
+            seen.append(transaction.get_connection().in_atomic_block)
+            raise PermissionDenied("stop here")
+
+        with (
+            patch.object(held_messages, "require_current_human_staff", spy),
+            self.assertRaises(PermissionDenied),
+        ):
+            held_messages.readable_held_message("unused", actor=officer)
+        self.assertEqual(seen, [True])
