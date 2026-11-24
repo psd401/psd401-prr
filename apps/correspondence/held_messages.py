@@ -18,6 +18,7 @@ import re
 from email.header import decode_header, make_header
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 
 from apps.api.models import StaffRole
 from apps.audit.models import audit
@@ -54,11 +55,14 @@ def _decoded(part) -> str:
 
 def readable_held_message(receipt_id, *, actor) -> dict:
     """Return a held email's headers, text, and attachment names."""
-    actor = require_current_human_staff(
-        actor,
-        roles=(StaffRole.RECORDS_OFFICER,),
-        message="Only a Records Officer may read a held email.",
-    )
+    # The officer check locks the staff row with select_for_update, which
+    # Postgres refuses outside a transaction (SQLite silently allows it).
+    with transaction.atomic():
+        actor = require_current_human_staff(
+            actor,
+            roles=(StaffRole.RECORDS_OFFICER,),
+            message="Only a Records Officer may read a held email.",
+        )
     receipt = InboundCorrespondenceReceipt.objects.get(pk=receipt_id)
     if receipt.parsing_status not in {
         InboundCorrespondenceReceipt.ParsingStatus.FAILED,
