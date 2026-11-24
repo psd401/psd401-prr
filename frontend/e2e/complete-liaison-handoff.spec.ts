@@ -10,12 +10,12 @@ import {
 
 test('complete-liaison-handoff', async ({ page }) => {
   await login(page, 'e2e-liaison', 'e2e-liaison-local-only')
-  // Login lands on Today; these queues live on the Inbox.
   await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
-  await page.goto('/inbox')
-  await page.getByRole('link', { name: /Open Complete record search/ }).click()
-  await expect(page.getByRole('heading', { name: 'Work context' })).toBeVisible()
-  await page.getByRole('link', { name: 'Open source context' }).click()
+  // A liaison's assigned search lives on the request; Requests finds it.
+  await page.goto('/requests?focus=mine')
+  await expect(page.getByRole('heading', { name: 'Requests' })).toBeVisible()
+  await page.goto('/requests/PRR-E2E-2000/collect')
+  await page.getByRole('row').nth(1).click()
   await expect(page.getByRole('dialog', { name: /Task — request/ })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByText('Restricted', { exact: true })).toBeVisible()

@@ -8,6 +8,7 @@ import { defaultLanding, routeIsAuthorized } from './nav'
 import { CaseWorkspace } from './case/CaseWorkspace'
 import {
   LegacyCorrespondenceRedirect,
+  LegacyInboxRedirect,
   LegacyRequestRedirect,
 } from './case/LegacyScopedRoutes'
 import { AgentAccess } from './pages/AgentAccess'
@@ -19,7 +20,8 @@ import { Decisions } from './pages/Decisions'
 import { Exemptions } from './pages/Exemptions'
 import { CounselDomains } from './pages/CounselDomains'
 import { DistrictSettings } from './pages/DistrictSettings'
-import { Inbox } from './pages/Inbox'
+import { Email } from './pages/Email'
+import { Requests } from './pages/Requests'
 import { IdentitySettings } from './pages/IdentitySettings'
 import { Knowledge } from './pages/Knowledge'
 import { Login } from './pages/Login'
@@ -74,7 +76,9 @@ function StaffApp() {
         <Route index element={<Navigate to={defaultLanding(user.roles)} replace />} />
 
         <Route path="work/:id" element={guard(<WorkItemDetail roles={user.roles} />)} />
-        <Route path="cases" element={<Navigate to="/inbox?view=cases" replace />} />
+        <Route path="cases" element={<Navigate to="/requests" replace />} />
+        <Route path="requests" element={guard(<Requests roles={user.roles} />)} />
+        <Route path="email" element={guard(<Email roles={user.roles} />)} />
         <Route
           path="requests/:number"
           element={guard(<LegacyRequestRedirect />)}
@@ -84,7 +88,7 @@ function StaffApp() {
           element={guard(<CaseWorkspace roles={user.roles} />)}
         />
         <Route path="today" element={guard(<Today />)} />
-        <Route path="inbox" element={guard(<Inbox roles={user.roles} />)} />
+        <Route path="inbox" element={<LegacyInboxRedirect />} />
         <Route path="review" element={guard(<Review />)} />
         <Route path="decisions" element={guard(<Decisions />)} />
         <Route path="staff-intake" element={guard(<StaffIntake />)} />
@@ -121,10 +125,9 @@ function StaffApp() {
           element={guard(<Correspondence roles={user.roles} />)}
         />
 
-        {/* My Work merged into the Inbox; its personal queue is a chip there. */}
-        <Route path="my-work" element={<Navigate to="/inbox?view=personal" replace />} />
+        {/* My Work became the Requests filter "Assigned to me". */}
+        <Route path="my-work" element={<Navigate to="/requests?focus=mine" replace />} />
         <Route path="agent-access" element={<Navigate to="/configuration/agent-access" replace />} />
-        <Route path="requests" element={<Navigate to="/inbox?view=cases" replace />} />
         <Route path="intake" element={<Navigate to="/staff-intake" replace />} />
         <Route
           path="correspondence"

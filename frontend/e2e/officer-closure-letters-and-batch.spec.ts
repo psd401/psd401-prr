@@ -56,8 +56,8 @@ test('officer-closure-letters-and-batch', async ({ page }) => {
   await page.keyboard.press('Escape')
   await expect(dialog).toBeHidden()
 
-  await page.goto('/inbox?view=cases')
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
+  await page.goto('/requests')
+  await expect(page.getByRole('heading', { name: 'Requests' })).toBeVisible()
   for (const number of [secondCaseNumber, fixtureRequestNumber]) {
     await page
       .getByRole('checkbox', {

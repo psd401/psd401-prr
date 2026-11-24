@@ -1,6 +1,7 @@
 // ABOUTME: Role-aware information architecture for the authenticated shell.
 // ABOUTME: API role policies remain authoritative; this registry guards routes and navigation.
 import type { StaffRole } from './api/auth'
+import type { WorkItemCounts } from './work'
 
 const WORKFLOW_ROLES: StaffRole[] = ['records_officer', 'liaison', 'reviewer', 'admin']
 const ALL_ROLES: StaffRole[] = [...WORKFLOW_ROLES, 'intake_clerk']
@@ -74,15 +75,24 @@ export interface NavItem {
   path: string
   roles: StaffRole[]
   description?: string
+  /** Queue counts summed into the menu badge: what is waiting there. */
+  badgeCounts?: (keyof WorkItemCounts)[]
 }
 
 /**
- * Three ways in, nothing more: the day's cases, a new request, and settings.
- * Inbox, Review, Decisions, and Oversight still open from their links (Today
- * points to whatever in them needs a person); they are no longer menu stops.
+ * The menu, in the officer's own words: what is due today, every request,
+ * email that is not on a request yet, a new request, and settings. Review,
+ * Decisions, and Oversight open from links on Today and Settings.
  */
 export const PRIMARY_NAV: NavItem[] = [
   { label: 'Today', path: '/today', roles: WORKFLOW_ROLES },
+  { label: 'Requests', path: '/requests', roles: WORKFLOW_ROLES },
+  {
+    label: 'Email',
+    path: '/email',
+    roles: ['records_officer', 'admin'],
+    badgeCounts: ['inbox_unmatched', 'inbox_quarantined', 'inbox_delivery_exceptions'],
+  },
   {
     label: 'New request',
     path: '/staff-intake',
@@ -93,7 +103,6 @@ export const PRIMARY_NAV: NavItem[] = [
 
 /** Pages reached from Today or Settings rather than the menu. */
 const LINKED_ROUTES: [string, StaffRole[]][] = [
-  ['/inbox', ['records_officer', 'liaison', 'admin', 'reviewer']],
   ['/review', ['records_officer', 'reviewer']],
   ['/decisions', ['records_officer', 'reviewer']],
   ['/oversight', ['records_officer', 'reviewer', 'admin']],

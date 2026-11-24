@@ -7,8 +7,8 @@ import { login } from './message-workspace.helpers.js'
 test('intake-clerk-route-boundary', async ({ page }) => {
   await login(page, 'e2e-intake', 'e2e-intake-local-only')
   await expect(page.getByRole('heading', { name: 'Staff intake' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Inbox' })).toHaveCount(0)
-  await expect(page.getByRole('link', { name: /Inbox/ })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'Requests' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: /^Email/ })).toHaveCount(0)
 
   const protectedRequests: string[] = []
   page.on('request', (request) => {
@@ -25,6 +25,8 @@ test('intake-clerk-route-boundary', async ({ page }) => {
   for (const path of [
     '/inbox',
     '/cases',
+    '/requests',
+    '/email',
     '/requests/PRR-E2E-2000',
     '/configuration/identity',
   ]) {

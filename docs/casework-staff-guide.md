@@ -16,10 +16,10 @@ in, such as *Send acknowledgment*, *Set the scope*, *Review 40 records*, or
 *Close the case*. The button opens the case where that step is done. A grey
 button means the case is waiting on the requester.
 
-Above the list, small links name work that is not on a case yet: email that
-needs a case, email held for review, messages that did not deliver, and
-decisions waiting for a person. Each opens the Inbox view or the Decisions
-page that handles it.
+Above the list, small links name work that is not on a case yet: email with
+no matching request, email that couldn't be read, letters that bounced, and
+decisions waiting for a person. Each opens the Email tab or the Decisions page
+that handles it.
 
 The search box finds any case, open or closed, by number, requester, or words
 in the request.
@@ -29,35 +29,41 @@ configuration and, under *Reports*, JLARC reporting, the audit log, and the AI
 evaluation and agreement reports. District settings opens on *Main* -- the AI
 switches, the day-5 safety net, the AI models (picked from the approved list),
 and the trust ladder -- with every other limit and timeout under *Advanced
-settings*; the search box finds any of them. The Inbox, Review, Decisions, and Oversight
-pages still open from their links and old bookmarks.
+settings*; the search box finds any of them. Review, Decisions, and Oversight open from
+their links on Today and Settings. Old Inbox links and bookmarks open the
+Requests or Email page that does that job now.
 
-## Triage the Inbox
+## Requests
 
-The Inbox groups its views by what they ask of you rather than listing them all
-as equals:
+The menu is **Today · Requests · Email · New request · Settings**.
 
-- **Needs you**: Needs attention, Awaiting statutory response, New, Unmatched,
-  Quarantined, and Delivery exceptions.
-- **Your queues** (every kind of work, not only messages): Assigned to you,
-  Unassigned, Team, and Critical.
-- **In progress**: Replies waiting, and Waiting on others.
-- **Reference**: Received, Handled, No action, Recently changed, and All.
+**Requests** lists every request, open ones by default, soonest due first,
+with requests that have new requester email flagged at the top. The status
+box switches to closed requests, every status, or one status. The filters
+above the list narrow it to what needs doing, each with the count of open
+requests it holds:
 
-**Awaiting statutory response** lists every received request that has no
-delivered five-business-day response under RCW 42.56.520, soonest due first,
-with its due date on each row. A draft or an approval does not satisfy the
-deadline; only a confirmed delivery does. The Intake stage of each of those
-cases shows the ordered steps that remain — prepare the draft, approve the
-exact wording, queue it, and wait for the mail provider to confirm — along with
-the single next action.
+- **5-day response due**: received requests with no delivered RCW 42.56.520
+  response. A draft or an approval does not satisfy the deadline; only a
+  confirmed delivery does. Each case's Intake stage shows the steps left.
+- **New email**: requests with a requester email nobody has handled. Read and
+  handle it on the request's Messages tab.
+- **Unpaid fee**: a fee or deposit unanswered for thirty days.
+- **Assigned to me**: requests you own or have work assigned on.
 
-A Records Officer message row is named by its subject line and states, without
-opening anything, the message kind, its timestamp, the attachment count, a
-bounded snippet, the case number, that case's legal status, its statutory
-response position, and the response due date. Full bodies, attachments, and
-requester identity still open only inside the authorized case. The Application
-Admin Inbox stays limited to sanitized delivery-exception work with no
+Tick requests to act on several at once: **Deny as bot requests** sends each
+an RCW 42.56.080(3) denial from the named template and closes it as denied in
+one click; **Draft notices for these cases** drafts a completion closure or a
+general notice for each, to read and send together.
+
+## Email
+
+**Email** holds mail that came in but is not on a request yet, in three tabs:
+**No matching request**, **Couldn't be read** (the parser refused it; *Review*
+shows its headers and text from the stored copy, with attachments named but
+never opened), and **Bounced** (our letters that did not deliver). Every row
+can be ticked and dismissed as not a request. The menu badge is the total
+waiting across the three. An Application Admin sees only **Bounced**, with no
 requester or message content.
 
 Each row also carries the dispositions an officer needs:
@@ -308,8 +314,8 @@ requester. Use role titles and district accounts, never student names.
 
 When a requester follows up from a fresh email thread, intake opens a new case
 for it rather than guessing which existing case it belongs to. When you
-recognize the real case, use **Add to an existing case…** — from the Inbox row
-or from the auto-created case's Overview. Give the case number and say why.
+recognize the real case, use **Add to an existing case…** — from the
+auto-created case's Overview. Give the case number and say why.
 
 That is one action, not two: the message and all of its attachments move to
 the case you name, and the leftover case closes as not a records request with

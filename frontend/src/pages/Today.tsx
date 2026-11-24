@@ -69,9 +69,9 @@ export function Today() {
   const waitingDecisions = decisions.data ? unwrap(decisions.data).length : 0
   // Work that belongs to no case yet, beside the cases themselves.
   const needsYou = [
-    { count: counts.data?.inbox_unmatched ?? 0, one: 'email needs a case', many: 'emails need a case', to: '/inbox?view=unmatched' },
-    { count: counts.data?.inbox_quarantined ?? 0, one: 'email held for review', many: 'emails held for review', to: '/inbox?view=quarantined' },
-    { count: counts.data?.inbox_delivery_exceptions ?? 0, one: 'message did not deliver', many: 'messages did not deliver', to: '/inbox?view=delivery_exceptions' },
+    { count: counts.data?.inbox_unmatched ?? 0, one: 'email has no matching request', many: 'emails have no matching request', to: '/email?tab=no_match' },
+    { count: counts.data?.inbox_quarantined ?? 0, one: "email couldn't be read", many: "emails couldn't be read", to: '/email?tab=unreadable' },
+    { count: counts.data?.inbox_delivery_exceptions ?? 0, one: 'letter bounced', many: 'letters bounced', to: '/email?tab=bounced' },
     { count: waitingDecisions, one: 'decision waiting', many: 'decisions waiting', to: '/decisions' },
   ].filter((item) => item.count > 0)
   const lateCount = rows.filter((row) => dueLabel(row.next_due).tone === 'late').length

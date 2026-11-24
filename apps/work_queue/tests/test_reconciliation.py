@@ -70,13 +70,16 @@ class InboundWorkItemReconciliationTests(TestCase):
             provider_message_id=f"inbound-correspondence-{self.sequence}",
         )
 
-    def make_receipt(self, *, matching_status="unmatched", match_method=""):
+    def make_receipt(
+        self, *, matching_status="unmatched", match_method="", kind=None,
+    ):
         self.sequence += 1
         matched = matching_status == InboundCorrespondenceReceipt.MatchingStatus.MATCHED
         candidate = matching_status == InboundCorrespondenceReceipt.MatchingStatus.CANDIDATE
         quarantined = matching_status == InboundCorrespondenceReceipt.MatchingStatus.QUARANTINED
         correspondence = None if quarantined else self.make_correspondence(
             request=self.request if matched else None,
+            kind=kind,
         )
         values = {
             "provider": "gmail",
@@ -280,6 +283,16 @@ class InboundWorkItemReconciliationTests(TestCase):
         self.assertFalse(
             WorkItem.objects.filter(source_id=str(delivered.pk)).exists()
         )
+
+    def test_unlinked_bounce_needs_a_person_like_any_unmatched_email(self):
+        # A bounce that could not be tied to the letter it bounced has no
+        # delivery to flag, so it is unmatched mail. Without a work item it
+        # sat in the list forever with no checkbox and out of the count.
+        receipt = self.make_receipt(
+            kind=Correspondence.Kind.DELIVERY_STATUS_NOTIFICATION,
+        )
+
+        self.assert_route(receipt, WorkItem.WorkKind.INBOUND_UNMATCHED)
 
     def test_duplicate_receipt_does_not_create_normal_inbound_work(self):
         original = self.make_receipt()

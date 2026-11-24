@@ -31,8 +31,8 @@ vi.mock('./layout/AppLayout', () => ({
 vi.mock('./pages/WorkItem', () => ({
   WorkItemDetail: () => <h1>Work detail child</h1>,
 }))
-vi.mock('./pages/Requests', () => ({ Requests: () => <h1>Cases child</h1> }))
-vi.mock('./pages/Inbox', () => ({ Inbox: () => <h1>Inbox child</h1> }))
+vi.mock('./pages/Requests', () => ({ Requests: () => <h1>Requests child</h1> }))
+vi.mock('./pages/Email', () => ({ Email: () => <h1>Email child</h1> }))
 vi.mock('./pages/Today', () => ({ Today: () => <h1>Today child</h1> }))
 vi.mock('./pages/Review', () => ({ Review: () => <h1>Review child</h1> }))
 vi.mock('./pages/Decisions', () => ({ Decisions: () => <h1>Decisions child</h1> }))
@@ -74,9 +74,9 @@ vi.mock('./pages/Correspondence', () => ({
 import App from './App'
 
 const HEADING_BY_ROUTE: Record<string, string> = {
-  '/cases': 'Cases child',
+  '/requests': 'Requests child',
+  '/email': 'Email child',
   '/today': 'Today child',
-  '/inbox': 'Inbox child',
   '/review': 'Review child',
   '/decisions': 'Decisions child',
   '/staff-intake': 'Staff Intake child',

@@ -19,8 +19,8 @@ test('officer-case-table-sort', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page)
 
-  await page.goto('/inbox?view=cases')
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
+  await page.goto('/requests')
+  await expect(page.getByRole('heading', { name: 'Requests' })).toBeVisible()
   await expect(page.getByRole('columnheader', { name: /Case #/ })).toBeVisible()
 
   const ordered = page.waitForResponse((response) => (
@@ -75,8 +75,8 @@ test('officer-case-table-caught-up', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page)
 
-  await page.goto('/inbox?view=cases_open')
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
+  await page.goto('/requests')
+  await expect(page.getByRole('heading', { name: 'Requests' })).toBeVisible()
   // The column is gone; the marking moved onto the row itself.
   await expect(page.getByRole('columnheader', { name: 'New activity' }))
     .toHaveCount(0)
@@ -133,7 +133,7 @@ test('officer-case-table-row-opens-the-case', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page)
 
-  await page.goto('/inbox?view=cases_open')
+  await page.goto('/requests')
   await expect(page.getByRole('columnheader', { name: /Case #/ })).toBeVisible()
   const row = page.getByRole('row').nth(1)
   const number = (await row.getByRole('link', { name: /^Open case / })
@@ -141,7 +141,7 @@ test('officer-case-table-row-opens-the-case', async ({ page }) => {
 
   // A checkbox owns its own click, and the list stays put.
   await row.getByRole('checkbox').first().click()
-  await expect(page).toHaveURL(/\/inbox/)
+  await expect(page).toHaveURL(/\/requests$/)
   await expect(page.getByText(/1 case selected/)).toBeVisible()
 
   await page.screenshot({
@@ -160,7 +160,7 @@ test('officer-case-table-row-opens-from-the-keyboard', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page)
 
-  await page.goto('/inbox?view=cases_open')
+  await page.goto('/requests')
   await expect(page.getByRole('columnheader', { name: /Case #/ })).toBeVisible()
   const row = page.getByRole('row').nth(1)
   const number = (await row.getByRole('link', { name: /^Open case / })
@@ -192,7 +192,7 @@ test('officer-case-table-bulk-caught-up', async ({ page }) => {
     await route.fulfill({ status: 200, json: { handled: 1 } })
   })
 
-  await page.goto('/inbox?view=cases_open')
+  await page.goto('/requests')
   await expect(page.getByRole('columnheader', { name: /Case #/ })).toBeVisible()
   await page
     .getByRole('checkbox', {

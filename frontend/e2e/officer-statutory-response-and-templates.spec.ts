@@ -12,56 +12,13 @@ test('officer-statutory-response-and-templates', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await login(page)
 
-  // Workstream B: grouped chips and the statutory backlog with triage context.
-  await page.goto('/inbox')
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
-  // Decide-now queues are chips; the taxonomy that used to fill the page is
-  // intact inside the menu.
-  await expect(page.getByRole('button', { name: /Needs attention/ })).toBeVisible()
-  // Reference and secondary queues live behind "More views" now; the command
-  // bar carries only the queues where not looking has a consequence.
-  await page.getByRole('button', { name: /More views/ }).click()
-  await expect(
-    page.getByRole('group', { name: 'Inbox views: Reference' }),
-  ).toBeVisible()
-  await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: /More views/ }).click()
-
-  await page.getByRole('button', { name: /^Awaiting statutory response/ }).click()
-  await expect(page).toHaveURL(/view=awaiting_statutory_response/)
-  await expect(page.getByText(/does not satisfy the deadline/)).toBeVisible()
+  // Workstream B: the 5-day backlog is a Requests filter.
+  await page.goto('/requests')
+  await expect(page.getByRole('heading', { name: 'Requests' })).toBeVisible()
+  await page.getByRole('button', { name: /^5-day response due/ }).click()
   await expect(page.getByText(awaitingRequestNumber)).toBeVisible()
-  await expect(page.getByText(/Statutory response due: Jan 20, 2026/)).toBeVisible()
   await page.screenshot({
     path: evidencePath('officer-awaiting-statutory-response.png'),
-    fullPage: false,
-  })
-
-  // Officer message rows are named by their subject and carry triage context.
-  // Reference and secondary queues live behind "More views" now; the command
-  // bar carries only the queues where not looking has a consequence.
-  await page.getByRole('button', { name: /More views/ }).click()
-  await page.getByRole('button', { name: /^All messages/ }).click()
-  await expect(page.getByRole('link', { name: /^Open case / }).first()).toBeVisible()
-  const triageRow = page.getByRole('listitem').first()
-  // The subject is the row title and the snippet sits under it. The
-  // scanning metadata - work kind, message kind, legal status, statutory
-  // position - is one small line of plain text at the bottom of the row now,
-  // not a stack of uppercase pills above the message.
-  await expect(triageRow.getByText('Synthetic inbound message 0000'))
-    .toBeVisible()
-  await expect(triageRow.getByText('Requester reply')).toBeVisible()
-  await expect(triageRow.getByText('Clarification response')).toBeVisible()
-  // The case's legal status, whatever earlier flows in this suite moved it to.
-  await expect(triageRow).toHaveText(
-    /(Received|Acknowledged|Awaiting clarification|Gathering records|Review and redaction|Producing installments|Fulfilled|Denied|Closed — )/,
-  )
-  await expect(triageRow.getByText('Five-day response delivered')).toBeVisible()
-  await expect(triageRow.getByText(/Jan \d+, 2026, \d+:\d+/)).toBeVisible()
-  await expect(triageRow.getByText(/Synthetic casework message 0000/))
-    .toBeVisible()
-  await page.screenshot({
-    path: evidencePath('officer-inbox-triage-context.png'),
     fullPage: false,
   })
 
@@ -166,7 +123,7 @@ test('officer-statutory-response-and-templates', async ({ page }) => {
     'Denial',
     'General correspondence',
   ]) {
-    await expect(page.getByRole('heading', { name: label })).toBeVisible()
+    await expect(page.getByRole('heading', { name: label, exact: true })).toBeVisible()
   }
   await expect(page.getByText('Structured template').first()).toBeVisible()
   await expect(page.getByText('Staff-authored').first()).toBeVisible()

@@ -1,7 +1,7 @@
 // ABOUTME: What Today says about a case: its one next step and how soon it
 // ABOUTME: is due, in the words a person would use.
 import { pacificDateString } from './date'
-import type { CaseListItem } from './pages/Inbox'
+import type { CaseListItem } from './pages/Requests'
 
 export interface CaseStage {
   id: 'intake' | 'scope' | 'collect' | 'review' | 'redact' | 'release' | 'close'

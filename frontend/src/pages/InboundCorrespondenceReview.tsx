@@ -73,6 +73,61 @@ function heldUnread(receipt: InboundReceiptSummary): boolean {
   return receipt.parsing_status === 'quarantined' || receipt.parsing_status === 'failed'
 }
 
+interface HeldMessage {
+  headers: [string, string][]
+  body: string
+  attachments: string[]
+  raw_source: boolean
+  truncated: boolean
+}
+
+/**
+ * A held email, read from the copy kept when it arrived. The parser refused
+ * it, so the app saved nothing readable; this shows its headers and text as
+ * plain text. Attachments are named only and never opened.
+ */
+function HeldMessageText({ receiptId }: { receiptId: string }) {
+  const message = useQuery({
+    queryKey: ['held-message', receiptId],
+    queryFn: () => api<HeldMessage>(
+      `/api/staff/inbound-correspondence-receipts/${receiptId}/readable/`,
+    ),
+  })
+  if (message.isPending) return <Spinner label="Reading the held email…" />
+  if (message.isError) return <ErrorNote error={message.error} />
+  const { headers, body, attachments, raw_source, truncated } = message.data
+  return (
+    <div className="space-y-3">
+      {headers.length > 0 && (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+          {headers.map(([name, value]) => (
+            <div key={name} className="contents">
+              <dt className="font-heading font-bold text-ink-muted">{name}</dt>
+              <dd className="break-words text-ink">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {raw_source && (
+        <p className="text-xs text-ink-muted">
+          The email could not be split into parts, so this is its raw source.
+        </p>
+      )}
+      <div className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-line bg-surface-raised p-3 font-mono text-xs text-ink">
+        {body || '(Empty email)'}
+      </div>
+      {truncated && (
+        <p className="text-xs text-ink-muted">Only the first part of a long email is shown.</p>
+      )}
+      {attachments.length > 0 && (
+        <p className="text-sm text-ink">
+          Attachments (not opened): {attachments.join(', ')}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function receiptTitle(receipt: InboundReceiptSummary): string {
   if (heldUnread(receipt)) {
     return 'Email held: PRR could not read it, so no case was opened'
@@ -132,11 +187,14 @@ export function InboundCorrespondenceReview({
   queue: controlledQueue,
   onQueueChange,
   showQueueSelector = true,
+  showReceiptLookup = true,
 }: {
   enabled: boolean
   queue?: ReviewQueue
   onQueueChange?: (queue: ReviewQueue) => void
   showQueueSelector?: boolean
+  /** The open-by-receipt-ID form; an operator's tool, not the Email page's. */
+  showReceiptLookup?: boolean
 }) {
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -493,6 +551,7 @@ export function InboundCorrespondenceReview({
             </Button>
           </div>
         )}
+        {showReceiptLookup && (
         <form
           onSubmit={submitLookup}
           className="flex flex-wrap items-end gap-2"
@@ -516,12 +575,13 @@ export function InboundCorrespondenceReview({
             Open receipt
           </Button>
         </form>
+        )}
       </div>
 
       {list.isPending && <Spinner label="Loading inbound review queue…" />}
       {list.isError && <ErrorNote error={list.error} />}
       {list.isSuccess && rows.length === 0 && (
-        <EmptyState>No messages are waiting in this queue.</EmptyState>
+        <EmptyState>Nothing is waiting here.</EmptyState>
       )}
       {chosenRows.length > 0 && (
         <div
@@ -660,15 +720,21 @@ export function InboundCorrespondenceReview({
                   Receipt {selected.id}
                 </span>
               </div>
-              <h3 className="font-heading text-base font-bold text-ink">
-                {selected.received_subject || '(No subject)'}
-              </h3>
-              <p className="text-xs text-ink-muted">
-                From {selected.received_sender || selected.envelope_sender || 'unknown sender'}
-              </p>
-              <div className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-md border border-line bg-surface-raised p-3 text-sm text-ink">
-                {selected.received_body || '(No plain-text body)'}
-              </div>
+              {heldUnread(selected) ? (
+                <HeldMessageText receiptId={selected.id} />
+              ) : (
+                <>
+                  <h3 className="font-heading text-base font-bold text-ink">
+                    {selected.received_subject || '(No subject)'}
+                  </h3>
+                  <p className="text-xs text-ink-muted">
+                    From {selected.received_sender || selected.envelope_sender || 'unknown sender'}
+                  </p>
+                  <div className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-md border border-line bg-surface-raised p-3 text-sm text-ink">
+                    {selected.received_body || '(No plain-text body)'}
+                  </div>
+                </>
+              )}
             </div>
 
             <section

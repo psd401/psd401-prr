@@ -142,11 +142,11 @@ it('points to work that is not on a case yet', async () => {
 
   expect(await screen.findByRole('link', { name: '2 decisions waiting' }))
     .toHaveAttribute('href', '/decisions')
-  expect(screen.getByRole('link', { name: '1 email needs a case' }))
-    .toHaveAttribute('href', '/inbox?view=unmatched')
-  expect(screen.getByRole('link', { name: '3 messages did not deliver' }))
-    .toHaveAttribute('href', '/inbox?view=delivery_exceptions')
-  expect(screen.queryByText(/held for review/)).not.toBeInTheDocument()
+  expect(screen.getByRole('link', { name: '1 email has no matching request' }))
+    .toHaveAttribute('href', '/email?tab=no_match')
+  expect(screen.getByRole('link', { name: '3 letters bounced' }))
+    .toHaveAttribute('href', '/email?tab=bounced')
+  expect(screen.queryByText(/couldn't be read/)).not.toBeInTheDocument()
 })
 
 it('says so when nothing is open', async () => {

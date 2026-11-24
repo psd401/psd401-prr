@@ -282,7 +282,7 @@ class CaseworkVerificationFoundationTests(SimpleTestCase):
             ),
             "correspondence-destination-parity": (
                 "/correspondence",
-                "/inbox",
+                "/email",
                 "/messages",
                 "/configuration/correspondence",
                 "correspondence-destination-parity-inbox.png",

@@ -86,14 +86,14 @@ describe('LegacyCorrespondenceRedirect', () => {
     )
   })
 
-  it('moves inbound receipt review to the Inbox', async () => {
+  it('moves inbound receipt review to Email', async () => {
     renderCorrespondence(
       '/correspondence?inbound_receipt=99999999-9999-4999-8999-999999999999',
       ['records_officer'],
     )
 
     expect(await screen.findByLabelText('Location')).toHaveTextContent(
-      '/inbox?view=unmatched&inbound_receipt=99999999-9999-4999-8999-999999999999',
+      '/email?tab=no_match&inbound_receipt=99999999-9999-4999-8999-999999999999',
     )
   })
 
@@ -104,36 +104,36 @@ describe('LegacyCorrespondenceRedirect', () => {
     )
 
     expect(await screen.findByLabelText('Location')).toHaveTextContent(
-      '/inbox?view=unmatched&inbound_receipt=99999999-9999-4999-8999-999999999999',
+      '/email?tab=no_match&inbound_receipt=99999999-9999-4999-8999-999999999999',
     )
   })
 
   it.each([
-    ['status=quarantined', 'quarantined'],
-    ['matching_state=quarantined', 'quarantined'],
-    ['status=unmatched', 'unmatched'],
-    ['matching_state=unmatched', 'unmatched'],
-    ['matching_state=candidate', 'unmatched'],
-    ['matching_state=ambiguous', 'unmatched'],
+    ['status=quarantined', 'unreadable'],
+    ['matching_state=quarantined', 'unreadable'],
+    ['status=unmatched', 'no_match'],
+    ['matching_state=unmatched', 'no_match'],
+    ['matching_state=candidate', 'no_match'],
+    ['matching_state=ambiguous', 'no_match'],
   ])(
-    'moves legacy inbound filter %s to the %s Inbox view',
-    async (query, view) => {
+    'moves legacy inbound filter %s to the %s Email tab',
+    async (query, tab) => {
       renderCorrespondence(`/correspondence?${query}`, ['records_officer'])
 
       expect(await screen.findByLabelText('Location')).toHaveTextContent(
-        `/inbox?view=${view}`,
+        `/email?tab=${tab}`,
       )
     },
   )
 
-  it('keeps a valid receipt selected in its quarantined Inbox view', async () => {
+  it('keeps a valid receipt selected on the Couldn\'t be read tab', async () => {
     renderCorrespondence(
       '/correspondence?status=quarantined&inbound_receipt=99999999-9999-4999-8999-999999999999',
       ['records_officer'],
     )
 
     expect(await screen.findByLabelText('Location')).toHaveTextContent(
-      '/inbox?view=quarantined&inbound_receipt=99999999-9999-4999-8999-999999999999',
+      '/email?tab=unreadable&inbound_receipt=99999999-9999-4999-8999-999999999999',
     )
   })
 
@@ -177,11 +177,11 @@ describe('LegacyCorrespondenceRedirect', () => {
     )
   })
 
-  it('preserves the legacy received-message queue in Inbox', async () => {
+  it('sends the legacy received-message queue to requests with new email', async () => {
     renderCorrespondence('/correspondence?status=received', ['records_officer'])
 
     expect(await screen.findByLabelText('Location')).toHaveTextContent(
-      '/inbox?view=received',
+      '/requests?focus=new_email',
     )
   })
 

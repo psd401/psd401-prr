@@ -70,10 +70,7 @@ test('officer-fee-estimate-and-deposit', async ({ page }) => {
   await page.keyboard.press('Escape')
   await expect(gate).toBeHidden()
 
-  await page.goto('/inbox')
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
-  await page.getByRole('button', { name: /^More views/ }).click()
-  await expect(
-    page.getByRole('button', { name: /Fee unpaid 30 days/ }),
-  ).toBeVisible()
+  await page.goto('/requests')
+  await expect(page.getByRole('heading', { name: 'Requests' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Unpaid fee/ })).toBeVisible()
 })

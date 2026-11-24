@@ -9,85 +9,48 @@ const evidencePath = (name: string) => path.resolve(
 )
 
 test('role-aware-work-inbox', async ({ page }) => {
+  const menu = page.getByRole('navigation', { name: 'Primary navigation' })
+
   await login(page)
-  // The officer lands on Today; the Inbox's queues stay one link away.
+  // The officer lands on Today; every other page is a menu stop.
   await expect(page).toHaveURL(/\/today$/)
   await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
-  await page.goto('/inbox')
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Needs attention' })).toBeVisible()
-  // "Assigned to you" is a command-bar chip; the rest of the retired My Work
-  // queues keep their group inside the menu.
-  await expect(page.getByRole('button', { name: /Assigned to you/ })).toBeVisible()
-  // Reference and secondary queues live behind "More views" now; the command
-  // bar carries only the queues where not looking has a consequence.
-  await page.getByRole('button', { name: /More views/ }).click()
-  await expect(
-    page.getByRole('group', { name: 'Inbox views: Your queues' }),
-  ).toBeVisible()
-  await page.getByRole('button', { name: /^Team/ }).click()
-  await expect(page.getByText('Complete record search').first()).toBeVisible()
+  await expect(menu.getByRole('link')).toHaveText([
+    'Today', 'Requests', /^Email/, 'New request', 'Settings',
+  ])
+  await menu.getByRole('link', { name: 'Requests' }).click()
+  await expect(page.getByRole('heading', { name: 'Requests' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^5-day response due/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^New email/ })).toBeVisible()
+  await expect(page.getByRole('combobox', { name: 'Case status' })).toHaveValue('open')
   await page.screenshot({ path: evidencePath('officer-shell.png'), fullPage: false })
-  await page.getByRole('link', { name: /^Open .* for / }).first().click()
-  await expect(page.getByRole('heading', { name: 'Work context' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'No action required' })).toBeVisible()
-  await page.goBack()
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
-  // Reference and secondary queues live behind "More views" now; the command
-  // bar carries only the queues where not looking has a consequence.
-  await page.getByRole('button', { name: /More views/ }).click()
-  await page.getByRole('button', { name: /^All messages/ }).click()
-  // The row is named by its subject and states where its case stands, so it
-  // can be triaged without opening anything.
-  await expect(page.getByRole('link', { name: /^Open case / }).first()).toBeVisible()
-  const triageRow = page.getByRole('listitem').first()
-  await expect(triageRow.getByText('Synthetic inbound message 0000')).toBeVisible()
-  await expect(triageRow.getByText('Requester reply')).toBeVisible()
-  await expect(triageRow.getByText(/PRR-E2E-2000 · Response due /)).toBeVisible()
-  // Open case is always on the row. While the row still has unresolved work,
-  // Mark handled joins it inline and the reasoned officer-only decisions sit
-  // one disclosure away, so the row stays dense without hiding the common
-  // action. Earlier specs in this suite may already have dispositioned this
-  // row, in which case only the deep link remains.
-  await expect(triageRow.getByRole('link', { name: /^Open case / })).toBeVisible()
-  const overflow = triageRow.getByRole('button', { name: /^More actions: / })
-  if (await overflow.count()) {
-    await expect(triageRow.getByRole('button', { name: /^Mark handled: / }))
-      .toBeVisible()
-    await overflow.click()
-    await expect(triageRow.getByRole('button', { name: /^No action: / }))
-      .toBeVisible()
-  }
-  await expect(triageRow.getByRole('link', { name: /^Work details: / })).toBeVisible()
-  if (await overflow.count()) await overflow.click()
+  await menu.getByRole('link', { name: /^Email/ }).click()
+  await expect(page.getByRole('heading', { name: 'Email' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^No matching request/ }))
+    .toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('button', { name: /^Couldn't be read/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Bounced/ })).toBeVisible()
   await page.waitForTimeout(250)
   await page.screenshot({ path: evidencePath('officer-inbox.png'), fullPage: false })
+  // An old Inbox bookmark opens the page that does that job now.
+  await page.goto('/inbox?view=unmatched')
+  await expect(page).toHaveURL(/\/email\?tab=no_match$/)
   await page.goto('/configuration/identity')
   await expect(page.getByRole('heading', { name: 'Not authorized' })).toBeVisible()
   await signOut(page)
 
   await login(page, 'e2e-liaison', 'e2e-liaison-local-only')
   await expect(page).toHaveURL(/\/today$/)
-  await page.goto('/inbox')
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
-  // A liaison gets the assignment queues and no cross-case message triage.
-  await expect(page.getByRole('button', { name: /Assigned to you/ }))
-    .toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByRole('button', { name: 'Needs attention' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Delivery exceptions' }))
-    .toHaveCount(0)
-  await page.getByRole('button', { name: /^Team/ }).click()
-  await expect(page.getByText('Complete record search').first()).toBeVisible()
+  // A liaison works their requests and never sees cross-case email.
+  await expect(menu.getByRole('link', { name: /^Email/ })).toHaveCount(0)
+  await menu.getByRole('link', { name: 'Requests' }).click()
+  await expect(page.getByRole('heading', { name: 'Requests' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Assigned to me/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^New email/ })).toHaveCount(0)
+  await page.getByRole('searchbox', { name: 'Search cases' }).fill('PRR-E2E-2000')
+  await page.getByRole('button', { name: 'Search' }).click()
+  await expect(page.getByRole('link', { name: /^Open case PRR-E2E-2000/ })).toBeVisible()
   await page.screenshot({ path: evidencePath('liaison-shell.png'), fullPage: false })
-  await page.getByRole('link', { name: /^Open .* for / }).first().click()
-  await expect(page.getByRole('heading', { name: 'Work context' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'No action required' })).toHaveCount(0)
-  await page.getByRole('link', { name: 'Open source context' }).click()
-  await expect(page).toHaveURL(
-    /\/requests\/PRR-E2E-2000\/collect\?task=\d+$/,
-  )
-  await expect(page.getByRole('dialog', { name: /Task — request/ })).toBeVisible()
-  await page.keyboard.press('Escape')
   await signOut(page)
 
   await login(page, 'e2e-reviewer', 'e2e-reviewer-local-only')
@@ -100,15 +63,13 @@ test('role-aware-work-inbox', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Work context' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'No action required' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Open source context' })).toBeVisible()
-  // The reviewer's Inbox is the case index and nothing else: the server scopes
-  // which cases they see and blanks requester identity, and no cross-case
-  // message queue is offered to them at all.
-  await page.goto('/inbox')
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
-  await expect(page.getByRole('button', { name: /All cases/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Needs attention/ })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /Awaiting statutory response/ }))
-    .toHaveCount(0)
+  // The reviewer's Requests list has no officer-only filters; the server
+  // scopes which requests they see and blanks requester identity.
+  await menu.getByRole('link', { name: 'Requests' }).click()
+  await expect(page.getByRole('heading', { name: 'Requests' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^All/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^New email/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^5-day response due/ })).toHaveCount(0)
   await signOut(page)
 
   await login(page, 'e2e-intake', 'e2e-intake-local-only')
@@ -121,14 +82,12 @@ test('role-aware-work-inbox', async ({ page }) => {
   await expect(page).toHaveURL(/\/configuration$/)
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
   await page.screenshot({ path: evidencePath('admin-shell.png'), fullPage: false })
-  await page.goto('/inbox')
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Delivery exceptions' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Needs attention' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /Assigned to you/ })).toHaveCount(0)
+  await menu.getByRole('link', { name: /^Email/ }).click()
+  await expect(page.getByRole('heading', { name: 'Email' })).toBeVisible()
+  // An administrator sees bounced letters only, never message content.
+  await expect(page.getByRole('button', { name: /^Bounced/ }))
+    .toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('button', { name: /^No matching request/ })).toHaveCount(0)
   await page.waitForTimeout(250)
   await page.screenshot({ path: evidencePath('admin-inbox.png'), fullPage: false })
-  await page.getByRole('link', { name: /^Open .* for / }).first().click()
-  await expect(page.getByRole('heading', { name: 'Work context' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'No action required' })).toHaveCount(0)
 })
