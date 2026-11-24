@@ -61,7 +61,14 @@ general notice for each, to read and send together.
 **Email** holds mail that came in but is not on a request yet, in three tabs:
 **No matching request**, **Couldn't be read** (the parser refused it; *Review*
 shows its headers and text from the stored copy, with attachments named but
-never opened), and **Bounced** (our letters that did not deliver). Every row
+never opened), and **Bounced** (our letters that did not deliver). In *Review*,
+an email that is not on a case yet goes to one place: **Add to a case** (by
+request number, including a closed one) or **Open a new request** (the sender,
+or a forward's original sender, becomes the requester and the email text the
+request). A held email is taken off hold first: the parser is tried again,
+and if it still refuses, the text you read is filed and its attachments stay
+with the held original. Each step needs a reason and is audited
+(`inbound.held_message_released`, `request.opened_from_email`). Every row
 can be ticked and dismissed as not a request. The menu badge is the total
 waiting across the three. An Application Admin sees only **Bounced**, with no
 requester or message content.

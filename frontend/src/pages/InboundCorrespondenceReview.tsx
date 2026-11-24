@@ -150,7 +150,7 @@ function receiptDetail(receipt: InboundReceiptSummary): string {
   const suggested =
     receipt.candidate_request_number || receipt.matched_request_number
   if (heldUnread(receipt)) {
-    return 'If it is a records request it is already on the clock. Open it, and ask an officer to re-parse it.'
+    return 'If it is a records request it is already on the clock. Open it to read it, then add it to a case or open a new request.'
   }
   if (receipt.quarantined || receipt.matching_status === 'quarantined') {
     return 'Nothing can be downloaded until the scan clears. Open it to see what arrived.'
@@ -177,6 +177,14 @@ interface AssociationInput {
   requestNumber: string
   reason: string
 }
+
+/** Where an email that is not on a case yet goes. */
+type Destination = 'case' | 'new'
+
+interface FileEmailInput extends AssociationInput {
+  destination: Destination
+}
+
 
 interface ClarificationAssociationInput {
   receipt: InboundReceiptDetail
@@ -206,6 +214,7 @@ export function InboundCorrespondenceReview({
   const [lookupId, setLookupId] = useState('')
   const [requestNumber, setRequestNumber] = useState('')
   const [reason, setReason] = useState('')
+  const [destination, setDestination] = useState<Destination>('case')
   const [clarificationCycleId, setClarificationCycleId] = useState('')
   const [clarificationReason, setClarificationReason] = useState('')
   // Rows chosen for one shared no-action decision, by receipt id. Only rows
@@ -267,9 +276,98 @@ export function InboundCorrespondenceReview({
       || '',
     )
     setReason('')
+    setDestination('case')
     setClarificationCycleId('')
     setClarificationReason('')
   }, [receipt.data])
+
+  function refreshAfterFiling() {
+    queryClient.invalidateQueries({
+      queryKey: ['inbound-correspondence-receipts'],
+    })
+    queryClient.invalidateQueries({
+      queryKey: ['correspondence-operations'],
+    })
+    void invalidateBoundedInfiniteQueries(
+      queryClient,
+      ['correspondence', 'transport'],
+    )
+    queryClient.invalidateQueries({
+      queryKey: ['correspondence-detail'],
+    })
+    queryClient.invalidateQueries({
+      queryKey: ['clarification-cycles', 'open'],
+    })
+    queryClient.invalidateQueries({ queryKey: ['work-item-counts'] })
+  }
+
+  /**
+   * Files an email that is not on a case yet: a held one is released first
+   * (the officer has read it), then it is added to a case or opens a new
+   * request. Two registered primitives, one click.
+   */
+  const fileEmail = useMutation({
+    mutationFn: async ({
+      receipt,
+      destination,
+      requestNumber,
+      reason,
+    }: FileEmailInput) => {
+      let current = receipt
+      if (heldUnread(current)) {
+        current = await api<InboundReceiptDetail>(
+          `/api/staff/inbound-correspondence-receipts/${current.id}/release/`,
+          {
+            method: 'POST',
+            body: { reason, expected_version: current.version },
+          },
+        )
+      }
+      if (destination === 'new') {
+        return api<InboundReceiptDetail>(
+          `/api/staff/inbound-correspondence-receipts/${current.id}/open-request/`,
+          {
+            method: 'POST',
+            body: { reason, expected_version: current.version },
+          },
+        )
+      }
+      return api<InboundReceiptDetail>(
+        `/api/staff/inbound-correspondence-receipts/${current.id}/match/`,
+        {
+          method: 'POST',
+          body: {
+            request_number: requestNumber,
+            reason,
+            expected_version: current.version,
+          },
+        },
+      )
+    },
+    onSuccess: (updated, input) => {
+      queryClient.setQueryData(
+        ['inbound-correspondence-receipt', updated.id],
+        updated,
+      )
+      refreshAfterFiling()
+      const number = updated.matched_request_number || ''
+      toast(
+        'success',
+        input.destination === 'new'
+          ? `Opened ${number} from this email.`
+          : `Added this email to ${number}.`,
+      )
+      closeReceipt()
+    },
+    onError: () => {
+      // A release that went through before the second step failed leaves the
+      // email readable and unfiled; reload it so the officer sees that.
+      queryClient.invalidateQueries({
+        queryKey: ['inbound-correspondence-receipt'],
+      })
+      refreshAfterFiling()
+    },
+  })
 
   const association = useMutation({
     mutationFn: ({
@@ -447,9 +545,11 @@ export function InboundCorrespondenceReview({
     setSearchParams(next)
     setRequestNumber('')
     setReason('')
+    setDestination('case')
     setClarificationCycleId('')
     setClarificationReason('')
     association.reset()
+    fileEmail.reset()
     clarificationAssociation.reset()
     download.reset()
   }
@@ -467,11 +567,21 @@ export function InboundCorrespondenceReview({
 
   function submitAssociation(event: FormEvent) {
     event.preventDefault()
+    const toCase = destination === 'case' || isRematch
     if (
       !receipt.data
-      || requestNumber.trim().length === 0
+      || (toCase && requestNumber.trim().length === 0)
       || reasonTooShort(reason)
     ) {
+      return
+    }
+    if (heldUnread(receipt.data) || !toCase) {
+      fileEmail.mutate({
+        receipt: receipt.data,
+        destination: toCase ? 'case' : 'new',
+        requestNumber: requestNumber.trim(),
+        reason: reason.trim(),
+      })
       return
     }
     association.mutate({
@@ -527,6 +637,10 @@ export function InboundCorrespondenceReview({
     && !isDeliveryStatus
   )
   const isRematch = selected?.matching_status === 'matched'
+  // A held email the officer has read can be filed: it is released first.
+  const canFile = Boolean(selected && heldUnread(selected)) || canAssociate
+  const filingNew = destination === 'new' && !isRematch
+  const filing = association.isPending || fileEmail.isPending
 
   return (
     <>
@@ -1082,15 +1196,58 @@ export function InboundCorrespondenceReview({
                   Close
                 </Button>
               </div>
-            ) : canAssociate ? (
+            ) : canFile ? (
               <form onSubmit={submitAssociation} className="space-y-4">
-                <Field label="Request number">
-                  <Input
-                    value={requestNumber}
-                    onChange={(event) => setRequestNumber(event.target.value)}
-                    required
-                  />
-                </Field>
+                {!isRematch && (
+                  <fieldset>
+                    <legend className="font-heading text-sm font-bold text-ink">
+                      Where does this email go?
+                    </legend>
+                    <div className="mt-2 flex flex-wrap gap-5 text-sm text-ink">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name={`email-destination-${selected.id}`}
+                          value="case"
+                          checked={destination === 'case'}
+                          onChange={() => setDestination('case')}
+                        />
+                        Add to a case
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name={`email-destination-${selected.id}`}
+                          value="new"
+                          checked={destination === 'new'}
+                          onChange={() => setDestination('new')}
+                        />
+                        Open a new request
+                      </label>
+                    </div>
+                  </fieldset>
+                )}
+                {heldUnread(selected) && (
+                  <p className="text-xs text-ink-muted">
+                    PRR takes the email off hold first. If it still cannot
+                    open the attachments, they stay with the held original.
+                  </p>
+                )}
+                {filingNew ? (
+                  <p className="text-sm text-ink">
+                    The sender becomes the requester and the email text becomes
+                    the request. A forward opens under the person who wrote
+                    the original.
+                  </p>
+                ) : (
+                  <Field label="Request number">
+                    <Input
+                      value={requestNumber}
+                      onChange={(event) => setRequestNumber(event.target.value)}
+                      required
+                    />
+                  </Field>
+                )}
                 <Field
                   label="Substantive reason"
                   hint={reasonHint("this is written to the append-only audit trail")}
@@ -1107,6 +1264,9 @@ export function InboundCorrespondenceReview({
                 {association.isError && (
                   <ErrorNote error={association.error} />
                 )}
+                {fileEmail.isError && (
+                  <ErrorNote error={fileEmail.error} />
+                )}
                 <div className="flex justify-end gap-2">
                   <Button type="button" variant="ghost" onClick={closeReceipt}>
                     Cancel
@@ -1114,16 +1274,18 @@ export function InboundCorrespondenceReview({
                   <Button
                     type="submit"
                     disabled={
-                      association.isPending
-                      || requestNumber.trim().length === 0
+                      filing
+                      || (!filingNew && requestNumber.trim().length === 0)
                       || reasonTooShort(reason)
                     }
                   >
-                    {association.isPending
+                    {filing
                       ? 'Saving…'
                       : isRematch
                         ? 'Rematch message'
-                        : 'Match message'}
+                        : filingNew
+                          ? 'Open new request'
+                          : 'Add to case'}
                   </Button>
                 </div>
               </form>
