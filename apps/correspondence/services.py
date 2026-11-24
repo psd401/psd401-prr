@@ -2325,7 +2325,10 @@ def batch_create_closure_drafts(
     an officer can read every one of them before anything leaves the
     District, which is exactly the review a bulk send would otherwise skip.
     """
-    actor = _require_records_officer(actor)
+    # The officer check locks the staff row with select_for_update, which
+    # Postgres refuses outside a transaction (SQLite silently allows it).
+    with transaction.atomic():
+        actor = _require_records_officer(actor)
     if confirmed is not True:
         raise ValidationError(
             "Confirm the selected cases before drafting for all of them."
@@ -2423,7 +2426,9 @@ def batch_approve_and_send(
     authorized together, and rolling back a message that has already reached
     a requester is not something this system can do anyway.
     """
-    actor = _require_records_officer(actor)
+    # Locks with select_for_update; Postgres needs a transaction around it.
+    with transaction.atomic():
+        actor = _require_records_officer(actor)
     if confirmed is not True:
         raise ValidationError(
             "Confirm the exact messages before sending them to requesters."

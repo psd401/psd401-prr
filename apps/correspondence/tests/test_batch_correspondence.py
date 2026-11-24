@@ -10,9 +10,12 @@ kinds that are decided one case at a time.
 import datetime as dt
 from unittest import mock
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import IntegrityError, OperationalError
+from django.db import IntegrityError, OperationalError, transaction
+from django.test import TransactionTestCase
 
+from apps.api.identity import StaffRole, apply_staff_roles
 from apps.audit.models import AuditLog
 from apps.correspondence import services
 from apps.correspondence.models import (
@@ -535,3 +538,49 @@ class BotRequestDenialBatchTests(OutboundDeliveryServiceTestCase):
                 confirmed=True,
             )
         self.assertFalse(CorrespondenceDelivery.objects.exists())
+
+
+class BatchRunsInsideATransactionTests(TransactionTestCase):
+    """The officer check locks rows with select_for_update, which Postgres
+    refuses outside a transaction. SQLite ignores the lock, so the ordinary
+    TestCase (itself one transaction) cannot see the production 500."""
+
+    def setUp(self):
+        self.officer = get_user_model().objects.create_user(
+            "batch-tx-officer", "batch-tx-officer@psd401.net", "pw", is_staff=True
+        )
+        apply_staff_roles(self.officer, {StaffRole.RECORDS_OFFICER})
+
+    def assert_officer_check_in_transaction(self, call):
+        seen = []
+        real = services._require_records_officer
+
+        def spy(actor):
+            seen.append(transaction.get_connection().in_atomic_block)
+            return real(actor)
+
+        with mock.patch.object(services, "_require_records_officer", spy):
+            with self.assertRaises(ValidationError):
+                call()
+        self.assertEqual(seen, [True])
+
+    def test_batch_draft_checks_the_officer_inside_a_transaction(self):
+        self.assert_officer_check_in_transaction(
+            lambda: services.batch_create_closure_drafts(
+                ["PRR-NOPE"],
+                kind=Correspondence.Kind.GENERAL,
+                subject="s",
+                body="b",
+                actor=self.officer,
+                confirmed=False,
+            )
+        )
+
+    def test_batch_send_checks_the_officer_inside_a_transaction(self):
+        self.assert_officer_check_in_transaction(
+            lambda: services.batch_approve_and_send(
+                ["00000000-0000-0000-0000-000000000000"],
+                actor=self.officer,
+                confirmed=False,
+            )
+        )

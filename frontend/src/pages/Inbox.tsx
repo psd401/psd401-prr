@@ -1368,6 +1368,10 @@ function BatchNoticeBar({
   const [drafted, setDrafted] = useState<BatchOutcome | null>(null)
   const [readEach, setReadEach] = useState(false)
   const [templateName, setTemplateName] = useState<string | null>(null)
+  const [denied, setDenied] = useState<{
+    closed: string[]
+    failed: { request_number: string; detail: string }[]
+  } | null>(null)
 
   // A bot-request denial is drafted from a district denial template. The
   // named ones (e.g. "Denial – bot generated") are listed; the first named
@@ -1394,6 +1398,7 @@ function BatchNoticeBar({
     setSubject('')
     setBody('')
     setTemplateName(null)
+    setDenied(null)
   }
 
   const draft = useMutation({
@@ -1414,6 +1419,49 @@ function BatchNoticeBar({
     ),
     onSuccess: async (outcome) => {
       setDrafted(outcome)
+      await onChanged()
+    },
+    onError: (error) => toast('error', error.message),
+  })
+
+  // A bot-request denial is one decision for the whole selection, so it is
+  // one click: each case's letter is drafted from the chosen template and
+  // sent at once, and each case closes as denied when its letter goes out.
+  const denyAndClose = useMutation({
+    mutationFn: async () => {
+      const drafts = await api<BatchOutcome>(
+        '/api/staff/correspondence/batch/closure-drafts/',
+        {
+          method: 'POST',
+          body: {
+            request_numbers: selected,
+            kind: 'denial',
+            confirmed: true,
+            template_name: chosenTemplate,
+          },
+        },
+      )
+      const sent = drafts.succeeded.length > 0
+        ? await api<BatchOutcome>(
+          '/api/staff/correspondence/batch/approve-and-send/',
+          {
+            method: 'POST',
+            body: {
+              correspondence_ids: drafts.succeeded.map(
+                (row) => row.correspondence_id,
+              ),
+              confirmed: true,
+            },
+          },
+        )
+        : { batch_id: '', succeeded: [], failed: [] }
+      return {
+        closed: sent.succeeded.map((row) => row.request_number),
+        failed: [...drafts.failed, ...sent.failed],
+      }
+    },
+    onSuccess: async (outcome) => {
+      setDenied(outcome)
       await onChanged()
     },
     onError: (error) => toast('error', error.message),
@@ -1485,7 +1533,16 @@ function BatchNoticeBar({
       <p className="text-sm text-ink">
         {selected.length} {selected.length === 1 ? 'case' : 'cases'} selected.
       </p>
-      <Button type="button" onClick={() => setOpen(true)}>
+      <Button
+        type="button"
+        onClick={() => {
+          setKind('denial')
+          setOpen(true)
+        }}
+      >
+        Deny as bot requests
+      </Button>
+      <Button type="button" variant="secondary" onClick={() => setOpen(true)}>
         Draft notices for these cases
       </Button>
       {/* The row menu's action, for the whole selection. It loops the same
@@ -1509,11 +1566,38 @@ function BatchNoticeBar({
           title={`Draft one notice for ${selected.length} ${selected.length === 1 ? 'case' : 'cases'}`}
           onClose={close}
         >
-          {!drafted ? (
+          {denied ? (
+            <div className="space-y-4">
+              <p className="text-sm text-ink">
+                Sent {denied.closed.length} bot-request{' '}
+                {denied.closed.length === 1 ? 'denial' : 'denials'}. Each case
+                closes as denied when its letter goes out.
+              </p>
+              {denied.failed.length > 0 && (
+                <ul className="space-y-1 text-sm text-rust">
+                  {denied.failed.map((row) => (
+                    <li key={row.request_number}>
+                      {row.request_number}: {row.detail}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <Button
+                type="button"
+                onClick={() => {
+                  close()
+                  onClear()
+                }}
+              >
+                Done
+              </Button>
+            </div>
+          ) : !drafted ? (
             <form
               onSubmit={(event: FormEvent) => {
                 event.preventDefault()
-                draft.mutate()
+                if (kind === 'denial') denyAndClose.mutate()
+                else draft.mutate()
               }}
               className="space-y-4"
             >
@@ -1579,9 +1663,18 @@ function BatchNoticeBar({
                 </>
               )}
               <div className="flex gap-3">
-                <Button type="submit" disabled={draft.isPending}>
-                  {draft.isPending ? 'Drafting…' : 'Create drafts'}
-                </Button>
+                {kind === 'denial' ? (
+                  <Button type="submit" disabled={denyAndClose.isPending}>
+                    {denyAndClose.isPending
+                      ? 'Sending…'
+                      : `Deny and close ${selected.length} `
+                        + `${selected.length === 1 ? 'case' : 'cases'}`}
+                  </Button>
+                ) : (
+                  <Button type="submit" disabled={draft.isPending}>
+                    {draft.isPending ? 'Drafting…' : 'Create drafts'}
+                  </Button>
+                )}
                 <Button type="button" variant="ghost" onClick={close}>
                   Cancel
                 </Button>
