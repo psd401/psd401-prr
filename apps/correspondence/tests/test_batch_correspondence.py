@@ -18,6 +18,7 @@ from apps.correspondence import services
 from apps.correspondence.models import (
     Correspondence,
     CorrespondenceDelivery,
+    CorrespondenceDenialCitation,
 )
 from apps.correspondence.tests.test_outbound_delivery import (
     OutboundDeliveryServiceTestCase,
@@ -401,3 +402,136 @@ class BatchCorrespondenceTests(OutboundDeliveryServiceTestCase):
 
         logged.assert_not_called()
         self.assertEqual(detail, "Pick a template first.")
+
+
+class BotRequestDenialBatchTests(OutboundDeliveryServiceTestCase):
+    """RCW 42.56.080(3): one form denies a set of bot requests.
+
+    A bot-request denial is the same determination for every selected case --
+    the requests came together from one interface -- so unlike an exemption
+    denial it may be drafted and sent as a batch. The statute is attached as
+    the denial basis by the system; the officer never picks a citation.
+    """
+
+    make_case = BatchCorrespondenceTests.make_case
+    BOT_NAME = "Denial - bot generated"
+
+    def setUp(self):
+        super().setUp()
+        self.publish_denial(
+            name=self.BOT_NAME,
+            body=(
+                "To Whom It May Concern:\n\nYou seek {{ request_description }}\n"
+                "Denied pursuant to RCW 42.56.080(3).\n"
+            ),
+        )
+
+    def publish_denial(self, *, name, body):
+        template = services.create_automatic_message_template_draft(
+            kind=Correspondence.Kind.DENIAL,
+            name=name,
+            subject_template="Public Records Request {{ request_number }} — Request Closed",
+            body_template=body,
+            change_reason="Bot-request denial wording for the batch.",
+            actor=self.officer,
+        )
+        services.activate_automatic_message_template(
+            template,
+            actor=self.officer,
+            expected_version=template.revision,
+            confirmed=True,
+            reason="Activate the reviewed bot-request denial wording.",
+        )
+
+    def bot_denials(self, cases, **extra):
+        extra.setdefault("template_name", self.BOT_NAME)
+        return services.batch_create_closure_drafts(
+            [case.number for case in cases],
+            kind=Correspondence.Kind.DENIAL,
+            actor=self.officer,
+            confirmed=True,
+            **extra,
+        )
+
+    def test_a_template_that_does_not_cite_the_statute_is_refused(self):
+        case = self.make_case(1)
+
+        outcome = self.bot_denials([case], template_name="")
+
+        self.assertEqual(outcome.succeeded, ())
+        self.assertIn("does not cite RCW 42.56.080(3)", outcome.failed[0][1])
+
+    def test_drafts_a_bot_denial_with_the_statute_attached_for_each_case(self):
+        cases = [self.make_case(index) for index in range(2)]
+
+        outcome = self.bot_denials(cases)
+
+        self.assertEqual(outcome.failed, ())
+        for case, (_, correspondence) in zip(cases, outcome.succeeded, strict=True):
+            self.assertEqual(correspondence.kind, Correspondence.Kind.DENIAL)
+            self.assertEqual(correspondence.status, Correspondence.Status.DRAFT)
+            self.assertIn(case.number, correspondence.draft_subject)
+            self.assertEqual(
+                list(
+                    CorrespondenceDenialCitation.objects.filter(
+                        correspondence=correspondence,
+                    ).values_list("exemption__citation", flat=True)
+                ),
+                [services.BOT_REQUEST_CITATION],
+            )
+        self.assertFalse(CorrespondenceDelivery.objects.exists())
+
+    def test_drafts_from_a_named_denial_template(self):
+        case = self.make_case(1)
+
+        outcome = self.bot_denials([case])
+
+        _, correspondence = outcome.succeeded[0]
+        self.assertIn("Request Closed", correspondence.draft_subject)
+        self.assertIn("Records about project 1.", correspondence.draft_body)
+
+    def test_a_bot_denial_batch_sends_and_each_case_closes_denied(self):
+        cases = [self.make_case(index) for index in range(2)]
+        drafted = self.bot_denials(cases)
+
+        outcome = services.batch_approve_and_send(
+            [str(correspondence.pk) for _, correspondence in drafted.succeeded],
+            actor=self.officer,
+            confirmed=True,
+        )
+
+        self.assertEqual(outcome.failed, ())
+        for index, delivery in enumerate(
+            CorrespondenceDelivery.objects.order_by("correspondence__request__number")
+        ):
+            claim = self.claim(delivery)
+            self.report(
+                delivery,
+                claim,
+                provider_message_id=f"gmail-bot-{index}",
+                provider_thread_id=f"bot-thread-{index}",
+            )
+        for case in cases:
+            case.refresh_from_db()
+            self.assertEqual(case.status, RequestStatus.DENIED)
+
+    def test_an_exemption_denial_still_cannot_ride_along_in_a_bot_batch(self):
+        bot_case = self.make_case(1)
+        exempt_case = self.make_case(2)
+        bot = self.bot_denials([bot_case]).succeeded[0][1]
+        exempt = services.create_authored_draft(
+            exempt_case,
+            kind=Correspondence.Kind.DENIAL,
+            subject="Denial",
+            body="The responsive records are exempt in full.",
+            actor=self.officer,
+            denial_exemption_citation_ids=[self.denial_exemption.pk],
+        )
+
+        with self.assertRaisesMessage(ValidationError, "one case at a time"):
+            services.batch_approve_and_send(
+                [str(bot.pk), str(exempt.pk)],
+                actor=self.officer,
+                confirmed=True,
+            )
+        self.assertFalse(CorrespondenceDelivery.objects.exists())

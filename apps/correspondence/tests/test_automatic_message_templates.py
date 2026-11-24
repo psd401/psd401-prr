@@ -360,7 +360,7 @@ class NamedGeneralTemplateTests(AutomaticMessageTemplateTests):
         )
 
     def test_a_statutory_kind_stays_a_single_slot(self):
-        with self.assertRaisesMessage(ValidationError, "Only general"):
+        with self.assertRaisesMessage(ValidationError, "Only general correspondence and denials"):
             services.create_automatic_message_template_draft(
                 kind=Correspondence.Kind.ACKNOWLEDGMENT,
                 name="Second acknowledgment",
@@ -440,4 +440,57 @@ class NamedGeneralTemplateTests(AutomaticMessageTemplateTests):
                 kind=Correspondence.Kind.GENERAL,
                 name="Fee reminder",
             ).body,
+        )
+
+
+class NamedDenialTemplateTests(AutomaticMessageTemplateTests):
+    """A denial is several letters, so it may be several named templates."""
+
+    DENIAL_BODY = (
+        "To Whom It May Concern:\n\n"
+        "Request {{ request_number }} is denied under RCW 42.56.080(3).\n"
+    )
+
+    def publish_denial(self, *, name, marker):
+        template = services.create_automatic_message_template_draft(
+            kind=Correspondence.Kind.DENIAL,
+            name=name,
+            subject_template="Public Records Request {{ request_number }} — Request Closed",
+            body_template=f"{self.DENIAL_BODY}\n{marker}\n",
+            change_reason=f"Publish the {name or 'default'} denial wording.",
+            actor=self.officer,
+        )
+        return services.activate_automatic_message_template(
+            template,
+            actor=self.officer,
+            expected_version=template.revision,
+            confirmed=True,
+            reason=f"Activate the reviewed {name or 'default'} denial wording.",
+        )
+
+    def test_a_named_denial_stays_active_beside_the_default(self):
+        default = self.publish_denial(name="", marker="DEFAULT DENIAL")
+        bot = self.publish_denial(name="Denial - bot generated", marker="BOT DENIAL")
+
+        for template in (default, bot):
+            template.refresh_from_db()
+            self.assertEqual(template.state, AutomaticMessageTemplate.State.ACTIVE)
+        self.assertIn(
+            "DEFAULT DENIAL",
+            services.render_free_form_prefill(
+                self.request,
+                kind=Correspondence.Kind.DENIAL,
+            ).body,
+        )
+        self.assertIn(
+            "BOT DENIAL",
+            services.render_free_form_prefill(
+                self.request,
+                kind=Correspondence.Kind.DENIAL,
+                name="Denial - bot generated",
+            ).body,
+        )
+        self.assertEqual(
+            active_template_names(Correspondence.Kind.DENIAL),
+            ["", "Denial - bot generated"],
         )

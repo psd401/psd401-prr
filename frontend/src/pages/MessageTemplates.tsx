@@ -56,6 +56,8 @@ function guardrailPrompt(error: unknown): GuardrailPrompt | null {
 interface MessageTemplateVersion {
   id: string | null
   kind: string
+  /** Empty for the district default; set for a named template. */
+  name?: string
   template_version: number | string
   state: 'draft' | 'active' | 'retired'
   source: 'built_in' | 'managed'
@@ -77,9 +79,12 @@ interface MessageTemplateSlot {
   label: string
   group: string
   authoring: 'structured' | 'free_form'
+  /** Whether this kind may carry several named templates beside its default. */
+  named?: boolean
   allowed_tokens: string[]
   required_tokens: string[]
   active: MessageTemplateVersion
+  named_active?: MessageTemplateVersion[]
   drafts: MessageTemplateVersion[]
   history: MessageTemplateVersion[]
 }
@@ -99,6 +104,10 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
   const toast = useToast()
   const [editing, setEditing] = useState<MessageTemplateVersion | null>(null)
   const [editingKind, setEditingKind] = useState('')
+  const [editingName, setEditingName] = useState('')
+  // Only a brand-new named template takes a typed name. A new version of an
+  // existing template keeps the name it versions.
+  const [nameEditable, setNameEditable] = useState(false)
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
   const [changeReason, setChangeReason] = useState('')
@@ -138,6 +147,7 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
         method: 'POST',
         body: {
           kind: editingKind,
+          name: editingName,
           subject_template: subject,
           body_template: body,
           change_reason: changeReason,
@@ -149,6 +159,8 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
       qc.invalidateQueries({ queryKey: ['automatic-message-templates'] })
       setEditing(null)
       setEditingKind('')
+      setEditingName('')
+      setNameEditable(false)
       setGuardrail(null)
       setOverrideReason('')
       toast('success', 'Template draft saved. Active automatic messages are unchanged.')
@@ -194,10 +206,16 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
     onError: (error) => toast('error', error.message),
   })
 
-  function openEditor(slot: MessageTemplateSlot, template: MessageTemplateVersion | null) {
-    const source = template ?? slot.active
+  function openEditor(
+    slot: MessageTemplateSlot,
+    template: MessageTemplateVersion | null,
+    options: { base?: MessageTemplateVersion, newName?: boolean } = {},
+  ) {
+    const source = template ?? options.base ?? slot.active
     setEditing(template ?? { ...source, id: null, state: 'draft', revision: null })
     setEditingKind(slot.kind)
+    setEditingName(options.newName ? '' : source.name ?? '')
+    setNameEditable(Boolean(options.newName))
     setSubject(source.subject_template)
     setBody(source.body_template)
     setChangeReason('')
@@ -209,6 +227,8 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
   function closeEditor() {
     setEditing(null)
     setEditingKind('')
+    setEditingName('')
+    setNameEditable(false)
     setGuardrail(null)
     setOverrideReason('')
     saveDraft.reset()
@@ -235,8 +255,10 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
       <div className="mb-6 rounded-lg border border-warning bg-warning-soft p-4 text-sm text-warning-ink">
         Editing wording never changes who may send a message. Structured
         templates produce the requester's message from validated case data, so
-        an activated version is used for future drafts of that kind. Starting
-        points are drafting aids only: you remain the author of that message.
+        an activated version is used for future drafts of that kind.
+        Staff-authored letters are drafting aids only: you remain the author of
+        that message, and a named template is offered beside the default when
+        you compose it.
         Required placeholders and statutory sentences cannot be removed. The
         submission receipt is a courtesy and is never the five-business-day
         RCW 42.56.520 response.
@@ -250,7 +272,7 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
               <Badge tone={slot.authoring === 'structured' ? 'blue' : 'neutral'}>
                 {slot.authoring === 'structured'
                   ? 'Structured template'
-                  : 'Starting point'}
+                  : 'Staff-authored'}
               </Badge>
               <span className="text-xs text-ink-muted">{slot.group}</span>
               {slot.active.source === 'built_in' ? (
@@ -285,7 +307,7 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <p className="font-heading font-semibold text-ink">
-                          Version {draft.template_version}
+                          {draft.name ? `${draft.name} · ` : ''}Version {draft.template_version}
                         </p>
                         <p className="text-xs text-ink-muted">{draft.change_reason}</p>
                       </div>
@@ -316,10 +338,61 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
             )}
 
             {canEdit && (
-              <Button className="mt-5" type="button" onClick={() => openEditor(slot, null)}>
-                Create editable version
-              </Button>
+              <div className="mt-5 flex flex-wrap gap-2">
+                <Button type="button" onClick={() => openEditor(slot, null)}>
+                  Create editable version
+                </Button>
+                {slot.named && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => openEditor(slot, null, { newName: true })}
+                  >
+                    Add named {slot.label} template
+                  </Button>
+                )}
+              </div>
             )}
+
+            {(slot.named_active ?? []).map((named) => (
+              <section
+                key={named.id ?? named.name}
+                aria-labelledby={`named-${named.id}`}
+                className="mt-5 border-t border-line pt-4"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 id={`named-${named.id}`} className="font-heading text-base font-bold text-ink">
+                    {named.name}
+                  </h3>
+                  <Badge tone="green">Active version {named.template_version}</Badge>
+                  <span className="text-xs text-ink-muted">
+                    Activated by {named.activated_by_username ?? 'records officer'}
+                  </span>
+                </div>
+                <p className="mt-3 font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
+                  Subject
+                </p>
+                <pre className="mt-1 whitespace-pre-wrap rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink">
+                  {named.subject_template}
+                </pre>
+                <p className="mt-3 font-heading text-xs font-bold uppercase tracking-wide text-ink-muted">
+                  Body
+                </p>
+                <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink">
+                  {named.body_template}
+                </pre>
+                {canEdit && (
+                  <Button
+                    className="mt-3"
+                    type="button"
+                    aria-label={`Create editable version of ${named.name}`}
+                    onClick={() => openEditor(slot, null, { base: named })}
+                  >
+                    Create editable version
+                  </Button>
+                )}
+              </section>
+            ))}
           </Card>
         ))}
       </div>
@@ -330,6 +403,23 @@ export function MessageTemplates({ roles }: { roles: StaffRole[] }) {
             Saving creates or updates a draft only. It cannot affect queued,
             approved, sent, or future messages until separately activated.
           </p>
+          {nameEditable ? (
+            <Field
+              label="Template name"
+              hint="Shown when staff choose which template to start from, e.g. “Denial – bot generated”."
+            >
+              <Input
+                value={editingName}
+                onChange={(event) => setEditingName(event.target.value)}
+                maxLength={120}
+                required
+              />
+            </Field>
+          ) : editingName ? (
+            <p className="text-sm text-ink">
+              Template: <span className="font-semibold">{editingName}</span>
+            </p>
+          ) : null}
           <Field label="Subject template">
             <Input value={subject} onChange={(event) => setSubject(event.target.value)} required />
           </Field>

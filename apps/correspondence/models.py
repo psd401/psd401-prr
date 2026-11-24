@@ -1051,10 +1051,13 @@ class AutomaticMessageTemplateQuerySet(models.QuerySet):
 #: correspondence is one slot for every situation that is not a statutory
 #: letter -- a records-not-ready note, a fee reminder, a courtesy follow-up --
 #: so the district kept its other wordings outside the application, where
-#: nothing versioned or audited them. A statutory kind stays a single slot on
-#: purpose: two active acknowledgments is an ambiguity about what the
-#: District's five-day response says.
-NAMED_TEMPLATE_KINDS = frozenset({"general"})
+#: nothing versioned or audited them. A denial is likewise several letters
+#: (a bot request under RCW 42.56.080(3), a full exemption); it stays
+#: staff-authored and still needs its exemption citations, so a named starting
+#: point changes only the wording the officer begins from. A structured
+#: statutory kind stays a single slot on purpose: two active acknowledgments
+#: is an ambiguity about what the District's five-day response says.
+NAMED_TEMPLATE_KINDS = frozenset({"general", "denial"})
 
 
 class AutomaticMessageTemplate(models.Model):

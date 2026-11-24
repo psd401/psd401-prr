@@ -560,6 +560,47 @@ class DraftActionApiTests(CorrespondenceApiTestCase):
         self.assertEqual(len(sent.json()["succeeded"]), 2)
         self.assertEqual(CorrespondenceDelivery.objects.count(), 2)
 
+    def test_batch_drafts_bot_request_denials_from_a_named_template(self):
+        """RCW 42.56.080(3): one form, the statute attached by the system."""
+        template = services.create_automatic_message_template_draft(
+            kind=Correspondence.Kind.DENIAL,
+            name="Denial - bot generated",
+            subject_template="Public Records Request {{ request_number }} — Request Closed",
+            body_template=(
+                "To Whom It May Concern:\n\nYou seek {{ request_description }}\n"
+                "Denied pursuant to RCW 42.56.080(3).\n"
+            ),
+            change_reason="Bot-request denial wording for the batch.",
+            actor=self.officer,
+        )
+        services.activate_automatic_message_template(
+            template,
+            actor=self.officer,
+            expected_version=template.revision,
+            confirmed=True,
+            reason="Activate the reviewed bot-request denial wording.",
+        )
+        self.login(self.officer)
+
+        drafted = self.client.post(
+            "/api/staff/correspondence/batch/closure-drafts/",
+            {
+                "request_numbers": [self.prr.number, self.other_prr.number],
+                "kind": "denial",
+                "template_name": "Denial - bot generated",
+                "confirmed": True,
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(drafted.status_code, 200, drafted.content)
+        payload = drafted.json()
+        self.assertEqual(payload["failed"], [])
+        self.assertEqual(len(payload["succeeded"]), 2)
+        for row in payload["succeeded"]:
+            self.assertIn("Request Closed", row["subject"])
+            self.assertIn("RCW 42.56.080(3)", row["body"])
+
     def test_batch_endpoints_refuse_an_agent_token(self):
         agent_headers = self.token_headers(self.officer)
 

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {
   MemoryRouter,
@@ -1127,6 +1127,66 @@ it('never batches a selected case the officer can no longer see', async () => {
   expect(
     screen.queryByRole('button', { name: 'Draft notices for these cases' }),
   ).not.toBeInTheDocument()
+})
+
+it('drafts bot-request denials from the named denial template with no citation to pick', async () => {
+  const posts: { url: string; body: unknown }[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (init?.method === 'POST') {
+      posts.push({ url, body: JSON.parse(String(init.body)) })
+      return response({
+        batch_id: 'batch-1',
+        succeeded: [{
+          request_number: 'PRR-2026-0042',
+          correspondence_id: 'draft-1',
+          subject: 'Public Records Request PRR-2026-0042 — Request Closed',
+          body: 'Denied pursuant to RCW 42.56.080(3).\n',
+        }],
+        failed: [],
+      })
+    }
+    if (url.endsWith('/automatic-message-templates/')) {
+      return response({
+        templates: [
+          { kind: 'general', names: ['Fee reminder'] },
+          { kind: 'denial', names: ['', 'Denial – bot generated'] },
+        ],
+      })
+    }
+    if (url.startsWith('/api/staff/requests/')) return response(page([caseRow]))
+    throw new Error(`Unexpected fetch: ${url}`)
+  }))
+  const user = userEvent.setup()
+
+  renderInbox(['records_officer'], counts, ['/inbox?view=cases'])
+
+  await user.click(
+    await screen.findByRole('checkbox', {
+      name: 'Select case PRR-2026-0042 for a batch notice',
+    }),
+  )
+  await user.click(
+    screen.getByRole('button', { name: 'Draft notices for these cases' }),
+  )
+  await user.selectOptions(
+    within(screen.getByRole('dialog')).getByRole('combobox', { name: 'Kind' }),
+    'denial',
+  )
+  // The named bot-request template is chosen for the officer.
+  const template = await screen.findByRole('combobox', { name: /^Denial template/ })
+  await waitFor(() => expect(template).toHaveValue('Denial – bot generated'))
+  expect(screen.queryByText(/citation/i)).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Create drafts' }))
+
+  expect(await screen.findByText(/Nothing has been sent yet/)).toBeInTheDocument()
+  expect(at(posts, 0).url).toContain('/batch/closure-drafts/')
+  expect(at(posts, 0).body).toMatchObject({
+    request_numbers: ['PRR-2026-0042'],
+    kind: 'denial',
+    template_name: 'Denial – bot generated',
+  })
+  expect(screen.getByText(/Denied pursuant to RCW 42\.56\.080\(3\)/)).toBeInTheDocument()
 })
 
 it('drafts one notice for several selected cases before sending any of them', async () => {

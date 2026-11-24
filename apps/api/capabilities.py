@@ -2508,9 +2508,10 @@ CAPABILITIES = (
     ),
     _capability(
         "correspondence.batch_draft_closures",
-        "Draft the same completion closure or general notice for up to 50 "
-        "selected cases; each case gets its own editable draft and nothing "
-        "is approved or sent.",
+        "Draft the same completion closure, general notice, or RCW "
+        "42.56.080(3) bot-request denial (statute attached by the system, "
+        "from a chosen denial template) for up to 50 selected cases; each "
+        "case gets its own editable draft and nothing is approved or sent.",
         "POST",
         "/api/staff/correspondence/batch/closure-drafts/",
         ["/inbox"],
@@ -2528,8 +2529,9 @@ CAPABILITIES = (
     _capability(
         "correspondence.batch_approve_and_send",
         "Approve and release up to 50 completion-closure, non-payment-closure "
-        "or general drafts, one independent delivery and one audit row per "
-        "case; denials and no-records closures are refused.",
+        "or general drafts, or bot-request denials whose only basis is RCW "
+        "42.56.080(3), one independent delivery and one audit row per case; "
+        "exemption denials and no-records closures are refused.",
         "POST",
         "/api/staff/correspondence/batch/approve-and-send/",
         ["/inbox"],

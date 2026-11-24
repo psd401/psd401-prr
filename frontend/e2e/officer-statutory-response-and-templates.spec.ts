@@ -161,15 +161,15 @@ test('officer-statutory-response-and-templates', async ({ page }) => {
     'Estimate revision',
     'Installment notice',
     'No-records / out-of-retention closure',
-    'Responsive-records notice (starting point)',
-    'Closure (starting point)',
-    'Denial (starting point)',
-    'General correspondence (starting point)',
+    'Responsive-records notice',
+    'Closure',
+    'Denial',
+    'General correspondence',
   ]) {
     await expect(page.getByRole('heading', { name: label })).toBeVisible()
   }
   await expect(page.getByText('Structured template').first()).toBeVisible()
-  await expect(page.getByText('Starting point').first()).toBeVisible()
+  await expect(page.getByText('Staff-authored').first()).toBeVisible()
   await page.screenshot({
     path: evidencePath('officer-editable-message-templates.png'),
     fullPage: true,

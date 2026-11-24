@@ -1367,6 +1367,24 @@ function BatchNoticeBar({
   const [body, setBody] = useState('')
   const [drafted, setDrafted] = useState<BatchOutcome | null>(null)
   const [readEach, setReadEach] = useState(false)
+  const [templateName, setTemplateName] = useState<string | null>(null)
+
+  // A bot-request denial is drafted from a district denial template. The
+  // named ones (e.g. "Denial – bot generated") are listed; the first named
+  // one is the sensible default, so the officer usually picks nothing.
+  const denialTemplates = useQuery({
+    queryKey: ['message-template-names'],
+    queryFn: () => api<{ templates: { kind: string; names: string[] }[] }>(
+      '/api/staff/automatic-message-templates/',
+    ),
+    enabled: open && kind === 'denial',
+    staleTime: 60_000,
+  })
+  const denialNames = (
+    denialTemplates.data?.templates.find((entry) => entry.kind === 'denial')
+      ?.names ?? []
+  ).filter((name) => name !== '')
+  const chosenTemplate = templateName ?? denialNames[0] ?? ''
 
   function close() {
     setOpen(false)
@@ -1375,6 +1393,7 @@ function BatchNoticeBar({
     setProductionSummary('')
     setSubject('')
     setBody('')
+    setTemplateName(null)
   }
 
   const draft = useMutation({
@@ -1389,6 +1408,7 @@ function BatchNoticeBar({
           production_summary: productionSummary,
           subject,
           body,
+          template_name: kind === 'denial' ? chosenTemplate : '',
         },
       },
     ),
@@ -1505,9 +1525,28 @@ function BatchNoticeBar({
                 >
                   <option value="completion_closure">Completion closure</option>
                   <option value="general">General correspondence</option>
+                  <option value="denial">
+                    Bot-request denial (RCW 42.56.080(3))
+                  </option>
                 </Select>
               </Field>
-              {kind === 'completion_closure' ? (
+              {kind === 'denial' ? (
+                <Field
+                  label="Denial template"
+                  hint="Each case gets its own letter from this template, with RCW 42.56.080(3) recorded as the basis."
+                >
+                  <Select
+                    value={chosenTemplate}
+                    onChange={(event) => setTemplateName(event.target.value)}
+                    className="w-full"
+                  >
+                    {denialNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    <option value="">District default denial</option>
+                  </Select>
+                </Field>
+              ) : kind === 'completion_closure' ? (
                 <Field
                   label="What the District produced"
                   hint="The same sentence goes to every selected case. Each draft is editable before it is sent."
