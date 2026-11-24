@@ -78,7 +78,7 @@ it('redirects the legacy global Correspondence route away from a Liaison', async
       return response(200, staffUser(['liaison']))
     }
     if (requestPath === '/api/staff/work-items/counts/') return response(200, {})
-    if (requestPath === '/api/staff/requests/') {
+    if (requestPath.startsWith('/api/staff/requests/')) {
       return response(200, { count: 0, next: null, previous: null, results: [] })
     }
     throw new Error(`Unexpected fetch: ${requestPath}`)
@@ -86,13 +86,13 @@ it('redirects the legacy global Correspondence route away from a Liaison', async
 
   renderApp()
 
-  expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeInTheDocument()
-  await waitFor(() => expect(window.location.pathname).toBe('/inbox'))
+  expect(await screen.findByRole('heading', { name: 'Requests' })).toBeInTheDocument()
+  await waitFor(() => expect(window.location.pathname).toBe('/requests'))
   expect(requests.some((requestPath) => requestPath.startsWith('/api/staff/correspondence/')))
     .toBe(false)
 })
 
-it('sends the retired My Work URL to its personal queue in the Inbox', async () => {
+it('sends the retired My Work URL to the Assigned to me requests', async () => {
   window.history.replaceState({}, '', '/my-work')
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const requestPath = String(input)
@@ -100,7 +100,7 @@ it('sends the retired My Work URL to its personal queue in the Inbox', async () 
       return response(200, staffUser(['records_officer']))
     }
     if (requestPath === '/api/staff/work-items/counts/') return response(200, {})
-    if (requestPath === '/api/staff/work-items/?queue=personal') {
+    if (requestPath.startsWith('/api/staff/requests/')) {
       return response(200, { count: 0, next: null, previous: null, results: [] })
     }
     throw new Error(`Unexpected fetch: ${requestPath}`)
@@ -108,10 +108,10 @@ it('sends the retired My Work URL to its personal queue in the Inbox', async () 
 
   renderApp()
 
-  expect(await screen.findByRole('heading', { name: 'Inbox', level: 1 }))
+  expect(await screen.findByRole('heading', { name: 'Requests', level: 1 }))
     .toBeInTheDocument()
-  await waitFor(() => expect(window.location.pathname).toBe('/inbox'))
-  expect(window.location.search).toBe('?view=personal')
+  await waitFor(() => expect(window.location.pathname).toBe('/requests'))
+  expect(window.location.search).toBe('?focus=mine')
 })
 
 it('does not mount Agent Access for an anonymous visitor', async () => {
@@ -147,7 +147,7 @@ it.each([
   expect(fetchMock).not.toHaveBeenCalled()
 })
 
-it('gives a Reviewer the Inbox case index and no message queues', async () => {
+it('sends an old Inbox link to Requests and gives a Reviewer no officer filters', async () => {
   window.history.replaceState({}, '', '/inbox')
   const requests: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -165,11 +165,10 @@ it('gives a Reviewer the Inbox case index and no message queues', async () => {
 
   renderApp()
 
-  expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeInTheDocument()
-  // The case index is the only queue a reviewer gets. The cross-case message
-  // and work queues are not merely hidden -- they are never requested.
-  expect(await screen.findByRole('button', { name: /All cases/ })).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: /Needs attention/ })).not.toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Requests' })).toBeInTheDocument()
+  await waitFor(() => expect(window.location.pathname).toBe('/requests'))
+  expect(await screen.findByRole('button', { name: /^All/ })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /New email/ })).not.toBeInTheDocument()
   await waitFor(() =>
     expect(requests.some((path) => path.startsWith('/api/staff/requests/'))).toBe(true),
   )

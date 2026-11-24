@@ -10,17 +10,13 @@ import {
 
 test('complete-officer-case-journey', async ({ page }) => {
   await login(page)
-  // Login lands on Today; these queues live on the Inbox.
   await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
-  await page.goto('/inbox')
-  // The officer lands on Inbox message triage; assigned work of every kind is
-  // the "Assigned to you" chip that absorbed the retired My Work screen.
-  await page.getByRole('button', { name: /^Assigned to you/ }).click()
-  const assignedWork = page.getByRole('link', { name: /Open Complete record search/ }).first()
-  await expect(assignedWork).toBeVisible()
-  await assignedWork.click()
-  await expect(page.getByRole('heading', { name: 'Work context' })).toBeVisible()
-  await page.getByRole('link', { name: 'Open source context' }).click()
+  // Assigned work is the Requests filter "Assigned to me"; the search task
+  // itself opens from its request's Collect stage.
+  await page.goto('/requests?focus=mine')
+  await expect(page.getByRole('heading', { name: 'Requests' })).toBeVisible()
+  await page.goto('/requests/PRR-E2E-2000/collect')
+  await page.getByRole('row').nth(1).click()
   await expect(page.getByRole('dialog', { name: /Task — request/ })).toBeVisible()
   await page.keyboard.press('Escape')
 

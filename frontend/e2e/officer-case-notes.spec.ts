@@ -45,7 +45,7 @@ test('officer-case-notes', async ({ page }) => {
 
   // And the list carries it, so the next person scanning does not have to
   // open the case to find out what happened last.
-  await page.goto('/inbox?view=cases')
+  await page.goto('/requests')
   await expect(page.getByRole('columnheader', { name: 'Latest note' }))
     .toBeVisible()
   const row = page.getByRole('row').filter({ hasText: fixtureRequestNumber })
@@ -70,15 +70,15 @@ for (const width of [1440, 1280]) {
     await page.setViewportSize({ width, height: 900 })
     await login(page)
 
-    for (const view of ['cases_open', 'cases']) {
-      await page.goto(`/inbox?view=${view}`)
+    for (const view of ['', '?show=all']) {
+      await page.goto(`/requests${view}`)
       await expect(page.getByRole('columnheader', { name: /Case #/ }))
         .toBeVisible()
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth
           - document.documentElement.clientWidth,
       )
-      expect(overflow, `${view} at ${width}px`).toBeLessThanOrEqual(0)
+      expect(overflow, `requests${view} at ${width}px`).toBeLessThanOrEqual(0)
     }
 
     await page.screenshot({

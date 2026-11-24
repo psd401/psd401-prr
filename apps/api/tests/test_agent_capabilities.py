@@ -430,15 +430,11 @@ class AgentCapabilityRegistryTests(SimpleTestCase):
         shared_work_actions = {
             "work_items.read": ["/requests/:number/messages", "/work/:id"],
             "work_items.unread": ["/requests/:number/messages", "/work/:id"],
-            # Triaged straight from an Inbox row as well as inside a case.
-            "work_items.disposition": [
-                "/inbox",
-                "/requests/:number/messages",
-                "/work/:id",
-            ],
+            "work_items.disposition": ["/requests/:number/messages", "/work/:id"],
             "work_items.reopen": ["/requests/:number/messages", "/work/:id"],
+            # Dismissed from the Email list as well as inside a case.
             "work_items.no_action_required": [
-                "/inbox",
+                "/email",
                 "/requests/:number/messages",
                 "/work/:id",
             ],
@@ -449,7 +445,7 @@ class AgentCapabilityRegistryTests(SimpleTestCase):
             self.assertNotIn("ui_deferred", capability["constraints"])
         self.assertEqual(
             by_id["work_items.list"]["ui_routes"],
-            ["/inbox", "/review"],
+            ["/email", "/review"],
         )
         self.assertEqual(
             by_id["work_items.retrieve"]["ui_routes"],
@@ -457,7 +453,7 @@ class AgentCapabilityRegistryTests(SimpleTestCase):
         )
         self.assertEqual(
             by_id["work_items.counts"]["ui_routes"],
-            ["/inbox", "/review"],
+            ["/requests", "/review"],
         )
         self.assertEqual(
             by_id["work_items.assignment_targets"]["ui_routes"],
@@ -523,11 +519,11 @@ class AgentCapabilityRegistryTests(SimpleTestCase):
         )
         self.assertEqual(
             by_id["inbound_correspondence.list"]["ui_routes"],
-            ["/inbox"],
+            ["/email"],
         )
         self.assertEqual(
             by_id["inbound_correspondence.match"]["ui_routes"],
-            ["/inbox"],
+            ["/email"],
         )
         self.assertIn(
             "/configuration/correspondence",

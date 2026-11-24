@@ -79,14 +79,17 @@ it('provides a skip link and keyboard drawer with focus return', async () => {
   expect(trigger).toHaveAttribute('aria-expanded', 'false')
 })
 
-it('marks the current page in a three-stop menu with no badges', async () => {
+it('names the menu in plain words and badges only Email with what is waiting', async () => {
   const event = userEvent.setup()
   renderLayout()
   await event.click(screen.getByRole('button', { name: 'Open navigation' }))
 
   const menu = screen.getByRole('navigation', { name: 'Primary navigation' })
-  expect(within(menu).getAllByRole('link').map((link) => link.textContent))
-    .toEqual(['Today', 'New request', 'Settings'])
+  // Email's badge is its three tabs added up: here one bounced letter.
+  await waitFor(() =>
+    expect(within(menu).getAllByRole('link').map((link) => link.textContent))
+      .toEqual(['Today', 'Requests', 'Email1', 'New request', 'Settings']))
+  expect(within(menu).getByLabelText('1 waiting')).toBeInTheDocument()
   expect(within(menu).getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page')
 })
 

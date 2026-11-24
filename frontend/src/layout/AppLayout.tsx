@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
 import { appAsset } from '../appAssets'
 import { useLogout, type StaffUser } from '../api/auth'
-import { PRIMARY_NAV, visibleNav } from '../nav'
+import { PRIMARY_NAV, visibleNav, type NavItem } from '../nav'
+import type { WorkItemCounts } from '../work'
 import { QueueCountStatus } from '../queueCounts'
 import { useQueueCounts } from '../useQueueCounts'
 import { ThemePicker, TrustFooter } from '../ui'
@@ -46,6 +47,21 @@ function DistrictLogo({ className }: { className: string }) {
         Peninsula School District
       </span>
     </>
+  )
+}
+
+/** How much is waiting on a menu stop, when anything is. */
+function NavBadge({ item, counts }: { item: NavItem; counts: WorkItemCounts | undefined }) {
+  if (!item.badgeCounts || !counts) return null
+  const waiting = item.badgeCounts.reduce((sum, key) => sum + (counts[key] ?? 0), 0)
+  if (waiting === 0) return null
+  return (
+    <span
+      className="rounded-full bg-action px-2 text-xs font-bold text-on-action"
+      aria-label={`${waiting} waiting`}
+    >
+      {waiting}
+    </span>
   )
 }
 
@@ -144,6 +160,7 @@ export function AppLayout({ user }: { user: StaffUser }) {
                 }
               >
                 <span>{item.label}</span>
+                <NavBadge item={item} counts={counts.data} />
               </NavLink>
           ))}
         </nav>

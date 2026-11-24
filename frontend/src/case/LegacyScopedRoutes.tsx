@@ -143,10 +143,10 @@ export function LegacyCorrespondenceRedirect({ roles }: { roles: StaffRole[] }) 
   const inboundView = legacyInboundView(source)
   if (receipt && uuid(receipt) && roles.includes('records_officer')) {
     const destination = new URLSearchParams({
-      view: inboundView ?? 'unmatched',
+      tab: emailTab(inboundView ?? 'unmatched'),
       inbound_receipt: receipt,
     })
-    return <Navigate to={withQuery('/inbox', destination)} replace />
+    return <Navigate to={withQuery('/email', destination)} replace />
   }
   if (REQUEST_NUMBER.test(requestNumber) && canUseMessages) {
     return <Navigate to={requestMessagesDestination(source, requestNumber)} replace />
@@ -168,20 +168,58 @@ export function LegacyCorrespondenceRedirect({ roles }: { roles: StaffRole[] }) 
     )
   }
   if (roles.includes('records_officer') && status === 'received') {
-    return <Navigate to="/inbox?view=received" replace />
+    return <Navigate to="/requests?focus=new_email" replace />
   }
   if (roles.includes('records_officer') && inboundView) {
-    return <Navigate to={`/inbox?view=${inboundView}`} replace />
+    return <Navigate to={`/email?tab=${emailTab(inboundView)}`} replace />
   }
   if (roles.includes('admin') && !roles.includes('records_officer')) {
     return <Navigate to="/configuration/correspondence" replace />
   }
-  if (!roles.includes('records_officer')) return <Navigate to="/cases" replace />
+  if (!roles.includes('records_officer')) return <Navigate to="/requests" replace />
 
   const destination = new URLSearchParams()
   if (receipt && uuid(receipt)) {
-    destination.set('view', 'unmatched')
+    destination.set('tab', 'no_match')
     destination.set('inbound_receipt', receipt)
+    return <Navigate to={withQuery('/email', destination)} replace />
   }
-  return <Navigate to={withQuery('/inbox', destination)} replace />
+  return <Navigate to="/requests" replace />
+}
+
+/** The Email tab that replaced each retired Inbox mail view. */
+function emailTab(view: string): string {
+  if (view === 'quarantined') return 'unreadable'
+  if (view === 'delivery_exceptions') return 'bounced'
+  return 'no_match'
+}
+
+/** Where each retired Inbox view went; Requests filters keep its meaning. */
+const LEGACY_INBOX_FOCUS: Record<string, string> = {
+  needs_attention: 'new_email',
+  new: 'new_email',
+  received: 'new_email',
+  awaiting_statutory_response: 'response_due',
+  fee_unpaid: 'fee_unpaid',
+  personal: 'mine',
+}
+
+/** Old /inbox links and bookmarks open the page that now does that job. */
+export function LegacyInboxRedirect() {
+  const [source] = useSearchParams()
+  const view = source.get('view') ?? ''
+  if (['unmatched', 'quarantined', 'delivery_exceptions'].includes(view)) {
+    const destination = new URLSearchParams({ tab: emailTab(view) })
+    const receipt = source.get('inbound_receipt')
+    if (receipt) destination.set('inbound_receipt', receipt)
+    return <Navigate to={withQuery('/email', destination)} replace />
+  }
+  const destination = new URLSearchParams()
+  const focus = LEGACY_INBOX_FOCUS[view]
+  if (focus) destination.set('focus', focus)
+  const status = source.get('status')
+  if (view === 'cases' && status && status !== 'open') destination.set('show', status)
+  const search = source.get('q')
+  if (search) destination.set('q', search)
+  return <Navigate to={withQuery('/requests', destination)} replace />
 }

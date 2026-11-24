@@ -451,3 +451,36 @@ class CaseStateFilterTests(StaffApiTestCase):
             "/api/staff/correspondence/", {"case_state": "sideways"}
         )
         self.assertEqual(response.status_code, 400, response.content)
+
+
+class RequestListFocusTests(CaseInboxViewTests):
+    """The Requests page filters: one list, narrowed by what needs doing."""
+
+    def focused_numbers(self, **params):
+        response = self.client.get("/api/staff/requests/", params)
+        self.assertEqual(response.status_code, 200, response.content)
+        return [row["number"] for row in response.json()["results"]]
+
+    def test_new_email_shows_only_cases_with_unhandled_requester_email(self):
+        self.assertEqual(
+            self.focused_numbers(queue="inbox", focus="new_email"),
+            [self.emailed.number],
+        )
+
+    def test_assigned_to_me_shows_cases_the_officer_owns(self):
+        type(self.web).objects.filter(pk=self.web.pk).update(
+            assigned_officer=self.officer
+        )
+
+        self.assertEqual(
+            self.focused_numbers(queue="inbox", focus="mine"), [self.web.number]
+        )
+
+    def test_focus_also_narrows_the_closed_list(self):
+        self.assertEqual(self.focused_numbers(status="closed", focus="new_email"), [])
+
+    def test_an_unknown_focus_is_refused(self):
+        response = self.client.get(
+            "/api/staff/requests/", {"queue": "inbox", "focus": "nope"}
+        )
+        self.assertEqual(response.status_code, 400)

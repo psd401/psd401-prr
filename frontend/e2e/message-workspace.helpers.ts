@@ -23,7 +23,7 @@ export async function signOut(page: Page) {
 }
 
 export async function openFixtureRequest(page: Page) {
-  await page.goto('/inbox?view=cases')
+  await page.goto('/requests')
   await page
     .getByRole('link', { name: new RegExp(`^Open case ${fixtureRequestNumber}`) })
     .first()

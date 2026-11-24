@@ -197,11 +197,15 @@ async function auditSurfaces(page: Page, theme: Theme, records: AuditRecord[]) {
 
   await login(page)
   await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
-  await audit(page, 'shell and Inbox', records)
+  await audit(page, 'shell and Today', records)
 
-  await page.goto('/inbox?view=team')
-  await expect(page.getByText('Complete record search').first()).toBeVisible()
-  await audit(page, 'Inbox assignment queues', records)
+  await page.goto('/requests')
+  await expect(page.getByRole('columnheader', { name: /Next due/ })).toBeVisible()
+  await audit(page, 'Requests', records)
+
+  await page.goto('/email')
+  await expect(page.getByRole('button', { name: /^No matching request/ })).toBeVisible()
+  await audit(page, 'Email', records)
 
   // Every stage of the rail (#45) and the Messages view beside it.
   for (const tab of [
@@ -383,24 +387,12 @@ test('accessibility-audit', async ({ page }) => {
   await useTheme(page, 'nexus')
   await auditSurfaces(page, 'nexus', records)
 
-  // Two Inbox layouts, not one: the assignment queues render work rows (the
-  // layout the retired My Work screen used to contribute here) and the
-  // default view renders message triage rows.
   await checkResponsiveSurface(
     page,
-    '/inbox?view=team',
-    'Inbox work queues',
-    'accessibility-work-queues',
-    'Inbox',
-    'Complete record search',
-    automatedChecks,
-  )
-  await checkResponsiveSurface(
-    page,
-    '/inbox',
-    'Inbox',
-    'accessibility-inbox',
-    'Inbox',
+    '/email',
+    'Email',
+    'accessibility-email',
+    'Email',
     null,
     automatedChecks,
   )
@@ -410,10 +402,10 @@ test('accessibility-audit', async ({ page }) => {
   // at 320px, which is where a dense row's action cluster is most at risk.
   await checkResponsiveSurface(
     page,
-    '/inbox?view=cases',
-    'Inbox',
+    '/requests',
+    'Requests',
     'accessibility-cases',
-    'Inbox',
+    'Requests',
     // Readiness is a column header: it is the one string that only appears
     // once the case table itself has rendered, which is what this surface is
     // auditing.
@@ -429,7 +421,7 @@ test('accessibility-audit', async ({ page }) => {
     'Legal record of the request as received',
     automatedChecks,
   )
-  expect(automatedChecks).toHaveLength(4)
+  expect(automatedChecks).toHaveLength(3)
 
   await writeFile(
     path.resolve('../.verification/axe-report.json'),

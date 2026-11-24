@@ -22,19 +22,19 @@ const ROLE_CASES: RoleCase[] = [
   {
     name: 'Records Officer',
     roles: ['records_officer'],
-    labels: ['Today', 'New request', 'Settings'],
+    labels: ['Today', 'Requests', 'Email', 'New request', 'Settings'],
     landing: '/today',
   },
   {
     name: 'Department Liaison',
     roles: ['liaison'],
-    labels: ['Today', 'Settings'],
+    labels: ['Today', 'Requests', 'Settings'],
     landing: '/today',
   },
   {
     name: 'Reviewer',
     roles: ['reviewer'],
-    labels: ['Today', 'Settings'],
+    labels: ['Today', 'Requests', 'Settings'],
     landing: '/today',
   },
   {
@@ -46,31 +46,31 @@ const ROLE_CASES: RoleCase[] = [
   {
     name: 'Application Admin',
     roles: ['admin'],
-    labels: ['Today', 'Settings'],
+    labels: ['Today', 'Requests', 'Email', 'Settings'],
     landing: '/configuration',
   },
   {
     name: 'Officer and admin',
     roles: ['records_officer', 'admin'],
-    labels: ['Today', 'New request', 'Settings'],
+    labels: ['Today', 'Requests', 'Email', 'New request', 'Settings'],
     landing: '/today',
   },
   {
     name: 'Liaison and reviewer',
     roles: ['liaison', 'reviewer'],
-    labels: ['Today', 'Settings'],
+    labels: ['Today', 'Requests', 'Settings'],
     landing: '/today',
   },
   {
     name: 'Reviewer and admin',
     roles: ['reviewer', 'admin'],
-    labels: ['Today', 'Settings'],
+    labels: ['Today', 'Requests', 'Email', 'Settings'],
     landing: '/today',
   },
   {
     name: 'Intake and admin',
     roles: ['intake_clerk', 'admin'],
-    labels: ['Today', 'New request', 'Settings'],
+    labels: ['Today', 'Requests', 'Email', 'New request', 'Settings'],
     landing: '/staff-intake',
   },
 ]
@@ -117,15 +117,17 @@ describe('role-aware shell contract', () => {
     expect(routeIsAuthorized('/requests/P000123-101426/overview', ['admin'])).toBe(true)
   })
 
-  it('keeps the menu to three stops, with Today first', () => {
-    expect(PRIMARY_NAV.map((item) => item.path)).toEqual(['/today', '/staff-intake', '/configuration'])
+  it('names the menu in plain words, with Today first', () => {
+    expect(PRIMARY_NAV.map((item) => item.path))
+      .toEqual(['/today', '/requests', '/email', '/staff-intake', '/configuration'])
   })
 
   it('still opens the pages Today and Settings link to', () => {
-    for (const path of ['/inbox', '/review', '/decisions', '/oversight']) {
+    for (const path of ['/requests', '/email', '/review', '/decisions', '/oversight']) {
       expect(routeIsAuthorized(path, ['records_officer'])).toBe(true)
     }
-    expect(routeIsAuthorized('/inbox', ['intake_clerk'])).toBe(false)
+    expect(routeIsAuthorized('/requests', ['intake_clerk'])).toBe(false)
+    expect(routeIsAuthorized('/email', ['liaison'])).toBe(false)
     expect(routeIsAuthorized('/today', ['intake_clerk'])).toBe(false)
   })
 

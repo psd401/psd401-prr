@@ -1793,6 +1793,7 @@ class RequestsViewSet(
             qs = qs.filter(status__in=services.CLOSED_STATUSES)
         elif status_param:
             qs = qs.filter(status=status_param)
+        qs = self._apply_focus(qs)
         search = self.request.query_params.get("search")
         if search:
             search_query = (
@@ -1853,6 +1854,50 @@ class RequestsViewSet(
         if ordering:
             return qs.order_by(*ordering)
         return qs.order_by(CASE_DUE_DATE.asc(nulls_last=True), "pk")
+
+    #: The Requests page filters. Each is a question an officer asks of the
+    #: whole list; the work items behind them are the authority, so a filter
+    #: never keeps its own definition of "due" or "unpaid".
+    FOCUS_FILTERS = ("response_due", "new_email", "fee_unpaid", "mine")
+
+    def _apply_focus(self, qs):
+        focus = self.request.query_params.get("focus")
+        if not focus:
+            return qs
+        if focus not in self.FOCUS_FILTERS:
+            raise serializers.ValidationError(
+                {"focus": [f"Choose one of: {', '.join(self.FOCUS_FILTERS)}."]}
+            )
+        unresolved = Q(
+            request_id=OuterRef("pk"),
+            disposition__in=UNRESOLVED_DISPOSITIONS,
+        )
+        if focus == "mine":
+            assigned_work = WorkItem.objects.filter(
+                unresolved, assignee=self.request.user
+            )
+            return qs.filter(
+                Q(assigned_officer=self.request.user) | Exists(assigned_work)
+            )
+        if focus == "new_email":
+            work = WorkItem.objects.filter(
+                request_id=OuterRef("pk"),
+                work_kind__in=INBOX_MESSAGE_WORK_KINDS,
+                disposition=WorkItem.Disposition.NEEDS_ATTENTION,
+            )
+        elif focus == "response_due":
+            # Same definition as the day-5 backlog queue: a REQUEST_ACTION
+            # item exists exactly while a received request has no delivered
+            # initial response.
+            work = WorkItem.objects.filter(
+                unresolved, work_kind=WorkItem.WorkKind.REQUEST_ACTION
+            )
+            qs = qs.filter(status=RequestStatus.RECEIVED)
+        else:
+            work = WorkItem.objects.filter(
+                unresolved, work_kind=WorkItem.WorkKind.FEE_UNPAID
+            )
+        return qs.filter(Exists(work))
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())

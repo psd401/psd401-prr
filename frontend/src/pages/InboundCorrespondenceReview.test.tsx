@@ -711,7 +711,7 @@ describe('Inbound correspondence review', () => {
       .not.toBeInTheDocument()
   })
 
-  it('renders a quarantined receipt with nullable parsed content safely', async () => {
+  it('reads a quarantined receipt from its stored copy instead of empty fields', async () => {
     const row = summary({
       parsing_status: 'quarantined',
       matching_status: 'quarantined',
@@ -754,6 +754,18 @@ describe('Inbound correspondence review', () => {
       ) {
         return fakeResponse(receipt)
       }
+      if (
+        url
+        === `/api/staff/inbound-correspondence-receipts/${row.id}/readable/`
+      ) {
+        return fakeResponse({
+          headers: [['Subject', 'Records about the levy']],
+          body: 'Please send the levy records.',
+          attachments: [],
+          raw_source: false,
+          truncated: false,
+        })
+      }
       throw new Error(`Unexpected fetch: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -767,8 +779,8 @@ describe('Inbound correspondence review', () => {
       ),
     }))
 
-    expect(await screen.findByText('(No subject)')).toBeInTheDocument()
-    expect(screen.getByText('(No plain-text body)')).toBeInTheDocument()
+    expect(await screen.findByText('Please send the levy records.')).toBeInTheDocument()
+    expect(screen.getByText('Records about the levy')).toBeInTheDocument()
     expect(screen.getByText('No attachments.')).toBeInTheDocument()
     expect(screen.getByText(/cannot be matched until parsing/)).toBeInTheDocument()
   })
@@ -960,7 +972,7 @@ describe('Inbound correspondence review', () => {
       expect(body.idempotency_key).toEqual(expect.any(String))
     })
     expect(
-      await screen.findByText('No messages are waiting in this queue.'),
+      await screen.findByText('Nothing is waiting here.'),
     ).toBeInTheDocument()
   })
 

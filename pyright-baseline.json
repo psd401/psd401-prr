@@ -1,6 +1,6 @@
 {
   "pyright": "1.1.414",
-  "total": 1767,
+  "total": 1769,
   "files": {
     "apps/api/access_tokens.py": 2,
     "apps/api/advisory.py": 1,
@@ -107,6 +107,7 @@
     "apps/correspondence/tests/test_delivery_notifications.py": 1,
     "apps/correspondence/tests/test_delivery_status_receiving.py": 5,
     "apps/correspondence/tests/test_editable_templates.py": 2,
+    "apps/correspondence/tests/test_held_message_reader.py": 2,
     "apps/correspondence/tests/test_inbound_concurrency.py": 7,
     "apps/correspondence/tests/test_inbound_mailbox_hardening.py": 7,
     "apps/correspondence/tests/test_inbound_matching.py": 13,

@@ -25,13 +25,14 @@ from rest_framework.response import Response
 
 from apps.api.handoffs import human_only_handoff
 from apps.api.identity import StaffRole
-from apps.correspondence import inbound, services
+from apps.correspondence import held_messages, inbound, services
 from apps.correspondence.models import (
     ClarificationCycle,
     CorrespondenceAttachment,
     CorrespondenceDeliveryNotification,
     InboundCorrespondenceReceipt,
 )
+from apps.correspondence.receiving import InboundStorageUnavailable
 from apps.records import email_intake
 from apps.records.models import PublicRecordsRequest
 from apps.work_queue.models import WorkItem
@@ -372,6 +373,7 @@ class InboundCorrespondenceReceiptViewSet(
         # evidence is filed is still the officer's.
         "redirect": OFFICER_ONLY,
         "associate_clarification": OFFICER_ONLY,
+        "readable": OFFICER_ONLY,
     }
 
     def get_queryset(self):
@@ -510,6 +512,27 @@ class InboundCorrespondenceReceiptViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return self._detail_response(receipt)
+
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
+    @action(detail=True, methods=["get"])
+    def readable(self, request, pk=None):
+        """A held email as plain text: headers, text, attachment names."""
+        receipt = self.get_object()
+        try:
+            message = held_messages.readable_held_message(
+                receipt.pk, actor=request.user
+            )
+        except ValidationError as exc:
+            return Response(
+                {"detail": " ".join(exc.messages)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except InboundStorageUnavailable:
+            return Response(
+                {"detail": "The stored email could not be read just now."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(message)
 
     @extend_schema(
         request=ManualInboundAssociationSerializer,

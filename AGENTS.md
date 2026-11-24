@@ -167,6 +167,29 @@ Production is the sole deployed target (`prr.psd401.net`). After merging to
 add a step between merge and that command, and do not treat local or CI tests as
 prerequisites. No dev environment (`dev-prr.psd401.net`, decommissioned 2026-10-13).
 
+## Staff UI rules
+
+The staff app has one user: the Records Officer doing the work. Hagel set these
+on 2026-11-23 after an evening of broken, unreachable, and confusing screens.
+
+1. **Plain words.** Name screens, tabs, and buttons the way the officer says them
+   out loud ("Requests", "Email", "Deny and close"). No invented terms.
+2. **Everything is reachable.** Every staff page is in the menu or linked from a
+   page that is. No URL-only screens.
+3. **One place per job.** Never two lists of the same thing under different names.
+4. **Counts match the rows.** A count on a link or tab equals the rows that page
+   shows.
+5. **Every row can be acted on.** In a list, every row is selectable or none is.
+   Anything held or flagged can be opened and read.
+6. **Repeated work is one action.** If the officer does the same thing to many
+   rows, there is a bulk action that finishes the job (send and close), not a
+   draft step to click through.
+7. **Sensible defaults.** Lists open on open items; closed is a filter. Do not ask
+   Hagel questions whose answer is obvious.
+8. **Use it before calling it done.** Click through the change in a browser
+   against production-like data (Postgres, real roles). Passing tests alone are
+   not evidence a screen works.
+
 ## Evidence a change must carry
 
 - TDD: a failing test first, then the minimal code to pass, for every feature and

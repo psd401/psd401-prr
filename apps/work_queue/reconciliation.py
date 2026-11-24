@@ -80,7 +80,12 @@ def _route_for_receipt(receipt) -> InboundRoute | None:
             == Correspondence.Kind.DELIVERY_STATUS_NOTIFICATION
         )
     )
-    if is_dsn:
+    unlinked_dsn = (
+        is_dsn
+        and receipt.matching_status
+        == InboundCorrespondenceReceipt.MatchingStatus.UNMATCHED
+    )
+    if is_dsn and not unlinked_dsn:
         exception_actions = set(
             receipt.delivery_notifications.filter(
                 action__in=[

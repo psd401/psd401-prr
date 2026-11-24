@@ -28,18 +28,17 @@ test('accessible-live-updates', async ({ page }) => {
         inbox_all: 1,
         inbox_unmatched: 0,
         inbox_quarantined: 0,
-        inbox_delivery_exceptions: 1,
+        inbox_delivery_exceptions: personalCount,
       },
     })
   })
   await login(page)
-  // Login lands on Today; these queues live on the Inbox.
   await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
-  await page.goto('/inbox')
+  await page.goto('/email')
 
-  // Focus the chip whose own count is about to change: a live update must not
+  // Focus the tab whose own count is about to change: a live update must not
   // move focus or scroll even when it rewrites the focused control's badge.
-  const teamFilter = page.getByRole('button', { name: /Assigned to you/ })
+  const teamFilter = page.getByRole('button', { name: /^Bounced/ })
   await teamFilter.focus()
   const initialScroll = await page.evaluate(() => window.scrollY)
   personalCount = 3

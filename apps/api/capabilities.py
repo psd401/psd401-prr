@@ -535,7 +535,7 @@ CAPABILITIES = (
         "intake label, and what they judged it to be.",
         "POST",
         "/api/staff/requests/{number}/advisory-intake/feedback/",
-        ["/requests/:number/intake", "/inbox"],
+        ["/requests/:number/intake", "/requests"],
         execution="human_confirmation",
         risk="moderate",
         constraints=["accountable_human_actor", "append_only_audit"],
@@ -690,7 +690,7 @@ CAPABILITIES = (
         "and audit trail.",
         "POST",
         "/api/staff/requests/{number}/close-non-request/",
-        ["/inbox", "/requests/:number/intake", "/requests/:number/close"],
+        ["/requests", "/requests/:number/intake", "/requests/:number/close"],
         execution="human_confirmation",
         risk="high",
         constraints=[
@@ -746,7 +746,7 @@ CAPABILITIES = (
         "production, or export.",
         "GET",
         "/api/staff/requests/{number}/notes/",
-        ["/requests/:number", "/inbox"],
+        ["/requests/:number", "/requests"],
     ),
     _capability(
         "requests.add_case_note",
@@ -768,7 +768,7 @@ CAPABILITIES = (
         "acting Records Officer without changing any message or the case.",
         "POST",
         "/api/staff/requests/{number}/inbox-handled/",
-        ["/inbox"],
+        ["/requests"],
         risk="moderate",
         constraints=[
             "accountable_human_actor",
@@ -2260,7 +2260,7 @@ CAPABILITIES = (
         "GET",
         "/api/staff/correspondence/",
         [
-            "/inbox",
+            "/requests",
             "/requests/:number/messages",
             "/configuration/correspondence",
         ],
@@ -2514,7 +2514,7 @@ CAPABILITIES = (
         "case gets its own editable draft and nothing is approved or sent.",
         "POST",
         "/api/staff/correspondence/batch/closure-drafts/",
-        ["/inbox"],
+        ["/requests"],
         execution="human_only",
         risk="moderate",
         constraints=[
@@ -2534,7 +2534,7 @@ CAPABILITIES = (
         "exemption denials and no-records closures are refused.",
         "POST",
         "/api/staff/correspondence/batch/approve-and-send/",
-        ["/inbox"],
+        ["/requests"],
         execution="human_only",
         risk="high",
         constraints=[
@@ -2667,7 +2667,7 @@ CAPABILITIES = (
         "without requester PII in list rows.",
         "GET",
         "/api/staff/inbound-correspondence-receipts/",
-        ["/inbox"],
+        ["/email"],
         risk="moderate",
     ),
     _capability(
@@ -2677,7 +2677,17 @@ CAPABILITIES = (
         "Officer.",
         "GET",
         "/api/staff/inbound-correspondence-receipts/{id}/",
-        ["/inbox"],
+        ["/email"],
+        risk="moderate",
+    ),
+    _capability(
+        "inbound_correspondence.readable",
+        "Read a held (unparseable) inbound email as plain text -- headers, "
+        "text parts, and attachment names, never attachment content -- as a "
+        "Records Officer; each read is audited.",
+        "GET",
+        "/api/staff/inbound-correspondence-receipts/{id}/readable/",
+        ["/email"],
         risk="moderate",
     ),
     _capability(
@@ -2687,7 +2697,7 @@ CAPABILITIES = (
         "notifications are excluded.",
         "POST",
         "/api/staff/inbound-correspondence-receipts/{id}/match/",
-        ["/inbox"],
+        ["/email"],
         execution="human_only",
         risk="high",
         constraints=[
@@ -2703,7 +2713,7 @@ CAPABILITIES = (
         "notifications are excluded.",
         "POST",
         "/api/staff/inbound-correspondence-receipts/{id}/rematch/",
-        ["/inbox"],
+        ["/email"],
         execution="human_only",
         risk="high",
         constraints=[
@@ -2719,7 +2729,7 @@ CAPABILITIES = (
         "request; nothing is deleted and no requester message is sent.",
         "POST",
         "/api/staff/inbound-correspondence-receipts/{id}/redirect/",
-        ["/inbox", "/requests/:number/intake"],
+        ["/requests", "/requests/:number/intake"],
         execution="human_only",
         risk="high",
         constraints=[
@@ -2740,7 +2750,7 @@ CAPABILITIES = (
             "/api/staff/inbound-correspondence-receipts/{id}/"
             "associate-clarification/"
         ),
-        ["/inbox"],
+        ["/email"],
         execution="human_only",
         risk="high",
         constraints=[
@@ -2754,7 +2764,7 @@ CAPABILITIES = (
         "Obtain a short-lived, user-bound download for a clean correspondence attachment.",
         "POST",
         "/api/staff/correspondence-attachments/{id}/download/",
-        ["/inbox", "/requests/:number/messages"],
+        ["/email", "/requests/:number/messages"],
         risk="moderate",
         constraints=["malware_scanned"],
     ),
@@ -2763,7 +2773,7 @@ CAPABILITIES = (
         "Browse clarification cycles requiring staff review.",
         "GET",
         "/api/staff/clarification-cycles/",
-        ["/inbox", "/requests/:number/messages"],
+        ["/requests", "/requests/:number/messages"],
     ),
     _capability(
         "clarifications.retrieve",
@@ -2791,7 +2801,7 @@ CAPABILITIES = (
         "without copying requester or message content.",
         "GET",
         "/api/staff/work-items/",
-        ["/inbox", "/review"],
+        ["/email", "/review"],
     ),
     _capability(
         "work_items.retrieve",
@@ -2807,7 +2817,7 @@ CAPABILITIES = (
         "handling as legal or transport state.",
         "GET",
         "/api/staff/work-items/counts/",
-        ["/inbox", "/review"],
+        ["/requests", "/review"],
     ),
     _capability(
         "work_items.assignment_targets",
@@ -2851,7 +2861,7 @@ CAPABILITIES = (
         "changing its source evidence.",
         "POST",
         "/api/staff/work-items/{id}/disposition/",
-        ["/inbox", "/requests/:number/messages", "/work/:id"],
+        ["/requests/:number/messages", "/work/:id"],
         risk="moderate",
         constraints=["accountable_human_actor", "append_only_audit"],
     ),
@@ -2871,7 +2881,7 @@ CAPABILITIES = (
         "required without changing legal or transport evidence.",
         "POST",
         "/api/staff/work-items/{id}/no-action-required/",
-        ["/inbox", "/requests/:number/messages", "/work/:id"],
+        ["/email", "/requests/:number/messages", "/work/:id"],
         execution="human_only",
         risk="high",
         constraints=[

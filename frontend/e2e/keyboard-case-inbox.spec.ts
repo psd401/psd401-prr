@@ -29,8 +29,8 @@ test('keyboard-case-inbox', async ({ page }) => {
   await expect(page.getByRole('main')).toBeFocused()
 
   await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
-  await page.goto('/inbox?view=cases')
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
+  await page.goto('/requests')
+  await expect(page.getByRole('heading', { name: 'Requests' })).toBeVisible()
 
   // The case table's headers are controls and its rows are links, so the
   // whole surface has to be operable without a pointer: sort a column, read
@@ -59,28 +59,13 @@ test('keyboard-case-inbox', async ({ page }) => {
   await page.keyboard.press('Enter')
   await expect(page).not.toHaveURL(/sort=/)
 
-  // Reference queues live behind "More views" now. The menu trigger and every
-  // item in it must be reachable and operable by keyboard alone -- nothing on
-  // this bar may depend on hover.
-  const moreViews = page.getByRole('button', { name: 'More views' })
-  await moreViews.focus()
+  // The filters are plain buttons, operable by keyboard alone.
+  const newEmail = page.getByRole('button', { name: /^New email/ })
+  await newEmail.focus()
   await page.keyboard.press('Enter')
-  const allFilter = page.getByRole('button', { name: /^All messages/ })
-  await allFilter.focus()
-  await page.keyboard.press('Enter')
-  // The trigger names the selected queue and carries its pressed state, so
-  // the current view stays announced without reopening the menu.
-  await expect(page.getByRole('button', { name: 'More views: All messages' }))
-    .toHaveAttribute('aria-pressed', 'true')
+  await expect(newEmail).toHaveAttribute('aria-pressed', 'true')
 
-  // "Open case" opens the case. Reading one message in its thread is a
-  // separate, honestly-labelled action in the row's overflow.
-  const overflow = page.getByRole('button', { name: /^More actions: / }).first()
-  await overflow.focus()
-  await page.keyboard.press('Enter')
-  const readInContext = page.getByRole('link', { name: /^Read in context: / }).first()
-  await readInContext.focus()
-  await page.keyboard.press('Enter')
+  await page.goto(`/requests/${fixtureRequestNumber}/messages`)
   await expect(page).toHaveURL(new RegExp(`/requests/${fixtureRequestNumber}/messages`))
 
   await searchMessages(page, primaryInboundSubject)

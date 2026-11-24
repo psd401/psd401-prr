@@ -16,14 +16,13 @@ test('correspondence-destination-parity', async ({ page }) => {
 
   const inboundReceiptId = 'ab558cf4-0623-5e14-a7c4-b626e9a6613c'
   const quarantinedReceiptId = '73431c31-2a18-5f26-879e-5ac649a6b00c'
-  const inboundPath = `/inbox?view=unmatched&inbound_receipt=${inboundReceiptId}`
+  const inboundPath = `/email?tab=no_match&inbound_receipt=${inboundReceiptId}`
   await page.goto(`/correspondence?inbound_receipt=${inboundReceiptId}`)
   await expect.poll(() => (
     new URL(page.url()).pathname + new URL(page.url()).search
   )).toBe(inboundPath)
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
-  // The queue is named for what it means to an officer now.
-  await expect(page.getByRole('button', { name: /Needs a case/ }))
+  await expect(page.getByRole('heading', { name: 'Email' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^No matching request/ }))
     .toHaveAttribute('aria-pressed', 'true')
   await page.screenshot({
     path: evidencePath('correspondence-destination-parity-inbox.png'),
@@ -31,26 +30,22 @@ test('correspondence-destination-parity', async ({ page }) => {
   })
 
   await page.goto('/correspondence?status=received')
-  await expect(page).toHaveURL(/\/inbox\?view=received$/)
-  await expect(page.getByRole('button', { name: 'Received' }))
+  await expect(page).toHaveURL(/\/requests\?focus=new_email$/)
+  await expect(page.getByRole('button', { name: /^New email/ }))
     .toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByRole('link', { name: /^Open case / }).first())
-    .toBeVisible()
 
   await page.goto('/correspondence?matching_state=candidate')
-  await expect(page).toHaveURL(/\/inbox\?view=unmatched$/)
-  await expect(page.getByRole('button', { name: /Needs a case/ }))
+  await expect(page).toHaveURL(/\/email\?tab=no_match$/)
+  await expect(page.getByRole('button', { name: /^No matching request/ }))
     .toHaveAttribute('aria-pressed', 'true')
 
   await page.goto(
     `/correspondence?status=quarantined&inbound_receipt=${quarantinedReceiptId}`,
   )
   await expect(page).toHaveURL(
-    new RegExp(`/inbox\\?view=quarantined&inbound_receipt=${quarantinedReceiptId}$`),
+    new RegExp(`/email\\?tab=unreadable&inbound_receipt=${quarantinedReceiptId}$`),
   )
-  // Held mail is not a bar chip; the "More views" trigger names and presses
-  // the selected queue when it lives in the menu.
-  await expect(page.getByRole('button', { name: 'More views: Held for review' }))
+  await expect(page.getByRole('button', { name: /^Couldn't be read/ }))
     .toHaveAttribute('aria-pressed', 'true')
   const quarantinedReview = page.getByRole('dialog', {
     name: 'Review inbound correspondence',
