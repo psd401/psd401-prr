@@ -312,7 +312,7 @@ def _starting_point_spec(
         body_template=body_template + _SIGNATURE,
         allowed_tokens=COMMON_TOKENS,
         required_tokens=frozenset({"request_number"}),
-        group="Staff-authored starting points",
+        group="Staff-authored letters",
     )
 
 
@@ -642,7 +642,7 @@ TEMPLATE_SPECS = {
         ),
     ),
     Correspondence.Kind.RESPONSIVE_RECORDS_NOTICE: _starting_point_spec(
-        label="Responsive-records notice (starting point)",
+        label="Responsive-records notice",
         kind=Correspondence.Kind.RESPONSIVE_RECORDS_NOTICE,
         subject_template=(
             "Public Records Request {{ request_number }} — Responsive Records"
@@ -661,7 +661,7 @@ If you have questions, contact the Public Records Officer at
 """,
     ),
     Correspondence.Kind.CLOSURE: _starting_point_spec(
-        label="Closure (starting point)",
+        label="Closure",
         kind=Correspondence.Kind.CLOSURE,
         subject_template=(
             "Public Records Request {{ request_number }} — Request Closed"
@@ -679,7 +679,7 @@ If you have questions, contact the Public Records Officer at
 """,
     ),
     Correspondence.Kind.DENIAL: _starting_point_spec(
-        label="Denial (starting point)",
+        label="Denial",
         kind=Correspondence.Kind.DENIAL,
         subject_template=(
             "Public Records Request {{ request_number }} — Denial"
@@ -702,7 +702,7 @@ If you have questions, contact the Public Records Officer at
 """,
     ),
     Correspondence.Kind.GENERAL: _starting_point_spec(
-        label="General correspondence (starting point)",
+        label="General correspondence",
         kind=Correspondence.Kind.GENERAL,
         subject_template="Public Records Request {{ request_number }}",
         body_template="""Dear {{ requester_name }},
@@ -1259,8 +1259,8 @@ def validate_template_name(kind: str, name: str) -> str:
         return ""
     if kind not in AutomaticMessageTemplate.NAMED_KINDS:
         raise ValidationError(
-            "Only general correspondence may carry several named templates; "
-            "every other kind has exactly one."
+            "Only general correspondence and denials may carry several "
+            "named templates; every other kind has exactly one."
         )
     if len(normalized) > 120:
         raise ValidationError("A template name is at most 120 characters.")

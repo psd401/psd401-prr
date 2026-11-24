@@ -108,3 +108,89 @@ class AutomaticMessageTemplateApiTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 403)
+
+
+class NamedDenialTemplateApiTests(APITestCase):
+    """A denial can be several letters (bot request, full exemption), so it
+    carries named templates beside the district default."""
+
+    def setUp(self):
+        user_model = get_user_model()
+        self.officer = user_model.objects.create_user(
+            "named-denial-officer",
+            "named-denial-officer@psd401.net",
+            "pw",
+            is_staff=True,
+        )
+        apply_staff_roles(self.officer, {StaffRole.RECORDS_OFFICER})
+        self.reviewer = user_model.objects.create_user(
+            "named-denial-reviewer",
+            "named-denial-reviewer@psd401.net",
+            "pw",
+            is_staff=True,
+        )
+        apply_staff_roles(self.reviewer, {StaffRole.REVIEWER})
+        self.url = "/api/staff/automatic-message-templates/"
+
+    DENIAL_BODY = (
+        "To Whom It May Concern:\n\n"
+        "Request {{ request_number }} is denied under RCW 42.56.080(3).\n"
+    )
+
+    def test_catalog_says_which_kinds_take_names_and_drops_starting_point(self):
+        self.client.force_authenticate(self.reviewer)
+
+        rows = {
+            row["kind"]: row
+            for row in self.client.get(self.url).data["templates"]
+        }
+
+        self.assertTrue(rows["denial"]["named"])
+        self.assertTrue(rows["general"]["named"])
+        self.assertFalse(rows["acknowledgment"]["named"])
+        self.assertEqual(rows["denial"]["label"], "Denial")
+        for row in rows.values():
+            self.assertNotIn("starting point", row["label"].lower())
+            self.assertNotIn("starting point", row["group"].lower())
+
+    def test_officer_publishes_a_named_denial_beside_the_default(self):
+        self.client.force_authenticate(self.officer)
+        created = self.client.post(
+            self.url,
+            {
+                "kind": "denial",
+                "name": "Denial - bot generated",
+                "subject_template": "Public Records Request {{ request_number }} — Request Closed",
+                "body_template": self.DENIAL_BODY,
+                "change_reason": "Bot-request denial wording under RCW 42.56.080(3).",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        self.assertEqual(created.data["name"], "Denial - bot generated")
+
+        activated = self.client.post(
+            f"{self.url}{created.data['id']}/activate/",
+            {
+                "expected_version": created.data["revision"],
+                "confirmed": True,
+                "reason": "Activate the reviewed bot-request denial wording.",
+            },
+            format="json",
+        )
+        self.assertEqual(activated.status_code, 200, activated.data)
+
+        rows = {
+            row["kind"]: row
+            for row in self.client.get(self.url).data["templates"]
+        }
+        # The default denial is untouched; the named one sits beside it.
+        self.assertEqual(rows["denial"]["active"]["source"], "built_in")
+        self.assertEqual(
+            [row["name"] for row in rows["denial"]["named_active"]],
+            ["Denial - bot generated"],
+        )
+        self.assertEqual(
+            rows["denial"]["names"],
+            ["Denial - bot generated"],
+        )

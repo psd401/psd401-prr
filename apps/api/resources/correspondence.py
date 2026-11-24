@@ -722,6 +722,16 @@ class BatchClosureDraftSerializer(serializers.Serializer):
         allow_blank=True,
         default="",
     )
+    template_name = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=120,
+        help_text=(
+            "For a bot-request denial: the named denial template to draft "
+            "from. Blank is the district default."
+        ),
+    )
 
 
 class BatchApproveAndSendSerializer(serializers.Serializer):

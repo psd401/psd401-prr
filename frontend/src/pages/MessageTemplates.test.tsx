@@ -97,7 +97,7 @@ describe('MessageTemplates', () => {
       }),
     )
   })
-  it('distinguishes structured templates from staff-authored starting points', async () => {
+  it('distinguishes structured templates from staff-authored letters', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.endsWith('/automatic-message-templates/')) {
@@ -116,8 +116,10 @@ describe('MessageTemplates', () => {
             },
             {
               kind: 'denial',
-              label: 'Denial (starting point)',
-              group: 'Staff-authored starting points',
+              label: 'Denial',
+              group: 'Staff-authored letters',
+              named: true,
+              named_active: [],
               authoring: 'free_form',
               allowed_tokens: ['request_number'],
               required_tokens: ['request_number'],
@@ -142,16 +144,116 @@ describe('MessageTemplates', () => {
 
     expect(await screen.findByRole('heading', { name: 'Message templates' }))
       .toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Denial (starting point)' }))
+    expect(screen.getByRole('heading', { name: 'Denial' }))
       .toBeInTheDocument()
     expect(screen.getByText('Structured template')).toBeInTheDocument()
-    expect(screen.getByText('Starting point')).toBeInTheDocument()
-    expect(screen.getByText('Staff-authored starting points')).toBeInTheDocument()
+    expect(screen.getByText('Staff-authored')).toBeInTheDocument()
+    expect(screen.getByText('Staff-authored letters')).toBeInTheDocument()
+    expect(screen.queryByText(/starting point/i)).not.toBeInTheDocument()
     expect(screen.getByText(/never changes who may send a message/))
       .toBeInTheDocument()
     expect(
       screen.getAllByRole('button', { name: 'Create editable version' }),
     ).toHaveLength(2)
+  })
+})
+
+describe('MessageTemplates named templates', () => {
+  const DENIAL_DEFAULT = {
+    ...ACTIVE,
+    kind: 'denial',
+    name: '',
+    template_version: 'default',
+    subject_template: 'Public Records Request {{ request_number }} — Denial',
+    body_template: 'Dear {{ requester_name }}, {{ request_number }}',
+  }
+  const BOT_DENIAL = {
+    ...DENIAL_DEFAULT,
+    id: 'bot-1',
+    name: 'Denial – bot generated',
+    template_version: 1,
+    source: 'managed',
+    subject_template: 'Public Records Request {{ request_number }} — Request Closed',
+    body_template: 'To Whom It May Concern: RCW 42.56.080(3) {{ request_number }}',
+    activated_by_username: 'hagelk',
+    revision: 2,
+  }
+  const CATALOG = {
+    templates: [{
+      kind: 'denial',
+      label: 'Denial',
+      group: 'Staff-authored letters',
+      authoring: 'free_form',
+      named: true,
+      allowed_tokens: ['request_number'],
+      required_tokens: ['request_number'],
+      active: DENIAL_DEFAULT,
+      named_active: [BOT_DENIAL],
+      drafts: [],
+      history: [],
+    }],
+  }
+
+  it('shows each named template beside the default and edits it under its own name', async () => {
+    let posted: Record<string, string> | undefined
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/automatic-message-templates/') && init?.method === 'POST') {
+        posted = JSON.parse(String(init.body)) as Record<string, string>
+        return response({ ...BOT_DENIAL, id: 'bot-2', state: 'draft', revision: 1 }, 201)
+      }
+      return response(CATALOG)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    renderPage()
+
+    expect(await screen.findByRole('heading', { name: 'Denial – bot generated' }))
+      .toBeInTheDocument()
+    expect(screen.getByText(/RCW 42\.56\.080\(3\)/)).toBeInTheDocument()
+
+    await user.click(
+      screen.getByRole('button', { name: 'Create editable version of Denial – bot generated' }),
+    )
+    // The name is fixed for a new version of an existing named template.
+    expect(screen.queryByRole('textbox', { name: /template name/i })).not.toBeInTheDocument()
+    await user.type(
+      screen.getByRole('textbox', { name: /change reason/i }),
+      'Tighten the bot-request reasons paragraph.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+    expect(posted?.kind).toBe('denial')
+    expect(posted?.name).toBe('Denial – bot generated')
+  })
+
+  it('adds a new named template with the name the officer types', async () => {
+    let posted: Record<string, string> | undefined
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/automatic-message-templates/') && init?.method === 'POST') {
+        posted = JSON.parse(String(init.body)) as Record<string, string>
+        return response({ ...BOT_DENIAL, id: 'new-1', state: 'draft', revision: 1 }, 201)
+      }
+      return response(CATALOG)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Add named Denial template' }))
+    await user.type(
+      screen.getByRole('textbox', { name: /template name/i }),
+      'Denial – full exemption',
+    )
+    await user.type(
+      screen.getByRole('textbox', { name: /change reason/i }),
+      'Add the full-exemption denial wording.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+    expect(posted?.kind).toBe('denial')
+    expect(posted?.name).toBe('Denial – full exemption')
   })
 })
 

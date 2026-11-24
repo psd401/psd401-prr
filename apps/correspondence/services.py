@@ -2196,6 +2196,51 @@ BATCH_SENDABLE_KINDS = frozenset(
     }
 )
 
+#: RCW 42.56.080(3) lets the District deny a bot request that is one of
+#: several from the same requester within 24 hours, when answering them would
+#: cause excessive interference with its other essential functions. That is
+#: one determination about a set of requests, not an exemption over specific
+#: records, so a denial whose only basis is this statute is the one denial
+#: that may be drafted and sent as a batch. The system attaches the statute
+#: as the denial basis; the officer never picks it.
+BOT_REQUEST_CITATION = "RCW 42.56.080(3)"
+BOT_REQUEST_CITATION_SHORT_NAME = (
+    "Bot request — excessive interference with essential functions"
+)
+
+
+def bot_request_citation() -> ExemptionCitation:
+    """The RCW 42.56.080(3) basis row, created on first use if not seeded."""
+    citation, _created = ExemptionCitation.objects.get_or_create(
+        citation=BOT_REQUEST_CITATION,
+        defaults={
+            "short_name": BOT_REQUEST_CITATION_SHORT_NAME,
+            "description": (
+                "Denial of a bot request that is one of multiple requests "
+                "received within 24 hours, where responding would cause "
+                "excessive interference with other essential District "
+                "functions."
+            ),
+        },
+    )
+    if not citation.active:
+        raise ValidationError(
+            f"{BOT_REQUEST_CITATION} is deactivated in Exemptions; reactivate "
+            "it before sending bot-request denials."
+        )
+    return citation
+
+
+def _is_bot_request_denial(correspondence: Correspondence) -> bool:
+    if correspondence.kind != Correspondence.Kind.DENIAL:
+        return False
+    citations = set(
+        CorrespondenceDenialCitation.objects.filter(
+            correspondence=correspondence,
+        ).values_list("exemption__citation", flat=True)
+    )
+    return citations == {BOT_REQUEST_CITATION}
+
 #: Kinds an officer may draft for many cases from one form. A non-payment
 #: closure is batch-sendable but not batch-draftable: the amount owed differs
 #: per case, and one amount typed once and applied to fifty letters is a
@@ -2204,6 +2249,8 @@ BATCH_DRAFTABLE_KINDS = frozenset(
     {
         Correspondence.Kind.COMPLETION_CLOSURE,
         Correspondence.Kind.GENERAL,
+        # Only ever as a bot-request denial under RCW 42.56.080(3).
+        Correspondence.Kind.DENIAL,
     }
 )
 
@@ -2269,6 +2316,7 @@ def batch_create_closure_drafts(
     production_summary: str = "",
     subject: str = "",
     body: str = "",
+    template_name: str = "",
 ) -> BatchOutcome:
     """Draft the same notice for several cases from one form.
 
@@ -2284,10 +2332,16 @@ def batch_create_closure_drafts(
         )
     if kind not in BATCH_DRAFTABLE_KINDS:
         raise ValidationError(
-            "Only completion closures and general correspondence can be "
-            "drafted for several cases from one form."
+            "Only completion closures, general correspondence, and "
+            "bot-request denials can be drafted for several cases from one "
+            "form."
         )
     numbers = _batch_selection(request_numbers, noun="case")
+    bot_citation = (
+        bot_request_citation()
+        if kind == Correspondence.Kind.DENIAL
+        else None
+    )
     batch_id = str(uuid.uuid4())
     succeeded: list[tuple[str, Correspondence]] = []
     failed: list[tuple[str, str]] = []
@@ -2300,6 +2354,28 @@ def batch_create_closure_drafts(
                         prr,
                         production_summary=production_summary,
                         actor=actor,
+                    )
+                elif bot_citation is not None:
+                    # Each letter is rendered against its own case from the
+                    # chosen denial template, with the statute as its basis.
+                    rendered = render_free_form_prefill(
+                        prr,
+                        kind=Correspondence.Kind.DENIAL,
+                        name=template_name,
+                    )
+                    if BOT_REQUEST_CITATION.lower() not in rendered.body.lower():
+                        raise ValidationError(
+                            "The chosen denial template does not cite "
+                            f"{BOT_REQUEST_CITATION}; choose the bot-request "
+                            "denial template."
+                        )
+                    correspondence = create_authored_draft(
+                        prr,
+                        kind=Correspondence.Kind.DENIAL,
+                        subject=rendered.subject,
+                        body=rendered.body,
+                        actor=actor,
+                        denial_exemption_citation_ids=[bot_citation.pk],
                     )
                 else:
                     correspondence = create_authored_draft(
@@ -2368,6 +2444,7 @@ def batch_approve_and_send(
             draft.get_kind_display()
             for draft in drafts
             if draft.kind not in BATCH_SENDABLE_KINDS
+            and not _is_bot_request_denial(draft)
         }
     )
     if refused:

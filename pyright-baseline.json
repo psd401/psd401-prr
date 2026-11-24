@@ -1,6 +1,6 @@
 {
   "pyright": "1.1.414",
-  "total": 1762,
+  "total": 1766,
   "files": {
     "apps/api/access_tokens.py": 2,
     "apps/api/advisory.py": 1,
@@ -35,7 +35,7 @@
     "apps/api/tests/test_agent_capabilities.py": 1,
     "apps/api/tests/test_app_settings.py": 2,
     "apps/api/tests/test_audit.py": 2,
-    "apps/api/tests/test_automatic_message_templates.py": 2,
+    "apps/api/tests/test_automatic_message_templates.py": 4,
     "apps/api/tests/test_case_activity.py": 7,
     "apps/api/tests/test_case_inbox.py": 1,
     "apps/api/tests/test_case_notes_api.py": 5,
@@ -102,7 +102,7 @@
     "apps/correspondence/services.py": 51,
     "apps/correspondence/tasks.py": 25,
     "apps/correspondence/tests/test_automatic_message_templates.py": 1,
-    "apps/correspondence/tests/test_batch_correspondence.py": 10,
+    "apps/correspondence/tests/test_batch_correspondence.py": 12,
     "apps/correspondence/tests/test_casework_fixture_command.py": 4,
     "apps/correspondence/tests/test_delivery_notifications.py": 1,
     "apps/correspondence/tests/test_delivery_status_receiving.py": 5,

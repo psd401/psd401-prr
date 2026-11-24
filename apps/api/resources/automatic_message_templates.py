@@ -109,7 +109,8 @@ class AutomaticMessageTemplateWriteSerializer(serializers.Serializer):
         default="",
         max_length=120,
         help_text=(
-            "Only general correspondence may carry several named templates. "
+            "Only general correspondence and denials may carry several "
+            "named templates. "
             "Leave blank for the district default."
         ),
     )
@@ -286,6 +287,10 @@ class AutomaticMessageTemplateViewSet(viewsets.ModelViewSet):
                     "kind": kind,
                     "label": spec.label,
                     "group": spec.group,
+                    # Whether this kind accepts a template name, so the
+                    # configuration page can offer one without hard-coding
+                    # which kinds are named.
+                    "named": kind in AutomaticMessageTemplate.NAMED_KINDS,
                     "authoring": (
                         "free_form"
                         if kind in FREE_FORM_TEMPLATE_KINDS
