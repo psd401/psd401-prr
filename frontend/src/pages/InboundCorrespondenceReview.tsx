@@ -99,11 +99,11 @@ function HeldMessageText({ receiptId }: { receiptId: string }) {
   return (
     <div className="space-y-3">
       {headers.length > 0 && (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+        <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
           {headers.map(([name, value]) => (
             <div key={name} className="contents">
               <dt className="font-heading font-bold text-ink-muted">{name}</dt>
-              <dd className="break-words text-ink">{value}</dd>
+              <dd className="min-w-0 text-ink [overflow-wrap:anywhere]">{value}</dd>
             </div>
           ))}
         </dl>
@@ -113,7 +113,9 @@ function HeldMessageText({ receiptId }: { receiptId: string }) {
           The email could not be split into parts, so this is its raw source.
         </p>
       )}
-      <div className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-line bg-surface-raised p-3 font-mono text-xs text-ink">
+      {/* overflow-wrap: anywhere, not break-word: a long URL must not set the
+          dialog's minimum width, or the whole review widens past its edge. */}
+      <div className="max-h-80 min-w-0 overflow-y-auto whitespace-pre-wrap rounded-md border border-line bg-surface-raised p-3 font-mono text-xs text-ink [overflow-wrap:anywhere]">
         {body || '(Empty email)'}
       </div>
       {truncated && (
