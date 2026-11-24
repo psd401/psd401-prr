@@ -484,3 +484,29 @@ class RequestListFocusTests(CaseInboxViewTests):
             "/api/staff/requests/", {"queue": "inbox", "focus": "nope"}
         )
         self.assertEqual(response.status_code, 400)
+
+
+class RequestListQueryShapeTests(CaseInboxViewTests):
+    """The open-requests list must not GROUP BY every row of the case query.
+
+    Counting waiting email with a join + Count() grouped the whole annotated
+    case query (due dates, subject, latest note) by every selected column; on
+    production Postgres that took ~5s for 109 open requests while the same
+    list without it took 0.3s. Correlated subqueries keep it per row.
+    """
+
+    def test_open_requests_list_does_not_group_the_case_query(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get("/api/staff/requests/", {"queue": "inbox"})
+        self.assertEqual(response.status_code, 200, response.content)
+        grouped = [
+            query["sql"]
+            for query in queries.captured_queries
+            # The outer case query grouping by its own columns is the slow
+            # shape; a GROUP BY inside a per-row subquery is not.
+            if 'GROUP BY "records_publicrecordsrequest"' in query["sql"]
+        ]
+        self.assertEqual(grouped, [])
