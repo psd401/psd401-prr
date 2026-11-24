@@ -1,6 +1,6 @@
 {
   "pyright": "1.1.414",
-  "total": 1766,
+  "total": 1767,
   "files": {
     "apps/api/access_tokens.py": 2,
     "apps/api/advisory.py": 1,
@@ -102,7 +102,7 @@
     "apps/correspondence/services.py": 51,
     "apps/correspondence/tasks.py": 25,
     "apps/correspondence/tests/test_automatic_message_templates.py": 1,
-    "apps/correspondence/tests/test_batch_correspondence.py": 12,
+    "apps/correspondence/tests/test_batch_correspondence.py": 13,
     "apps/correspondence/tests/test_casework_fixture_command.py": 4,
     "apps/correspondence/tests/test_delivery_notifications.py": 1,
     "apps/correspondence/tests/test_delivery_status_receiving.py": 5,
