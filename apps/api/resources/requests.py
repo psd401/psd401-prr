@@ -17,7 +17,6 @@ from django.db.models import (
     Exists,
     F,
     IntegerField,
-    Max,
     OuterRef,
     Prefetch,
     Q,
@@ -1823,16 +1822,28 @@ class RequestsViewSet(
             # requester emails nobody has handled yet. Web-form cases have no
             # email rows at all, which is exactly why the Inbox has to start
             # from cases rather than from messages.
-            open_inbox_rows = Q(
-                work_items__work_kind__in=INBOX_MESSAGE_WORK_KINDS,
-                work_items__disposition=WorkItem.Disposition.NEEDS_ATTENTION,
+            # Correlated subqueries, not a join + Count(): counting through
+            # the join made Postgres GROUP BY every column of the annotated
+            # case query, which took ~5s for 109 open requests in production.
+            open_inbox_rows = WorkItem.objects.filter(
+                request_id=OuterRef("pk"),
+                work_kind__in=INBOX_MESSAGE_WORK_KINDS,
+                disposition=WorkItem.Disposition.NEEDS_ATTENTION,
             )
             qs = qs.exclude(status__in=services.CLOSED_STATUSES).annotate(
-                _inbox_needs_attention=Count(
-                    "work_items", filter=open_inbox_rows, distinct=True,
+                _inbox_needs_attention=Coalesce(
+                    Subquery(
+                        open_inbox_rows.order_by()
+                        .values("request_id")
+                        .annotate(waiting=Count("id"))
+                        .values("waiting")[:1],
+                        output_field=IntegerField(),
+                    ),
+                    Value(0),
                 ),
-                _latest_inbound_at=Max(
-                    "work_items__created_at", filter=open_inbox_rows,
+                _latest_inbound_at=Subquery(
+                    open_inbox_rows.order_by("-created_at")
+                    .values("created_at")[:1],
                 ),
             )
             # An explicit column sort replaces the flagged-first default
