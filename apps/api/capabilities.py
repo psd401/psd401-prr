@@ -2691,6 +2691,42 @@ CAPABILITIES = (
         risk="moderate",
     ),
     _capability(
+        "inbound_correspondence.release_held",
+        "Release a held email a Records Officer has read: the current parser "
+        "is tried first, and when it still refuses the message its plain text "
+        "is released with its attachments left held. The email is never "
+        "matched automatically; the officer files it.",
+        "POST",
+        "/api/staff/inbound-correspondence-receipts/{id}/release/",
+        ["/email"],
+        execution="human_only",
+        risk="high",
+        constraints=[
+            "substantive_reason",
+            "accountable_human_actor",
+            "interactive_staff_session",
+            "records_officer_authority",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
+        "inbound_correspondence.open_request",
+        "Open a new public records request from a released email that is not "
+        "on a case yet, under its sender (or a forward's original sender).",
+        "POST",
+        "/api/staff/inbound-correspondence-receipts/{id}/open-request/",
+        ["/email"],
+        execution="human_only",
+        risk="high",
+        constraints=[
+            "substantive_reason",
+            "accountable_human_actor",
+            "interactive_staff_session",
+            "records_officer_authority",
+            "append_only_audit",
+        ],
+    ),
+    _capability(
         "inbound_correspondence.match",
         "Associate parsed inbound correspondence to one request after an "
         "accountable human reviews the retained evidence; delivery-status "

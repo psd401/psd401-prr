@@ -107,6 +107,13 @@ def _eligible_unmatched_email(
     if "list-id" in headers:
         return None
 
+    return _intake_values(receipt, correspondence)
+
+
+def _intake_values(
+    receipt: InboundCorrespondenceReceipt,
+    correspondence: Correspondence,
+) -> tuple[str, str, str, dt.datetime, str] | None:
     identity = _requester_identity(correspondence)
     if identity is None:
         return None
@@ -232,11 +239,17 @@ def create_request_from_unmatched_email(
     eligible = _eligible_unmatched_email(receipt)
     if eligible is None:
         return None
-    name, email, body, received_at, forwarded_by = eligible
+    return _open_email_request(receipt, eligible, actor=actor)
+
+
+def _open_email_request(receipt, values, *, actor, allow_candidate=False):
+    name, email, body, received_at, forwarded_by = values
 
     def claim_receipt(request: PublicRecordsRequest) -> None:
         try:
-            inbound.match_email_intake_receipt(receipt, request=request)
+            inbound.match_email_intake_receipt(
+                receipt, request=request, allow_candidate=allow_candidate
+            )
         except ValidationError as exc:
             raise _EmailIntakeClaimConflict() from exc
 
@@ -284,6 +297,82 @@ def create_request_from_unmatched_email(
     refreshed = InboundCorrespondenceReceipt.objects.get(pk=receipt.pk)
     ensure_email_intake_attachments(refreshed, request)
     defer_automatic_request_intent_advisory(request.pk)
+    return request
+
+
+def open_request_from_email(
+    receipt: InboundCorrespondenceReceipt,
+    *,
+    actor,
+    reason,
+    expected_version,
+) -> PublicRecordsRequest:
+    """An officer opens a new request from one unfiled email.
+
+    The same intake an eligible email gets automatically, without the
+    automatic gates (recipient list, bulk or list headers, blocked sender
+    domains): a person has read it and decided it is a request.
+    """
+    # The officer check locks the staff row with select_for_update, which
+    # Postgres refuses outside a transaction (SQLite silently allows it).
+    with transaction.atomic():
+        actor = require_current_human_staff(
+            actor,
+            roles=(StaffRole.RECORDS_OFFICER,),
+            message="Only a Records Officer may open a request from an email.",
+        )
+    reason = (reason or "").strip()
+    if len(reason) < 10:
+        raise ValidationError("Say why this email is a new request.")
+    receipt = InboundCorrespondenceReceipt.objects.select_related(
+        "matched_correspondence"
+    ).get(pk=receipt.pk)
+    if receipt.version != expected_version:
+        from apps.correspondence.services import VersionConflict
+
+        raise VersionConflict(
+            "This email changed since it was opened. Reload it and try again."
+        )
+    correspondence = receipt.matched_correspondence
+    if (
+        receipt.parsing_status
+        != InboundCorrespondenceReceipt.ParsingStatus.PARSED
+        or receipt.quarantined
+        or receipt.matching_status
+        not in {
+            InboundCorrespondenceReceipt.MatchingStatus.UNMATCHED,
+            InboundCorrespondenceReceipt.MatchingStatus.CANDIDATE,
+            InboundCorrespondenceReceipt.MatchingStatus.AMBIGUOUS,
+        }
+        or correspondence is None
+        or correspondence.kind
+        == Correspondence.Kind.DELIVERY_STATUS_NOTIFICATION
+    ):
+        raise ValidationError(
+            "Only a released email that is not on a case yet can open a new "
+            "request."
+        )
+    if not correspondence.received_body.strip():
+        raise ValidationError(
+            "This email has no text to use as the request. Add it to an "
+            "existing case instead."
+        )
+    values = _intake_values(receipt, correspondence)
+    if values is None:
+        raise ValidationError(
+            "PRR cannot tell who sent this email, so it cannot open a request "
+            "for them. Add it to an existing case instead."
+        )
+    request = _open_email_request(
+        receipt, values, actor=actor, allow_candidate=True
+    )
+    audit(
+        "request.opened_from_email",
+        target=request.number,
+        actor=actor,
+        receipt_id=str(receipt.pk),
+        reason=reason,
+    )
     return request
 
 

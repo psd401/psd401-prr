@@ -330,6 +330,27 @@ class ManualInboundAssociationSerializer(serializers.Serializer):
         return super().to_internal_value(data)
 
 
+class OfficerEmailDecisionSerializer(serializers.Serializer):
+    reason = serializers.CharField(
+        min_length=10,
+        max_length=2000,
+        trim_whitespace=True,
+    )
+    expected_version = serializers.IntegerField(min_value=1)
+
+    def to_internal_value(self, data):
+        if hasattr(data, "keys"):
+            unknown = set(data.keys()) - set(self.fields)
+            if unknown:
+                raise serializers.ValidationError(
+                    {
+                        field: ["This field is not accepted."]
+                        for field in sorted(unknown)
+                    }
+                )
+        return super().to_internal_value(data)
+
+
 class ClarificationResponseAssociationSerializer(serializers.Serializer):
     clarification_cycle_id = serializers.UUIDField()
     reason = serializers.CharField(
@@ -374,6 +395,8 @@ class InboundCorrespondenceReceiptViewSet(
         "redirect": OFFICER_ONLY,
         "associate_clarification": OFFICER_ONLY,
         "readable": OFFICER_ONLY,
+        "release": OFFICER_ONLY,
+        "open_request": OFFICER_ONLY,
     }
 
     def get_queryset(self):
@@ -533,6 +556,79 @@ class InboundCorrespondenceReceiptViewSet(
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         return Response(message)
+
+    def _officer_decision(self, request, *, capability_id, action_text, run):
+        handoff = human_only_handoff(
+            request,
+            capability_id=capability_id,
+            action=action_text,
+        )
+        if handoff:
+            return handoff
+        receipt = self.get_object()
+        serializer = OfficerEmailDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        try:
+            run(receipt, data["reason"], data["expected_version"])
+        except services.VersionConflict as exc:
+            return Response(
+                {"code": "version_conflict", "detail": _validation_detail(exc)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except ValidationError as exc:
+            return Response(
+                {"code": "validation_error", "detail": _validation_detail(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except InboundStorageUnavailable:
+            return Response(
+                {"detail": "The stored email could not be read just now."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return self._detail_response(receipt)
+
+    @extend_schema(
+        request=OfficerEmailDecisionSerializer,
+        responses={200: InboundReceiptDetailSerializer},
+    )
+    @action(detail=True, methods=["post"])
+    def release(self, request, pk=None):
+        """Release a held email the officer has read, to be filed by hand."""
+        return self._officer_decision(
+            request,
+            capability_id="inbound_correspondence.release_held",
+            action_text="Release a held email so it can be filed.",
+            run=lambda receipt, reason, version: (
+                held_messages.release_held_message(
+                    receipt.pk,
+                    actor=request.user,
+                    reason=reason,
+                    expected_version=version,
+                )
+            ),
+        )
+
+    @extend_schema(
+        request=OfficerEmailDecisionSerializer,
+        responses={200: InboundReceiptDetailSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="open-request")
+    def open_request(self, request, pk=None):
+        """Open a new request from an email that is not on a case yet."""
+        return self._officer_decision(
+            request,
+            capability_id="inbound_correspondence.open_request",
+            action_text="Open a new records request from an email.",
+            run=lambda receipt, reason, version: (
+                email_intake.open_request_from_email(
+                    receipt,
+                    actor=request.user,
+                    reason=reason,
+                    expected_version=version,
+                )
+            ),
+        )
 
     @extend_schema(
         request=ManualInboundAssociationSerializer,

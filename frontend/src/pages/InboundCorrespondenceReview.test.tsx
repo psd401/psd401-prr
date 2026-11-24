@@ -210,7 +210,7 @@ describe('Inbound correspondence review', () => {
       screen.getByLabelText('Substantive reason'),
       'The headers and case history confirm this request association.',
     )
-    await user.click(screen.getByRole('button', { name: 'Match message' }))
+    await user.click(screen.getByRole('button', { name: 'Add to case' }))
 
     await waitFor(() => {
       const matchCall = fetchMock.mock.calls.find(
@@ -281,7 +281,7 @@ describe('Inbound correspondence review', () => {
       screen.getByLabelText('Substantive reason'),
       'The retained evidence confirms this request association.',
     )
-    await user.click(screen.getByRole('button', { name: 'Match message' }))
+    await user.click(screen.getByRole('button', { name: 'Add to case' }))
 
     await waitFor(() => {
       expect(invalidate).toHaveBeenCalledWith({
@@ -476,7 +476,7 @@ describe('Inbound correspondence review', () => {
       screen.getByText(/does not retry delivery or change request status/i),
     ).toBeInTheDocument()
     expect(
-      screen.queryByRole('button', { name: 'Match message' }),
+      screen.queryByRole('button', { name: 'Add to case' }),
     ).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: 'Rematch message' }),
@@ -782,7 +782,145 @@ describe('Inbound correspondence review', () => {
     expect(await screen.findByText('Please send the levy records.')).toBeInTheDocument()
     expect(screen.getByText('Records about the levy')).toBeInTheDocument()
     expect(screen.getByText('No attachments.')).toBeInTheDocument()
-    expect(screen.getByText(/cannot be matched until parsing/)).toBeInTheDocument()
+    expect(screen.queryByText(/cannot be matched until parsing/)).not.toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Add to a case' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: 'Open a new request' })).toBeInTheDocument()
+    expect(screen.getByText(/takes the email off hold first/)).toBeInTheDocument()
+  })
+
+  describe('filing a held email', () => {
+    const REASON = 'The requester replied to the closed case; it is readable.'
+    const held = summary({
+      parsing_status: 'quarantined',
+      matching_status: 'quarantined',
+      correspondence_id: null,
+      candidate_request_number: null,
+      quarantined: true,
+      quarantine_reason_code: 'malformed_message',
+      parsing_error_code: 'malformed_message',
+      attachment_count: 0,
+      quarantined_attachment_count: 0,
+      version: 4,
+    })
+    const heldDetail = detail({
+      ...held,
+      received_subject: null,
+      received_body: null,
+      received_sender: null,
+      received_recipients: null,
+      correspondence_status: null,
+      correspondence_kind: null,
+      received_headers: {},
+      attachments: [],
+    })
+    const released = detail({
+      ...held,
+      parsing_status: 'parsed',
+      matching_status: 'unmatched',
+      quarantined: false,
+      quarantine_reason_code: '',
+      parsing_error_code: '',
+      version: 5,
+    })
+
+    function mockFetch(filed: Record<string, unknown>) {
+      return vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+        const url = String(input)
+        const base = `/api/staff/inbound-correspondence-receipts/${held.id}`
+        if (url.endsWith('?queue=unmatched')) return fakeResponse(page([]))
+        if (url.endsWith('?queue=quarantined')) return fakeResponse(page([held]))
+        if (url === `${base}/`) return fakeResponse(heldDetail)
+        if (url === `${base}/readable/`) {
+          return fakeResponse({
+            headers: [['Subject', 'Re: levy records']],
+            body: 'Thanks, please keep going.',
+            attachments: [],
+            raw_source: false,
+            truncated: false,
+          })
+        }
+        if (url === `${base}/release/`) return fakeResponse(released)
+        if (url === `${base}/open-request/` || url === `${base}/match/`) {
+          return fakeResponse(filed)
+        }
+        throw new Error(`Unexpected fetch: ${url}`)
+      })
+    }
+
+    async function openHeld() {
+      const user = userEvent.setup()
+      renderReview()
+      await user.click(await screen.findByRole('button', { name: 'Quarantined' }))
+      await user.click(await screen.findByRole('button', {
+        name: 'Review email received 2026-07-23',
+      }))
+      await screen.findByText('Thanks, please keep going.')
+      return user
+    }
+
+    function body(fetchMock: ReturnType<typeof mockFetch>, suffix: string) {
+      const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith(suffix))
+      const init = call?.[1] as RequestInit | undefined
+      return init ? JSON.parse(String(init.body)) : undefined
+    }
+
+    it('releases it, then opens a new request from it', async () => {
+      const fetchMock = mockFetch(detail({
+        ...released,
+        matching_status: 'matched',
+        match_method: 'email_intake',
+        matched_request_number: 'PRR-2026-0200',
+        version: 6,
+      }))
+      vi.stubGlobal('fetch', fetchMock)
+      const user = await openHeld()
+
+      await user.click(screen.getByRole('radio', { name: 'Open a new request' }))
+      expect(screen.queryByLabelText('Request number')).not.toBeInTheDocument()
+      await user.type(screen.getByLabelText('Substantive reason'), REASON)
+      await user.click(screen.getByRole('button', { name: 'Open new request' }))
+
+      await waitFor(() => {
+        expect(body(fetchMock, '/open-request/')).toEqual({
+          reason: REASON,
+          expected_version: 5,
+        })
+      })
+      expect(body(fetchMock, '/release/')).toEqual({
+        reason: REASON,
+        expected_version: 4,
+      })
+      expect(
+        await screen.findByText('Opened PRR-2026-0200 from this email.'),
+      ).toBeInTheDocument()
+    })
+
+    it('releases it, then adds it to the case the officer names', async () => {
+      const fetchMock = mockFetch(detail({
+        ...released,
+        matching_status: 'matched',
+        match_method: 'manual',
+        matched_request_number: 'PRR-2026-0042',
+        version: 6,
+      }))
+      vi.stubGlobal('fetch', fetchMock)
+      const user = await openHeld()
+
+      await user.type(screen.getByLabelText('Request number'), 'PRR-2026-0042')
+      await user.type(screen.getByLabelText('Substantive reason'), REASON)
+      await user.click(screen.getByRole('button', { name: 'Add to case' }))
+
+      await waitFor(() => {
+        expect(body(fetchMock, '/match/')).toEqual({
+          request_number: 'PRR-2026-0042',
+          reason: REASON,
+          expected_version: 5,
+        })
+      })
+      expect(
+        await screen.findByText('Added this email to PRR-2026-0042.'),
+      ).toBeInTheDocument()
+    })
   })
 
   it('names the dialog and offers an explicit close after receipt load failure', async () => {

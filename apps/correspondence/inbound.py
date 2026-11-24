@@ -611,18 +611,28 @@ def match_inbound_evidence(receipt):
 
 
 @transaction.atomic
-def match_email_intake_receipt(receipt, *, request):
-    """Atomically bind one plain unmatched email to its newly created case."""
+def match_email_intake_receipt(receipt, *, request, allow_candidate=False):
+    """Atomically bind one plain unmatched email to its newly created case.
+
+    ``allow_candidate`` is for an officer's choice to open a new request from
+    an email that only looked like it might belong to another case (a
+    candidate or ambiguous match).
+    """
     request = PublicRecordsRequest.objects.select_for_update().get(pk=request.pk)
     locked = _locked_receipt(receipt)
     if request.channel != Channel.EMAIL:
         raise ValidationError("Email intake must create an email-channel request.")
+    claimable = {InboundCorrespondenceReceipt.MatchingStatus.UNMATCHED}
+    if allow_candidate:
+        claimable |= {
+            InboundCorrespondenceReceipt.MatchingStatus.CANDIDATE,
+            InboundCorrespondenceReceipt.MatchingStatus.AMBIGUOUS,
+        }
     if (
         locked.parsing_status
         != InboundCorrespondenceReceipt.ParsingStatus.PARSED
         or locked.quarantined
-        or locked.matching_status
-        != InboundCorrespondenceReceipt.MatchingStatus.UNMATCHED
+        or locked.matching_status not in claimable
         or _is_delivery_status_receipt(locked)
     ):
         raise ValidationError(

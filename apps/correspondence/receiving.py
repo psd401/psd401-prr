@@ -548,6 +548,23 @@ def _adopt_attachments_and_match(
     receipt, correspondence, parsed, attachment_reservations, actor
 ):
     """Adopt stored attachment evidence, then match the parsed receipt."""
+    attachments = _adopt_attachments(
+        receipt, correspondence, parsed, attachment_reservations, actor
+    )
+    if parsed.delivery_status_report is not None:
+        receipt = match_delivery_status_report(
+            receipt,
+            parsed.delivery_status_report,
+        )
+    else:
+        receipt = match_inbound_evidence(receipt)
+    return receipt, attachments
+
+
+def _adopt_attachments(
+    receipt, correspondence, parsed, attachment_reservations, actor
+):
+    """Adopt stored attachment evidence for a parsed receipt."""
     attachments = []
     for parsed_attachment, reservation in zip(
         parsed.attachments,
@@ -573,15 +590,7 @@ def _adopt_attachments_and_match(
                 attachment_id
             )
         )
-
-    if parsed.delivery_status_report is not None:
-        receipt = match_delivery_status_report(
-            receipt,
-            parsed.delivery_status_report,
-        )
-    else:
-        receipt = match_inbound_evidence(receipt)
-    return receipt, attachments
+    return attachments
 
 
 @transaction.atomic
@@ -912,45 +921,34 @@ def verified_raw_message(receipt) -> bytes | None:
     return raw_bytes
 
 
-def reparse_quarantined_receipt(receipt_id, *, actor) -> InboundReparseResult:
-    """Re-read one whole-message quarantine with the current parser.
+def is_whole_message_quarantine(candidate) -> bool:
+    """A receipt the parser refused outright: held with no readable snapshot."""
+    return (
+        candidate.parsing_status
+        in {
+            InboundCorrespondenceReceipt.ParsingStatus.FAILED,
+            InboundCorrespondenceReceipt.ParsingStatus.QUARANTINED,
+        }
+        and candidate.matching_status
+        == InboundCorrespondenceReceipt.MatchingStatus.QUARANTINED
+        and candidate.matched_correspondence_id is None
+    )
 
-    Returns ``released`` when the retained raw message now parses and the
-    receipt joins the normal matching path; ``still_quarantined`` (with the
-    parser's reason) when it still does not; ``evidence_mismatch`` when the
-    stored raw bytes no longer hash to the retained digest; and
-    ``not_quarantined`` for any receipt that is not a parsing quarantine.
+
+def release_parsed_quarantine(
+    receipt,
+    parsed,
+    *,
+    actor,
+    match=True,
+    on_released=None,
+):
+    """Store ``parsed`` as a whole-message quarantine's snapshot and release it.
+
+    Returns the released receipt, or None when another worker released it
+    first. ``match=False`` leaves it unmatched for an officer to file;
+    ``on_released`` runs in the same transaction (for the caller's audit).
     """
-    actor = require_exact_inbound_identity(actor)
-    receipt = InboundCorrespondenceReceipt.objects.get(pk=receipt_id)
-
-    def eligible(candidate) -> bool:
-        return (
-            candidate.parsing_status
-            in {
-                InboundCorrespondenceReceipt.ParsingStatus.FAILED,
-                InboundCorrespondenceReceipt.ParsingStatus.QUARANTINED,
-            }
-            and candidate.matching_status
-            == InboundCorrespondenceReceipt.MatchingStatus.QUARANTINED
-            and candidate.matched_correspondence_id is None
-        )
-
-    if not eligible(receipt):
-        return InboundReparseResult(receipt.pk, "not_quarantined")
-    raw_bytes = verified_raw_message(receipt)
-    if raw_bytes is None:
-        return InboundReparseResult(receipt.pk, "evidence_mismatch")
-    try:
-        parsed = parse_inbound_message(raw_bytes, limits=_mime_limits())
-    except InboundMimeSecurityError as exc:
-        return InboundReparseResult(receipt.pk, "still_quarantined", exc.code)
-    except Exception:  # noqa: BLE001 - an unparseable message stays quarantined
-        logger.error("Inbound MIME re-parse failed closed")
-        return InboundReparseResult(
-            receipt.pk, "still_quarantined", _PARSER_UNAVAILABLE
-        )
-
     attachment_reservations = [
         _reserve_and_store(
             logical_identity=_reservation_identity(
@@ -978,8 +976,8 @@ def reparse_quarantined_receipt(receipt_id, *, actor) -> InboundReparseResult:
         locked = InboundCorrespondenceReceipt.objects.select_for_update().get(
             pk=receipt.pk
         )
-        if not eligible(locked):
-            return InboundReparseResult(receipt.pk, "not_quarantined")
+        if not is_whole_message_quarantine(locked):
+            return None
         previous_reason = locked.quarantine_reason or locked.parsing_error
         correspondence = _create_correspondence(locked, parsed, actor)
         released = cast(
@@ -992,9 +990,52 @@ def reparse_quarantined_receipt(receipt_id, *, actor) -> InboundReparseResult:
             in_reply_to=" ".join(parsed.in_reply_to),
             references=parsed.references,
         )
-        released, attachments = _adopt_attachments_and_match(
-            released, correspondence, parsed, attachment_reservations, actor
+        if match:
+            released, attachments = _adopt_attachments_and_match(
+                released, correspondence, parsed, attachment_reservations, actor
+            )
+        else:
+            attachments = _adopt_attachments(
+                released, correspondence, parsed, attachment_reservations, actor
+            )
+        if on_released is not None:
+            on_released(released, correspondence, previous_reason, attachments)
+    from apps.work_queue.integration import (
+        schedule_inbound_receipt_reconciliation,
+    )
+
+    schedule_inbound_receipt_reconciliation(released.pk)
+    return released
+
+
+def reparse_quarantined_receipt(receipt_id, *, actor) -> InboundReparseResult:
+    """Re-read one whole-message quarantine with the current parser.
+
+    Returns ``released`` when the retained raw message now parses and the
+    receipt joins the normal matching path; ``still_quarantined`` (with the
+    parser's reason) when it still does not; ``evidence_mismatch`` when the
+    stored raw bytes no longer hash to the retained digest; and
+    ``not_quarantined`` for any receipt that is not a parsing quarantine.
+    """
+    actor = require_exact_inbound_identity(actor)
+    receipt = InboundCorrespondenceReceipt.objects.get(pk=receipt_id)
+
+    if not is_whole_message_quarantine(receipt):
+        return InboundReparseResult(receipt.pk, "not_quarantined")
+    raw_bytes = verified_raw_message(receipt)
+    if raw_bytes is None:
+        return InboundReparseResult(receipt.pk, "evidence_mismatch")
+    try:
+        parsed = parse_inbound_message(raw_bytes, limits=_mime_limits())
+    except InboundMimeSecurityError as exc:
+        return InboundReparseResult(receipt.pk, "still_quarantined", exc.code)
+    except Exception:  # noqa: BLE001 - an unparseable message stays quarantined
+        logger.error("Inbound MIME re-parse failed closed")
+        return InboundReparseResult(
+            receipt.pk, "still_quarantined", _PARSER_UNAVAILABLE
         )
+
+    def record(released, correspondence, previous_reason, attachments):
         audit(
             "correspondence.inbound_reparsed",
             target=str(released.pk),
@@ -1006,9 +1047,10 @@ def reparse_quarantined_receipt(receipt_id, *, actor) -> InboundReparseResult:
             match_method=released.match_method,
             attachment_count=len(attachments),
         )
-    from apps.work_queue.integration import (
-        schedule_inbound_receipt_reconciliation,
-    )
 
-    schedule_inbound_receipt_reconciliation(released.pk)
+    released = release_parsed_quarantine(
+        receipt, parsed, actor=actor, on_released=record
+    )
+    if released is None:
+        return InboundReparseResult(receipt.pk, "not_quarantined")
     return InboundReparseResult(released.pk, "released")

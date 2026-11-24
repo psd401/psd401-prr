@@ -293,6 +293,13 @@ eligible new request opens with its real arrival time (audited as
 `correspondence.inbound_reparsed`). The same deadline warning as catch-up
 applies.
 
+An officer does not need the command for a held email they have read:
+**Email → Couldn't be read → Review** releases it and adds it to a case or opens
+a new request from it (`release_held_message`, then the match or
+`open_request_from_email` primitive). A message the parser still refuses is
+released as plain text with no attachments; nothing about it is matched
+automatically.
+
 ## Mailbox reconciliation, triage alerts, and catch-up
 
 The history feed only reports messages that arrive carrying the INBOX label.
