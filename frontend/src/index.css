@@ -123,3 +123,38 @@
     forced-color-adjust: auto;
   }
 }
+
+/* File pickers. Nexus styles .nx-input as a one-line text box and Tailwind's
+   preflight strips the native picker button, so "Choose Files" rendered as
+   bare text in an empty box. Give the picker room and a real button. */
+@layer components {
+  .nx-input[type='file'] {
+    height: auto;
+    min-height: 48px;
+    padding: var(--space-1) var(--space-2);
+    line-height: 38px;
+    cursor: pointer;
+  }
+
+  .nx-input[type='file']::file-selector-button {
+    height: 36px;
+    margin-right: var(--space-3);
+    padding: 0 var(--space-4);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-sunken);
+    color: var(--ink);
+    font: 600 13px/16px var(--font-sans);
+    cursor: pointer;
+    transition: background-color 0.16s ease-out;
+  }
+
+  .nx-input[type='file']:hover::file-selector-button {
+    background: var(--surface-canvas);
+  }
+
+  .nx-input[type='file']:disabled,
+  .nx-input[type='file']:disabled::file-selector-button {
+    cursor: not-allowed;
+  }
+}

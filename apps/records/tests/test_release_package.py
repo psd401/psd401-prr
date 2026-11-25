@@ -14,12 +14,14 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.test import TestCase, override_settings
+from django.db import transaction
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.api.identity import apply_staff_roles
 from apps.api.models import StaffRole
+from apps.records import release_package
 from apps.records.exemption_logs import (
     _build_manifest,
     current_exemption_log_manifest_sha256,
@@ -189,3 +191,28 @@ class BuildReleasePackageApiTests(_Fixture):
         self.assertEqual(response.status_code, 400)
         self.assertNotIn("blocker", response.json())
         self.assertIn("exemption log is required", str(response.json()))
+
+
+class ReleasePackageTransactionTests(TransactionTestCase):
+    """Postgres refuses select_for_update outside a transaction; SQLite and
+    the ordinary TestCase (one big transaction) hide that, so check it. The
+    officer check locks the staff row, and "Build package" 500'd on
+    prr.psd401.net because it ran outside one."""
+
+    def test_the_officer_check_runs_inside_a_transaction(self):
+        officer = get_user_model().objects.create(
+            username="release-tx", email="release-tx@psd401.net", is_staff=True,
+        )
+        apply_staff_roles(officer, {StaffRole.RECORDS_OFFICER})
+        seen = []
+
+        def spy(*, actor, message):
+            seen.append(transaction.get_connection().in_atomic_block)
+            raise PermissionDenied("stop here")
+
+        with (
+            patch.object(release_package, "_require_current_records_officer", spy),
+            self.assertRaises(PermissionDenied),
+        ):
+            release_package.build_release_package("unused", actor=officer)
+        self.assertEqual(seen, [True])
