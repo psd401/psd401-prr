@@ -623,7 +623,7 @@ source "$1"
         self.assertIn("prr-app-backup@", source)
 
     def test_ci_shellchecks_every_backup_script(self):
-        workflow = (self.root / ".github" / "workflows" / "psd-ci-jobs.yml").read_text()
+        workflow = (self.root / ".github" / "workflows" / "ci.yml").read_text()
         for name in (
             "run-app-backup.sh",
             "verify-app-backup-restore.sh",
@@ -632,7 +632,7 @@ source "$1"
             self.assertIn(name, workflow)
 
     def test_ci_shellcheck_does_not_depend_on_an_unbounded_package_install(self):
-        workflow = (self.root / ".github" / "workflows" / "psd-ci-jobs.yml").read_text()
+        workflow = (self.root / ".github" / "workflows" / "ci.yml").read_text()
 
         self.assertNotIn("apt-get install -y -qq shellcheck", workflow)
         self.assertIn("shellcheck --version", workflow)

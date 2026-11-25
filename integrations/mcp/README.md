@@ -386,7 +386,7 @@ the review sees the wording diff beside it.
 with placeholder credentials — the scanner only needs the server to start and
 answer `tools/list`, and it must never hold a real staff token.
 
-The token-free half runs on every pull request, inside `psd-ci / Backend
+The token-free half runs on every pull request, inside the CI check `Backend
 audits and quarantined tests`, and gates the merge:
 
 ```bash

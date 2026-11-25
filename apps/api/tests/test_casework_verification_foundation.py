@@ -296,7 +296,7 @@ class CaseworkVerificationFoundationTests(SimpleTestCase):
                 self.assertIn(expected, flow_text)
 
     def test_ci_runs_credential_free_playwright_and_uploads_failure_evidence(self):
-        workflow_path = self.root / ".github" / "workflows" / "psd-ci-jobs.yml"
+        workflow_path = self.root / ".github" / "workflows" / "ci.yml"
         workflow_text = workflow_path.read_text(encoding="utf-8")
         workflow = yaml.safe_load(workflow_text)
         self.assertEqual(

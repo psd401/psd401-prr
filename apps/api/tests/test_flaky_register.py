@@ -168,7 +168,7 @@ class FlakyRegisterTests(SimpleTestCase):
         self.assertIn("--exclude-tag=quarantine", gate)
 
     def test_ci_gates_exclude_quarantined_tests_and_still_run_them(self):
-        workflow_path = self.root / ".github" / "workflows" / "psd-ci-jobs.yml"
+        workflow_path = self.root / ".github" / "workflows" / "ci.yml"
         workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
 
         gating = next(

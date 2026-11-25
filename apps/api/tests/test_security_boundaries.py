@@ -549,7 +549,7 @@ class DependencySecurityAutomationTests(SimpleTestCase):
         self.assertEqual(violations, [])
 
     def test_ci_audits_python_and_frontend_dependencies(self):
-        workflow = (settings.BASE_DIR / ".github/workflows/psd-ci-jobs.yml").read_text()
+        workflow = (settings.BASE_DIR / ".github/workflows/ci.yml").read_text()
 
         # The audited environment is the one `uv sync --locked` built, so this
         # covers the locked transitive closure, not just the declared floors.
@@ -624,10 +624,10 @@ class DependencySecurityAutomationTests(SimpleTestCase):
                 env = {**parsed.get("env", {}), **job.get("env", {})}
                 with self.subTest(job=callers[-1]):
                     self.assertEqual(env.get("UV_PYTHON_PREFERENCE"), "only-managed")
-        self.assertIn("psd-ci-jobs.yml:backend", callers)
+        self.assertIn("ci.yml:backend", callers)
 
     def test_ci_executes_legal_workflow_races_on_postgresql_16(self):
-        workflow = (settings.BASE_DIR / ".github/workflows/psd-ci-jobs.yml").read_text()
+        workflow = (settings.BASE_DIR / ".github/workflows/ci.yml").read_text()
 
         self.assertIn("image: postgres:16", workflow)
         self.assertIn(
@@ -941,29 +941,48 @@ class DependencySecurityAutomationTests(SimpleTestCase):
     def test_org_ruleset_required_checks_are_reported(self):
         """The org rulesets require `psd-ci / psd-ci`; security-scan checks LICENSE."""
         workflow_dir = settings.BASE_DIR / ".github/workflows"
-        ci = yaml.load((workflow_dir / "ci.yml").read_text(), Loader=yaml.BaseLoader)
-        jobs = yaml.load(
-            (workflow_dir / "psd-ci-jobs.yml").read_text(),
-            Loader=yaml.BaseLoader,
-        )
+        ci_text = (workflow_dir / "ci.yml").read_text()
+        ci = yaml.load(ci_text, Loader=yaml.BaseLoader)
         security_scan_text = (workflow_dir / "security-scan.yml").read_text()
         security_scan = yaml.load(security_scan_text, Loader=yaml.BaseLoader)
 
-        # The caller job's id `psd-ci` plus the inner job's name `psd-ci`
-        # report as `psd-ci / psd-ci`; every CI job runs under that caller.
-        self.assertEqual(list(ci["jobs"]), ["psd-ci"])
-        self.assertEqual(
-            ci["jobs"]["psd-ci"]["uses"], "./.github/workflows/psd-ci-jobs.yml"
+        # standards/06 §2, repo-specific gate jobs: the gates run as jobs in
+        # ci.yml, and the caller job `psd-ci` hands their results to the org
+        # reusable, whose job is also named `psd-ci` -- so the check reports
+        # as `psd-ci / psd-ci`. `if: always()` keeps a failed gate job from
+        # skipping the caller, since a skipped required check would pass.
+        gate = ci["jobs"]["psd-ci"]
+        self.assertTrue(
+            gate["uses"].startswith(
+                "PSD401/.github/.github/workflows/reusable-psd-ci.yml@"
+            )
         )
-        self.assertIn("workflow_call", jobs["on"])
-        gate = jobs["jobs"]["psd-ci"]
-        self.assertEqual(gate["name"], "psd-ci")
+        self.assertRegex(
+            ci_text,
+            r"reusable-psd-ci\.yml@[0-9a-f]{40} # v\d+\.\d+\.\d+",
+        )
         self.assertEqual(gate["if"], "always()")
+        self.assertEqual(gate["permissions"], {"contents": "read"})
         self.assertEqual(
             sorted(gate["needs"]),
-            sorted(name for name in jobs["jobs"] if name != "psd-ci"),
+            sorted(name for name in ci["jobs"] if name != "psd-ci"),
         )
-        self.assertIn('"success"', gate["steps"][-1]["run"])
+        self.assertEqual(
+            gate["with"],
+            {"upstream-results": "${{ join(needs.*.result, ' ') }}", "gate": "off"},
+        )
+        # A gate job skipped by a job-level `if:` fails `upstream-results`;
+        # a docs-only skip belongs inside steps.
+        for name, job in ci["jobs"].items():
+            if name != "psd-ci":
+                with self.subTest(job=name):
+                    self.assertNotIn("if", job)
+        # No local rollup is left to drift from the org one.
+        self.assertFalse((workflow_dir / "psd-ci-jobs.yml").exists())
+        # A compromised floating dependency in any gate job reaches no
+        # credential: nothing in ci.yml reads the `secrets` context, and the
+        # caller passes none to the org reusable.
+        self.assertNotRegex(ci_text, r"\bsecrets\s*[.\[:]")
         # From PSD401/.github v1.8.0 the security-scan reusable runs the LICENSE
         # check as a step, so the standalone license-check caller (one more
         # billed job per run) is gone (psd-dev-standards standards/06 §4).

@@ -25,7 +25,7 @@ case "$MODE" in
 esac
 
 # --patch-coverage is the local copy of the CI gate in
-# .github/workflows/psd-ci-jobs.yml: run both suites under coverage, then
+# .github/workflows/ci.yml: run both suites under coverage, then
 # require 80% of the lines this branch adds to be covered
 # (psd-dev-standards standards/05 rule 4). It is slower than the default lane
 # because instrumentation is not free, which is why it is opt-in.
@@ -66,7 +66,7 @@ reap() {
 }
 
 # Lint and typecheck first, in the same lane shape CI uses (`backend-static`
-# in .github/workflows/psd-ci-jobs.yml). They are seconds against the suite's
+# in .github/workflows/ci.yml). They are seconds against the suite's
 # minutes, and a ruff finding is faster to read here than in a CI log.
 echo "backend static (lint, typecheck ratchet)"
 run ruff    "$PY -m ruff check ."

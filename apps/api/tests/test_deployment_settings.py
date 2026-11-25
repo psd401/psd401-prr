@@ -169,7 +169,7 @@ class DeploymentReadinessTests(SimpleTestCase):
         )
 
         workflow = yaml.safe_load(
-            (Path(settings.BASE_DIR) / ".github" / "workflows" / "psd-ci-jobs.yml").read_text()
+            (Path(settings.BASE_DIR) / ".github" / "workflows" / "ci.yml").read_text()
         )
         self.assertEqual(
             workflow["jobs"]["deployment-compose"]["env"]["PRR_RELEASE_IMAGE"],

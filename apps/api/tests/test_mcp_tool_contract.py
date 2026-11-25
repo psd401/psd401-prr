@@ -470,7 +470,7 @@ class ServerManifestTests(SimpleTestCase):
         # trusted to be noticed.
         workflows = Path(settings.BASE_DIR) / ".github" / "workflows"
         pins = set()
-        for name in ("mcp-scan.yml", "psd-ci-jobs.yml"):
+        for name in ("mcp-scan.yml", "ci.yml"):
             text = (workflows / name).read_text()
             found = re.findall(r'PRR_MCP_SCAN_VERSION:\s*"([^"]+)"', text)
             self.assertEqual(
