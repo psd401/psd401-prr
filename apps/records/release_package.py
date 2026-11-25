@@ -17,6 +17,7 @@ than duplicated, and a prepared one is returned as it is.
 """
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Q
 
 from .exemption_logs import generate_exemption_log
@@ -60,10 +61,13 @@ def _exemption_log_ready(installment: Installment) -> bool:
 
 def build_release_package(request_number, *, actor, _client=None) -> Installment:
     """Create, log, and prepare the next release package in one action."""
-    _require_current_records_officer(
-        actor=actor,
-        message="Records Officer authority is required to build a release package.",
-    )
+    # The officer check locks the staff row with select_for_update, which
+    # Postgres refuses outside a transaction (a 500 that SQLite hides).
+    with transaction.atomic():
+        _require_current_records_officer(
+            actor=actor,
+            message="Records Officer authority is required to build a release package.",
+        )
     prr = PublicRecordsRequest.objects.get(number=request_number)
     if prr.status in CLOSED_STATUSES:
         raise ReleasePackageBlocked(
