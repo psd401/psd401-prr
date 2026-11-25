@@ -49,7 +49,7 @@ class IacGateWiringTests(SimpleTestCase):
     def setUp(self):
         self.root = Path(settings.BASE_DIR)
         self.ci = yaml.safe_load(
-            (self.root / ".github/workflows/psd-ci-jobs.yml").read_text(
+            (self.root / ".github/workflows/ci.yml").read_text(
                 encoding="utf-8"
             )
         )
@@ -168,7 +168,7 @@ class IacToolVersionTests(SimpleTestCase):
     def setUp(self):
         self.root = Path(settings.BASE_DIR)
         self.ci = yaml.safe_load(
-            (self.root / ".github/workflows/psd-ci-jobs.yml").read_text(
+            (self.root / ".github/workflows/ci.yml").read_text(
                 encoding="utf-8"
             )
         )

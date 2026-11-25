@@ -231,7 +231,7 @@ uv run pip-audit
 ```
 
 Pin Checkov to the version `PRR_CHECKOV_VERSION` holds in
-`.github/workflows/psd-ci-jobs.yml`, or a locally newer ruleset will report
+`.github/workflows/ci.yml`, or a locally newer ruleset will report
 findings CI does not.
 
 The same gates run from one command, which is what `.psd/verify.json` calls:
@@ -407,7 +407,7 @@ and the observed July 4th trip naive expectations). Event delivery tests mock
 America/Los_Angeles and deadline math depends on it.
 
 The `infra/cdk` suite gates every pull request through the `infrastructure` job
-in `.github/workflows/psd-ci-jobs.yml`. `cdk synth` runs there with no AWS credentials
+in `.github/workflows/ci.yml`. `cdk synth` runs there with no AWS credentials
 configured, so a change that reintroduces a credentialed lookup fails the
 build.
 
@@ -465,12 +465,16 @@ GUI/agent parity is also a required gate. Any new production frontend call to
 the frontend and fails if a GUI action has no registered agent path. Do not
 solve parity by bypassing the statutory human-only actions in `docs/compliance-rules.md` (rules 6 and 7).
 
-`.github/workflows/ci.yml` runs these backend and frontend gates for every
-pull request and every push to `main`. It calls `psd-ci-jobs.yml` from a job
-named `psd-ci`, so each check reports as `psd-ci / <job>` and the combined gate
-as `psd-ci / psd-ci`, the context the org rulesets require.
+`.github/workflows/ci.yml` runs these backend and frontend gates as its own
+jobs on every pull request to `main` (psd-dev-standards standards/06 §2,
+"Repo-specific gate jobs"). Its last job, `psd-ci`, runs with `if: always()`,
+passes every gate job's result to the org reusable
+`PSD401/.github/.github/workflows/reusable-psd-ci.yml` as `upstream-results`
+with `gate: "off"`, and fails unless every one succeeded. That job reports as
+`psd-ci / psd-ci`, the context the org rulesets require. A gate job must not
+carry a job-level `if:`: a skipped job fails `psd-ci`.
 
-Toolchain setup is two local composite actions, used by `psd-ci-jobs.yml`,
+Toolchain setup is two local composite actions, used by `ci.yml`,
 `nightly.yml`, and `mutation-testing.yml`:
 `.github/actions/setup-python-deps` (uv, Python 3.12, `uv sync --locked`,
 with `include-dev: false` for `--no-dev`) and `.github/actions/setup-bun-deps`

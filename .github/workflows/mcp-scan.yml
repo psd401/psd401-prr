@@ -2,12 +2,12 @@
 # standards/07-mcp.md build standard 6, and the standard's weekly
 # "runs mcp-scan against live endpoints" enforcement pattern).
 #
-# Why this is a separate workflow rather than a step in psd-ci-jobs.yml:
+# Why this is a separate workflow rather than a step in ci.yml:
 # the analysis half of Agent Scan -- prompt-injection and toxic-flow checks
 # on tool descriptions -- authenticates to Snyk's API and exits non-zero
-# without a SNYK_TOKEN. `ci.yml` deliberately calls psd-ci-jobs.yml with no
-# `secrets:` so that a compromised floating dependency in any of its ten
-# jobs reaches no credential, and widening that to carry one token would be
+# without a SNYK_TOKEN. No job in `ci.yml` reads a secret, on purpose, so
+# that a compromised floating dependency in any of its ten gate jobs reaches
+# no credential, and widening that to carry one token would be
 # a poor trade. The token-free half of the same tool (`inspect`, which boots
 # the server and enumerates its tools) does run in that gating lane.
 #
@@ -63,7 +63,7 @@ jobs:
     timeout-minutes: 15
 
     env:
-      # Pinned for the same reason as PRR_CHECKOV_VERSION in psd-ci-jobs.yml:
+      # Pinned for the same reason as PRR_CHECKOV_VERSION in ci.yml:
       # a scanner that changes rules under the gate fails a branch nobody
       # touched. Transitive versions float, bounded by `contents: read` and
       # no cloud credentials in this job.
@@ -128,7 +128,7 @@ jobs:
             echo
             echo "The token-free half of the same tool still gates every"
             echo "pull request: see the \"Enumerate MCP tools with Snyk"
-            echo "Agent Scan\" step in \`psd-ci / Backend audits and"
+            echo "Agent Scan\" step in the CI check \`Backend audits and"
             echo "quarantined tests\`."
             echo
             echo "To enable: add a \`SNYK_TOKEN\` repository secret from"

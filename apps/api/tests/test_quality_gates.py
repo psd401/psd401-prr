@@ -45,7 +45,7 @@ class CiShapeTests(SimpleTestCase):
         self.root = Path(settings.BASE_DIR)
         self.workflows = self.root / ".github" / "workflows"
         self.ci = yaml.safe_load(
-            (self.workflows / "psd-ci-jobs.yml").read_text(encoding="utf-8")
+            (self.workflows / "ci.yml").read_text(encoding="utf-8")
         )
 
     def test_the_backend_shards_cover_every_installed_app(self):
@@ -196,7 +196,7 @@ class SharedSetupActionTests(SimpleTestCase):
 
     def test_the_two_playwright_lanes_install_browsers_the_same_way(self):
         lanes = (
-            self.workflows["psd-ci-jobs.yml"]["jobs"]["acceptance"],
+            self.workflows["ci.yml"]["jobs"]["acceptance"],
             self.workflows["nightly.yml"]["jobs"]["full-acceptance"],
         )
         for job in lanes:
@@ -211,7 +211,7 @@ class PatchCoverageGateTests(SimpleTestCase):
     def setUp(self):
         self.root = Path(settings.BASE_DIR)
         self.ci = yaml.safe_load(
-            (self.root / ".github/workflows/psd-ci-jobs.yml").read_text(encoding="utf-8")
+            (self.root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         )
 
     def _coverage_config(self):
@@ -370,7 +370,7 @@ class MutationTestingTests(SimpleTestCase):
     def test_it_is_scheduled_and_never_gates_a_merge(self):
         self.assertTrue(self.workflow[True]["schedule"][0]["cron"])
         ci = yaml.safe_load(
-            (self.root / ".github/workflows/psd-ci-jobs.yml").read_text(encoding="utf-8")
+            (self.root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         )
         self.assertNotIn("mutation", str(ci["jobs"]["psd-ci"]["needs"]))
 
@@ -889,7 +889,7 @@ class StaticAnalysisGateTests(SimpleTestCase):
         super().setUpClass()
         cls.root = Path(settings.BASE_DIR)
         cls.ci = yaml.safe_load(
-            (cls.root / ".github/workflows/psd-ci-jobs.yml").read_text(
+            (cls.root / ".github/workflows/ci.yml").read_text(
                 encoding="utf-8"
             )
         )
