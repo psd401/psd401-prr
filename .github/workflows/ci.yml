@@ -74,6 +74,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
+          # Every checkout in this repo drops the job token after cloning: no step
+          # uses git over the network, and a token left in .git/config can leak
+          # through an uploaded artifact (zizmor artipacked; the org security
+          # scan fails on it from PSD401/.github v1.16.0).
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
