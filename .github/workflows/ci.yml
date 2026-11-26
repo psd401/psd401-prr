@@ -709,7 +709,7 @@ jobs:
       - deployment-compose
     permissions:
       contents: read
-    uses: PSD401/.github/.github/workflows/reusable-psd-ci.yml@53bd9c84e4630cbe0a8cf32c18eb1227b5f70ae5 # v1.14.1
+    uses: PSD401/.github/.github/workflows/reusable-psd-ci.yml@bf041d7e251023502d143a5af3b19bdf449ac65c # v1.22.4
     with:
       upstream-results: ${{ join(needs.*.result, ' ') }}
       gate: "off"
