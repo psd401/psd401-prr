@@ -37,6 +37,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
 
       # `uv sync` puts the environment in the checkout's `.venv`, which is
       # where `scripts/prr-python.sh` -- and so the acceptance runner -- looks
